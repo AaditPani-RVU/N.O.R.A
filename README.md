@@ -215,7 +215,7 @@ Hold [Ctrl+`] → speak → release
 
 ## Extending NORA
 
-Drop a `.py` file into `~/.nora/plugins/`. Any function decorated with `@register` is live on the next run — no core changes needed.
+Drop a `.py` file into `plugins/`. Any function decorated with `@register` is live on the next run — no core changes needed.
 
 ```python
 from nora.command_engine import register
@@ -225,6 +225,14 @@ def brew_coffee(parameters: dict) -> str:
     # your automation here
     return "Coffee brewing."
 ```
+
+**Bundled plugins** (`plugins/`):
+
+| File | Actions |
+|---|---|
+| `dev_tools.py` | `run_script`, `kill_port`, `git_status`, `git_commit`, `git_push`, `run_tests`, `pip_install`, `conda_activate` |
+| `focus_mode.py` | `focus_mode`, `end_focus`, `pomodoro`, `stop_pomodoro` |
+| `productivity.py` | `quick_note`, `daily_briefing` |
 
 ---
 

@@ -91,4 +91,4 @@ neurosym:
 
 plugins:
   enabled: true
-  dir: "~/.nora/plugins"           # Drop .py files here; @register handlers auto-load
+  dir: "./plugins"                  # Drop .py files here; @register handlers auto-load
