@@ -1,0 +1,67 @@
+# ── Runtime data (personal / generated) ────────────────────────────────────
+nora_memory.json
+nora_knowledge.json
+nora_user_model.json
+nora_cognitive_db/
+
+# ── Logs ────────────────────────────────────────────────────────────────────
+*.log
+hook_notify.log
+
+# ── Environment & secrets ────────────────────────────────────────────────────
+.env
+*.env
+.env.*
+
+# ── Personal / local-only files ─────────────────────────────────────────────
+Personal_Jarvis_System_Design.md
+graphify-out/
+temp_final/
+test_mic.py
+.graphify_analysis.json
+.graphify_python
+
+# Claude Code session data
+.claude/
+
+# Root-level loose .txt files (recovery codes, scratch notes, etc.)
+/*.txt
+
+# ── Sounds (personal music library) ─────────────────────────────────────────
+sounds/*.mp3
+sounds/*.wav
+sounds/*.ogg
+sounds/*.flac
+sounds/*.m4a
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# ── Build / packaging ───────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+*.sublime-project
+*.sublime-workspace
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+Thumbs.db
+desktop.ini
+.DS_Store

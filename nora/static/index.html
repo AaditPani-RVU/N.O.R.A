@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>N.O.R.A — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --c:    #00d4ff;
+      --cg:   rgba(0,212,255,0.4);
+      --cd:   rgba(0,212,255,0.12);
+      --bg:   #00080f;
+      --cbg:  rgba(0,14,32,0.88);
+      --txt:  #7ecfff;
+      --dim:  rgba(126,207,255,0.45);
+      --mono: 'Share Tech Mono', 'Courier New', monospace;
+      --disp: 'Rajdhani', sans-serif;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--txt);
+      font-family: var(--mono);
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Animated grid background (GPU: background-position keyframe) ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(0,212,255,0.022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,0.022) 1px, transparent 1px);
+      background-size: 52px 52px;
+      animation: grid-drift 25s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes grid-drift { to { background-position: 52px 52px; } }
+
+    /* ── CRT scanlines (pure CSS, GPU path) ── */
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 200;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 2px,
+        rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px
+      );
+      pointer-events: none;
+    }
+
+    /* ── App wrapper ── */
+    #app {
+      position: relative; z-index: 1;
+      display: grid;
+      grid-template-rows: 52px 1fr;
+      width: 100%; height: 100%;
+    }
+
+    /* ════════════════════ HEADER ════════════════════ */
+    #header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--cd);
+      background: rgba(0,8,22,0.92);
+      backdrop-filter: blur(16px);
+    }
+    .hdr-logo {
+      font-family: var(--disp);
+      font-size: 21px; font-weight: 700;
+      letter-spacing: 9px; padding-left: 9px;
+      color: var(--c);
+      text-shadow: 0 0 22px var(--cg);
+    }
+    .hdr-logo em { font-style: normal; font-weight: 300; }
+    .hdr-mid {
+      display: flex; align-items: center; gap: 18px;
+      font-size: 11px; letter-spacing: 2px; color: var(--dim);
+    }
+    #hdr-clock {
+      font-size: 16px; letter-spacing: 4px; color: var(--c);
+      text-shadow: 0 0 10px var(--cg);
+    }
+    .hdr-right { display: flex; align-items: center; gap: 10px; }
+    .pill {
+      display: flex; align-items: center; gap: 5px;
+      padding: 3px 9px;
+      border: 1px solid var(--cd);
+      font-size: 8px; letter-spacing: 2px; color: var(--dim);
+    }
+    .pill .dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: #00ff88; box-shadow: 0 0 5px #00ff88;
+      animation: blink 2.2s ease-in-out infinite;
+    }
+    .pill.warn .dot { background: #ffaa00; box-shadow: 0 0 5px #ffaa00; }
+    @keyframes blink { 0%,100%{opacity:1} 55%{opacity:0.25} }
+
+    /* ════════════════════ MAIN GRID ════════════════════ */
+    #main {
+      display: grid;
+      grid-template-columns: 265px 1fr 265px;
+      gap: 10px; padding: 10px;
+      min-height: 0;
+    }
+    .panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+
+    /* ════════════════════ CARD ════════════════════ */
+    .card {
+      background: var(--cbg);
+      border: 1px solid var(--cd);
+      padding: 13px 14px;
+      position: relative; overflow: hidden;
+      backdrop-filter: blur(10px);
+      flex-shrink: 0;
+    }
+    /* corner brackets */
+    .card::before {
+      content: ''; position: absolute; top: 0; left: 0;
+      width: 13px; height: 13px;
+      border-top: 1.5px solid var(--c); border-left: 1.5px solid var(--c);
+    }
+    .card::after {
+      content: ''; position: absolute; bottom: 0; right: 0;
+      width: 13px; height: 13px;
+      border-bottom: 1.5px solid rgba(0,212,255,0.3);
+      border-right: 1.5px solid rgba(0,212,255,0.3);
+    }
+    .card-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 11px;
+    }
+    .card-title {
+      font-family: var(--disp);
+      font-size: 10px; letter-spacing: 4px; color: var(--c);
+      text-transform: uppercase;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .card-title .sq {
+      width: 10px; height: 10px;
+      border: 1px solid var(--c);
+      display: inline-block;
+    }
+    .badge {
+      font-size: 8px; letter-spacing: 2px; color: var(--dim);
+      border: 1px solid var(--cd); padding: 2px 6px;
+    }
+
+    /* ════════════════════ STAT BARS ════════════════════ */
+    .srow { display: flex; align-items: center; margin-bottom: 9px; }
+    .slabel { font-size: 8px; letter-spacing: 2px; color: var(--dim); width: 38px; }
+    .sbar-wrap {
+      flex: 1; height: 3px; background: rgba(0,212,255,0.07);
+      margin: 0 8px; position: relative;
+    }
+    .sbar {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #003888, var(--c));
+      transition: width 1.2s ease; position: relative;
+    }
+    .sbar::after {
+      content: ''; position: absolute; right: -1px; top: -2.5px;
+      width: 2px; height: 8px;
+      background: #fff; box-shadow: 0 0 4px var(--c);
+    }
+    .sval { font-size: 8px; color: var(--c); width: 44px; text-align: right; }
+
+    /* Stat boxes */
+    .sboxrow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 9px; }
+    .sbox {
+      background: rgba(0,212,255,0.04); border: 1px solid var(--cd);
+      padding: 7px 5px; text-align: center;
+    }
+    .sbox .sl { font-size: 7px; letter-spacing: 1px; color: var(--dim); }
+    .sbox .sv { font-size: 12px; font-weight: 600; color: var(--c); margin-top: 2px; }
+
+    /* Load segments */
+    .load-wrap { margin-top: 9px; }
+    .load-lbl { font-size: 7px; letter-spacing: 2px; color: var(--dim); margin-bottom: 4px; }
+    .load-segs { display: flex; gap: 2px; }
+    .seg { flex: 1; height: 5px; background: rgba(0,212,255,0.07); transition: background 0.5s; }
+    .seg.on  { background: var(--c); }
+    .seg.warn { background: #ffaa00; }
+    .seg.crit { background: #ff4460; }
+
+    /* ════════════════════ CAMERA ════════════════════ */
+    #camera-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .cam-box {
+      flex: 1; min-height: 0;
+      background: rgba(0,4,12,0.95); border: 1px solid var(--cd);
+      display: flex; align-items: center; justify-content: center;
+      position: relative; overflow: hidden;
+    }
+    .cam-box video { width: 100%; height: 100%; object-fit: cover; display: none; }
+    .cam-off {
+      display: flex; flex-direction: column; align-items: center; gap: 7px;
+      color: var(--dim); font-size: 9px; letter-spacing: 2px;
+    }
+    .cam-icon-wrap {
+      width: 34px; height: 34px; border: 1px solid var(--cd); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .cam-live {
+      position: absolute; top: 6px; right: 7px;
+      font-size: 7px; letter-spacing: 2px; color: #ff4460;
+      display: none;
+    }
+    .cam-live.on { display: block; animation: blink 0.9s step-end infinite; }
+    .cam-btn {
+      margin-top: 6px; width: 100%; padding: 7px;
+      background: rgba(0,212,255,0.04); border: 1px solid var(--cd);
+      color: var(--c); font-family: var(--mono);
+      font-size: 8px; letter-spacing: 3px; cursor: pointer; text-transform: uppercase;
+      transition: background 0.18s;
+    }
+    .cam-btn:hover { background: rgba(0,212,255,0.1); }
+
+    /* ════════════════════ CENTER ════════════════════ */
+    #center {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 18px;
+    }
+
+    /* ── Orb wrapper ── */
+    .orb-wrap {
+      position: relative;
+      width: 340px; height: 340px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* CSS rings — runs entirely on GPU compositor */
+    .ring {
+      position: absolute; border-radius: 50%;
+      top: 50%; left: 50%;
+      will-change: transform; pointer-events: none;
+    }
+    /* sizes: top 50%/left 50% + negative margins to center */
+    .r1 {
+      width: 338px; height: 338px; margin: -169px 0 0 -169px;
+      border: 1px dashed rgba(0,212,255,0.14);
+      animation: cw 50s linear infinite;
+    }
+    .r2 {
+      width: 296px; height: 296px; margin: -148px 0 0 -148px;
+      border: 1.5px solid transparent;
+      border-top-color: rgba(0,212,255,0.55);
+      border-right-color: rgba(0,212,255,0.35);
+      animation: cw 9s linear infinite;
+    }
+    .r3 {
+      width: 252px; height: 252px; margin: -126px 0 0 -126px;
+      border: 1px dashed rgba(0,212,255,0.22);
+      border-bottom-color: transparent; border-right-color: transparent;
+      animation: ccw 14s linear infinite;
+    }
+    .r4 {
+      width: 206px; height: 206px; margin: -103px 0 0 -103px;
+      border: 1px solid transparent;
+      border-top-color: rgba(0,212,255,0.5);
+      border-left-color: rgba(0,212,255,0.3);
+      animation: ccw 6s linear infinite;
+    }
+    .r5 {
+      width: 158px; height: 158px; margin: -79px 0 0 -79px;
+      border: 1px dashed rgba(0,212,255,0.28);
+      animation: cw 8s linear infinite;
+    }
+    @keyframes cw  { to { transform: rotate(360deg);  } }
+    @keyframes ccw { to { transform: rotate(-360deg); } }
+
+    /* Tri-dots on the r2 ring — also CSS animated */
+    .tri-ring {
+      position: absolute; top: 50%; left: 50%;
+      width: 296px; height: 296px; margin: -148px 0 0 -148px;
+      will-change: transform;
+      animation: cw 9s linear infinite;
+      pointer-events: none;
+    }
+    .tdot {
+      position: absolute; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--c); box-shadow: 0 0 10px var(--c), 0 0 3px #fff;
+    }
+
+    /* Orb canvas */
+    #orbc {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      will-change: transform; pointer-events: none;
+    }
+
+    /* Core orb glow — pure CSS pulse */
+    .orb-core {
+      position: absolute; z-index: 2;
+      width: 36px; height: 36px; border-radius: 50%;
+      background: radial-gradient(circle, #fff 0%, #aaeeff 45%, rgba(0,140,255,0) 100%);
+      box-shadow: 0 0 18px var(--c), 0 0 38px #0055cc;
+      animation: core-pulse 2.8s ease-in-out infinite;
+      will-change: transform, box-shadow;
+    }
+    @keyframes core-pulse {
+      0%,100% { transform: scale(1);    box-shadow: 0 0 18px var(--c), 0 0 38px #0055cc; }
+      50%      { transform: scale(1.18); box-shadow: 0 0 30px var(--c), 0 0 65px #0055cc, 0 0 100px rgba(0,80,200,0.3); }
+    }
+
+    /* ── NORA label ── */
+    .jlabel { text-align: center; }
+    .jname {
+      font-family: var(--disp); font-size: 31px; font-weight: 700;
+      letter-spacing: 13px; padding-left: 13px;
+      color: var(--c); text-shadow: 0 0 28px var(--cg);
+    }
+    #jstatus {
+      font-size: 10px; letter-spacing: 6px; color: var(--dim);
+      margin-top: 3px; transition: color 0.4s, text-shadow 0.4s;
+    }
+    #jstatus.on { color: var(--c); text-shadow: 0 0 12px var(--cg); }
+
+    /* Speech text */
+    #speech {
+      max-width: 370px; text-align: center;
+      font-size: 11px; letter-spacing: 1.5px; line-height: 1.7; color: var(--txt);
+      min-height: 36px; opacity: 0; transition: opacity 0.5s;
+      text-shadow: 0 0 10px rgba(0,212,255,0.35);
+    }
+
+    /* PTT */
+    #ptt {
+      width: 158px; height: 40px;
+      border: 1.5px solid rgba(0,212,255,0.45);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      background: rgba(0,212,255,0.04);
+      box-shadow: 0 0 12px rgba(0,212,255,0.08);
+      transition: background 0.1s, box-shadow 0.1s, border-color 0.1s;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 4px; color: var(--c);
+      text-transform: uppercase;
+    }
+    #ptt:hover { background: rgba(0,212,255,0.09); box-shadow: 0 0 20px rgba(0,212,255,0.18); }
+    #ptt.held  { background: rgba(0,212,255,0.16); border-color: var(--c); box-shadow: 0 0 28px rgba(0,212,255,0.42); }
+
+    /* ════════════════════ WEATHER ════════════════════ */
+    .w-main { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+    .w-temp {
+      font-family: var(--disp); font-size: 44px; font-weight: 600;
+      color: var(--c); line-height: 1;
+    }
+    .w-temp sup { font-size: 18px; font-weight: 300; }
+    .w-icon { font-size: 38px; line-height: 1; }
+    .w-desc { font-size: 9px; letter-spacing: 3px; color: var(--dim); margin-bottom: 3px; }
+    .w-loc  { font-size: 8px; letter-spacing: 2px; color: var(--dim); margin-bottom: 10px; }
+    .w-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .wcell {
+      background: rgba(0,212,255,0.04); border: 1px solid var(--cd);
+      padding: 7px 8px;
+    }
+    .wcell .wl { font-size: 7px; letter-spacing: 2px; color: var(--dim); }
+    .wcell .wv { font-size: 13px; color: var(--c); margin-top: 2px; }
+
+    /* ════════════════════ UPTIME ════════════════════ */
+    .uptime-val {
+      font-family: var(--disp); font-size: 30px; font-weight: 600;
+      color: var(--c); letter-spacing: 4px; text-align: center;
+      margin: 6px 0 2px; text-shadow: 0 0 18px var(--cg);
+    }
+    .uptime-sub { font-size: 7px; letter-spacing: 3px; color: var(--dim); text-align: center; }
+    .uptime-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 9px; }
+
+    /* ════════════════════ ACTIVITY ════════════════════ */
+    #activity-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #activity-card .card-body { flex: 1; min-height: 0; overflow: hidden; }
+    .act-list { display: flex; flex-direction: column; gap: 5px; }
+    .act-item {
+      display: flex; gap: 7px;
+      padding: 6px 8px; border-left: 2px solid rgba(0,212,255,0.18);
+      font-size: 9px; letter-spacing: 0.4px; line-height: 1.5; color: var(--dim);
+      background: rgba(0,212,255,0.03); transition: all 0.4s;
+    }
+    .act-item.fresh { border-left-color: var(--c); color: var(--txt); background: rgba(0,212,255,0.06); }
+    .act-time { font-size: 7px; color: var(--dim); white-space: nowrap; min-width: 38px; padding-top: 1px; }
+    .act-empty { font-size: 9px; letter-spacing: 2px; color: var(--dim); text-align: center; padding: 14px 0; }
+
+    /* ════════════════════ MUSIC PANEL ════════════════════ */
+    .mus-head-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .mus-src-pill {
+      font-size: 7px; letter-spacing: 2px;
+      border: 1px solid var(--cd); padding: 2px 6px;
+      color: var(--c); text-transform: uppercase;
+    }
+    .mus-track {
+      font-family: var(--disp); font-size: 14px; font-weight: 600;
+      color: var(--c); letter-spacing: 1px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-shadow: 0 0 8px var(--cg);
+    }
+    .mus-artist {
+      font-size: 9px; letter-spacing: 2px; color: var(--dim);
+      margin-top: 1px; margin-bottom: 9px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mus-status {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 8px; letter-spacing: 2px; color: var(--dim);
+      margin-bottom: 10px;
+    }
+    .mus-status .dot {
+      width: 5px; height: 5px; border-radius: 50%; background: var(--dim);
+    }
+    .mus-status.playing .dot { background: #00ff88; box-shadow: 0 0 5px #00ff88; animation: blink 1.6s ease-in-out infinite; }
+    .mus-status.paused  .dot { background: #ffaa00; box-shadow: 0 0 5px #ffaa00; }
+    .mus-progress {
+      height: 3px; background: rgba(0,212,255,0.07);
+      position: relative; margin-bottom: 10px;
+    }
+    .mus-progress-fill {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: linear-gradient(90deg, #003888, var(--c));
+      width: 0%; transition: width 0.8s ease;
+    }
+    .mus-ctrls {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+      margin-bottom: 8px;
+    }
+    .mus-btn {
+      background: rgba(0,212,255,0.04); border: 1px solid var(--cd);
+      color: var(--c); font-family: var(--mono);
+      font-size: 10px; letter-spacing: 2px;
+      padding: 7px 0; cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .mus-btn:hover { background: rgba(0,212,255,0.12); border-color: var(--c); }
+    .mus-btn.primary { grid-column: span 2; }
+    .mus-vol-row { display: flex; align-items: center; gap: 6px; }
+    .mus-vol-row .slabel { width: 28px; }
+    .mus-vol-row input[type=range] {
+      flex: 1; -webkit-appearance: none; appearance: none;
+      height: 3px; background: rgba(0,212,255,0.12);
+      outline: none;
+    }
+    .mus-vol-row input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--c); box-shadow: 0 0 6px var(--cg); cursor: pointer;
+    }
+    .mus-vol-row input[type=range]::-moz-range-thumb {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--c); border: none; box-shadow: 0 0 6px var(--cg); cursor: pointer;
+    }
+
+    /* Act-item success/fail dot */
+    .act-ok  { width: 5px; height: 5px; border-radius: 50%; background: #00ff88; flex-shrink: 0; margin-top: 5px; }
+    .act-err { width: 5px; height: 5px; border-radius: 50%; background: #ff4460; flex-shrink: 0; margin-top: 5px; }
+
+    /* Analytics top-command rows */
+    .ana-row { display: flex; align-items: center; gap: 6px; font-size: 8px; letter-spacing: 1px; color: var(--dim); }
+    .ana-bar-wrap { flex:1; height:2px; background:rgba(0,212,255,0.07); }
+    .ana-bar { height:100%; background: linear-gradient(90deg, #003888, var(--c)); transition: width 0.8s ease; }
+    .ana-cnt { font-size:8px; color:var(--c); min-width:22px; text-align:right; }
+
+    /* PTT-mode pill on the center panel */
+    #ptt-mode-pill {
+      display: flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border: 1px solid var(--cd);
+      font-size: 8px; letter-spacing: 2px; color: var(--dim);
+      margin-top: 4px;
+    }
+    #ptt-mode-pill .dot {
+      width: 5px; height: 5px; border-radius: 50%; background: var(--dim);
+    }
+    #ptt-mode-pill.on .dot { background: #00ff88; box-shadow: 0 0 5px #00ff88; }
+    #ptt-mode-pill.off .dot { background: #ffaa00; box-shadow: 0 0 5px #ffaa00; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══════════════════ HEADER ═══════════════════ -->
+  <header id="header">
+    <div class="hdr-logo">J<em>.</em>A<em>.</em>R<em>.</em>V<em>.</em>I<em>.</em>S</div>
+    <div class="hdr-mid">
+      <div id="hdr-clock">00:00:00</div>
+      <div id="hdr-date">— — —</div>
+    </div>
+    <div class="hdr-right">
+      <div class="pill"><div class="dot"></div>ONLINE</div>
+      <div class="pill"><div class="dot"></div>NLP</div>
+      <div class="pill"><div class="dot"></div>AUDIO</div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════ MAIN ═══════════════════ -->
+  <div id="main">
+
+    <!-- ── LEFT PANEL ── -->
+    <div class="panel">
+
+      <!-- System Stats -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><div class="sq"></div>SYSTEM STATS</div>
+          <div class="badge" id="stats-badge">POLLING</div>
+        </div>
+        <div class="srow"><div class="slabel">CPU</div>
+          <div class="sbar-wrap"><div class="sbar" id="cpu-bar"></div></div>
+          <div class="sval" id="cpu-val">—</div></div>
+        <div class="srow"><div class="slabel">RAM</div>
+          <div class="sbar-wrap"><div class="sbar" id="ram-bar"></div></div>
+          <div class="sval" id="ram-val">—</div></div>
+        <div class="srow"><div class="slabel">DISK</div>
+          <div class="sbar-wrap"><div class="sbar" id="disk-bar"></div></div>
+          <div class="sval" id="disk-val">—</div></div>
+        <div class="sboxrow">
+          <div class="sbox"><div class="sl">CPU</div><div class="sv" id="c-cpu">—</div></div>
+          <div class="sbox"><div class="sl">MEMORY</div><div class="sv" id="c-ram">—</div></div>
+          <div class="sbox"><div class="sl">DISK</div><div class="sv" id="c-dsk">—</div></div>
+        </div>
+        <div class="load-wrap">
+          <div class="load-lbl">SYSTEM LOAD</div>
+          <div class="load-segs" id="ld-segs"></div>
+        </div>
+      </div>
+
+      <!-- Camera -->
+      <div class="card" id="camera-card">
+        <div class="card-head">
+          <div class="card-title"><div class="sq"></div>CAMERA</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <div class="cam-live" id="cam-live">● LIVE</div>
+            <div class="badge" id="cam-badge">INACTIVE</div>
+          </div>
+        </div>
+        <div class="cam-box" id="cam-box">
+          <video id="cam-vid" autoplay muted playsinline></video>
+          <div class="cam-off" id="cam-off">
+            <div class="cam-icon-wrap">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(0,212,255,0.4)" stroke-width="1.5">
+                <path d="M23 7l-7 5 7 5V7z"/>
+                <rect x="1" y="5" width="15" height="14" rx="2"/>
+              </svg>
+            </div>
+            <span>CAMERA INACTIVE</span>
+            <span style="font-size:7px;opacity:0.5">CLICK BELOW TO ACTIVATE</span>
+          </div>
+        </div>
+        <button class="cam-btn" id="cam-btn">ENABLE CAMERA</button>
+      </div>
+
+    </div><!-- /left -->
+
+    <!-- ── CENTER ── -->
+    <div id="center">
+
+      <!-- Arc reactor orb -->
+      <div class="orb-wrap">
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="ring r3"></div>
+        <div class="ring r4"></div>
+        <div class="ring r5"></div>
+        <div class="tri-ring" id="tri-ring"></div>
+        <canvas id="orbc" width="340" height="340"></canvas>
+        <div class="orb-core"></div>
+      </div>
+
+      <!-- Label -->
+      <div class="jlabel">
+        <div class="jname">N.O.R.A</div>
+        <div id="jstatus">STANDBY</div>
+      </div>
+
+      <!-- Transcription -->
+      <div id="speech"></div>
+
+      <!-- PTT -->
+      <div id="ptt">HOLD TO SPEAK</div>
+      <div id="ptt-mode-pill" class="off"><div class="dot"></div><span id="ptt-mode-lbl">PASSIVE</span></div>
+
+    </div><!-- /center -->
+
+    <!-- ── RIGHT PANEL ── -->
+    <div class="panel">
+
+      <!-- Weather -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><div class="sq"></div>WEATHER</div>
+          <div class="badge" id="w-badge">FETCHING</div>
+        </div>
+        <div class="w-main">
+          <div>
+            <div class="w-temp"><span id="w-temp">—</span><sup>°C</sup></div>
+            <div class="w-desc" id="w-desc">—</div>
+            <div class="w-loc"  id="w-loc">LOCATING…</div>
+          </div>
+          <div class="w-icon" id="w-icon">🌐</div>
+        </div>
+        <div class="w-grid">
+          <div class="wcell"><div class="wl">HUMIDITY</div><div class="wv" id="w-hum">—</div></div>
+          <div class="wcell"><div class="wl">WIND</div><div class="wv" id="w-wind">—</div></div>
+          <div class="wcell"><div class="wl">FEELS LIKE</div><div class="wv" id="w-feel">—</div></div>
+          <div class="wcell"><div class="wl">VISIBILITY</div><div class="wv" id="w-vis">—</div></div>
+        </div>
+      </div>
+
+      <!-- Uptime + Analytics -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title"><div class="sq"></div>SYSTEM UPTIME</div>
+          <div class="badge" id="up-badge">RUNNING</div>
+        </div>
+        <div class="uptime-val" id="uptime">00:00:00</div>
+        <div class="uptime-sub">ACTIVE SESSION DURATION</div>
+        <div class="uptime-grid">
+          <div class="sbox"><div class="sl">SESSION</div><div class="sv" id="cmd-cnt">0</div></div>
+          <div class="sbox"><div class="sl">SYS LOAD</div><div class="sv" id="load-txt">LOW</div></div>
+          <div class="sbox"><div class="sl">ALL-TIME</div><div class="sv" id="ana-total">—</div></div>
+          <div class="sbox"><div class="sl">SUCCESS</div><div class="sv" id="ana-rate">—</div></div>
+        </div>
+        <div style="margin-top:9px">
+          <div class="load-lbl">TOP COMMANDS</div>
+          <div id="ana-top" style="margin-top:4px;display:flex;flex-direction:column;gap:3px"></div>
+        </div>
+      </div>
+
+      <!-- Apple Music -->
+      <div class="card" id="music-card">
+        <div class="card-head">
+          <div class="card-title"><div class="sq"></div>APPLE MUSIC</div>
+          <div class="mus-src-pill" id="mus-src">—</div>
+        </div>
+        <div class="mus-track" id="mus-track">NO TRACK</div>
+        <div class="mus-artist" id="mus-artist">—</div>
+        <div class="mus-status" id="mus-status"><div class="dot"></div><span id="mus-status-lbl">IDLE</span></div>
+        <div class="mus-progress"><div class="mus-progress-fill" id="mus-prog"></div></div>
+        <div class="mus-ctrls">
+          <button class="mus-btn" data-act="prev">«</button>
+          <button class="mus-btn primary" data-act="toggle" id="mus-toggle">PLAY</button>
+          <button class="mus-btn" data-act="next">»</button>
+        </div>
+        <div class="mus-vol-row">
+          <div class="slabel">VOL</div>
+          <input type="range" min="0" max="100" value="60" id="mus-vol">
+          <div class="sval" id="mus-vol-val">60%</div>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="card" id="activity-card">
+        <div class="card-head">
+          <div class="card-title"><div class="sq"></div>ACTIVITY LOG</div>
+          <div style="display:flex;gap:5px;align-items:center">
+            <div class="badge" id="act-badge">LIVE</div>
+            <div class="badge" id="hist-badge" style="cursor:pointer" title="Load full history">HISTORY</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="act-list" id="act-list">
+            <div class="act-empty" id="act-empty">NO RECENT ACTIVITY</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /right -->
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════════════════════
+//  ORB CANVAS — NORA arc reactor visualizer
+//  All shadowBlur removed → GPU-friendly with CSS ring animations
+// ════════════════════════════════════════════════════════════════
+const orbc = document.getElementById('orbc');
+const oc   = orbc.getContext('2d');
+const W = 340, H = 340, CX = 170, CY = 170;
+
+// Pre-render hex grid to offscreen canvas (drawn once, reused every frame)
+const hexOff = (() => {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const hx = c.getContext('2d');
+  const sz = 15, hexH = sz * Math.sqrt(3);
+  hx.strokeStyle = 'rgba(0,200,255,0.28)';
+  hx.lineWidth = 0.5;
+  hx.save();
+  hx.beginPath(); hx.arc(CX, CY, 118, 0, Math.PI * 2); hx.clip();
+  for (let r = -9; r <= 9; r++) {
+    for (let col = -9; col <= 9; col++) {
+      const x = col * sz * 1.5 + CX;
+      const y = r * hexH + (col % 2) * (hexH / 2) + CY;
+      hx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 - Math.PI / 6;
+        const px = x + (sz - 1.5) * Math.cos(a), py = y + (sz - 1.5) * Math.sin(a);
+        if (i === 0) hx.moveTo(px, py); else hx.lineTo(px, py);
+      }
+      hx.closePath(); hx.stroke();
+    }
+  }
+  hx.restore();
+  return c;
+})();
+
+// Tri-dots placed on the tri-ring CSS element (synchronised with ring r2)
+const triRingEl = document.getElementById('tri-ring');
+for (let i = 0; i < 3; i++) {
+  const d = document.createElement('div');
+  d.className = 'tdot';
+  const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+  const R = 148; // matches r2 radius
+  d.style.cssText = `top:calc(50% + ${Math.sin(a)*R}px - 3.5px);left:calc(50% + ${Math.cos(a)*R}px - 3.5px);`;
+  triRingEl.appendChild(d);
+}
+
+// ── Orb state ──
+let speaking  = false;
+let scanAngle = 0;
+let waveT     = 0;
+
+// 8 radar nodes on scanner ring
+const NRING = 118;
+const NNODES = 8;
+const nodes = Array.from({length: NNODES}, (_, i) => ({
+  a: (i / NNODES) * Math.PI * 2, glow: 0
+}));
+
+// Energy arc
+let arc = null;
+function spawnArc() {
+  const f = Math.floor(Math.random() * NNODES);
+  let t = Math.floor(Math.random() * (NNODES - 1));
+  if (t >= f) t++;
+  arc = { f, t, life: 1.0 };
+}
+
+function drawOrb(ts) {
+  requestAnimationFrame(drawOrb);
+  oc.clearRect(0, 0, W, H);
+
+  // Hex grid (cached bitmap, no CPU cost per frame)
+  oc.globalAlpha = speaking ? 0.10 : 0.055;
+  oc.drawImage(hexOff, 0, 0);
+  oc.globalAlpha = 1;
+
+  // ── Scanner sweep ──
+  scanAngle += speaking ? 0.028 : 0.013;
+  const sweepEnd = scanAngle;
+  const sweepStart = sweepEnd - 0.55;
+  const grad = oc.createConicGradient
+    ? (() => {
+        // Use conic gradient if available (Chrome 99+)
+        const g = oc.createConicGradient(sweepStart, CX, CY);
+        g.addColorStop(0, `rgba(0,212,255,${speaking ? 0.42 : 0.2})`);
+        g.addColorStop(0.12, 'rgba(0,212,255,0)');
+        return g;
+      })()
+    : null;
+
+  oc.save();
+  oc.beginPath();
+  oc.moveTo(CX, CY);
+  oc.arc(CX, CY, NRING + 5, sweepStart, sweepEnd);
+  oc.closePath();
+  if (grad) {
+    oc.fillStyle = grad;
+  } else {
+    // fallback: solid fill with radial fade
+    const rg = oc.createRadialGradient(CX, CY, 0, CX, CY, NRING + 5);
+    rg.addColorStop(0, `rgba(0,212,255,${speaking ? 0.3 : 0.12})`);
+    rg.addColorStop(1, 'rgba(0,212,255,0)');
+    oc.fillStyle = rg;
+  }
+  oc.fill();
+  oc.restore();
+
+  // Scanner ring outline
+  oc.save();
+  oc.strokeStyle = `rgba(0,212,255,${speaking ? 0.45 : 0.22})`;
+  oc.lineWidth = 0.8;
+  oc.beginPath(); oc.arc(CX, CY, NRING + 5, 0, Math.PI * 2); oc.stroke();
+  oc.restore();
+
+  // ── Radar nodes ──
+  nodes.forEach(n => {
+    const diff = ((n.a - scanAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const hit  = diff < 0.45 ? 1 - diff / 0.45 : 0;
+    n.glow = Math.max(n.glow * 0.93, hit);
+    const nx = CX + Math.cos(n.a) * NRING;
+    const ny = CY + Math.sin(n.a) * NRING;
+    const alpha = 0.3 + n.glow * 0.7;
+    // Node dot
+    oc.beginPath(); oc.arc(nx, ny, 2.5 + n.glow * 2.5, 0, Math.PI * 2);
+    oc.fillStyle = `rgba(0,212,255,${alpha})`; oc.fill();
+    // Node ring flash
+    if (n.glow > 0.2) {
+      oc.beginPath(); oc.arc(nx, ny, 2.5 + n.glow * 9, 0, Math.PI * 2);
+      oc.strokeStyle = `rgba(0,212,255,${n.glow * 0.35})`; oc.lineWidth = 0.8; oc.stroke();
+    }
+  });
+
+  // ── Energy arc between nodes (speaking) ──
+  if (speaking) {
+    if (!arc || arc.life <= 0) { if (Math.random() < 0.04) spawnArc(); }
+    if (arc && arc.life > 0) {
+      arc.life -= 0.028;
+      const na = nodes[arc.f], nb = nodes[arc.t];
+      const ax = CX + Math.cos(na.a) * NRING, ay = CY + Math.sin(na.a) * NRING;
+      const bx = CX + Math.cos(nb.a) * NRING, by = CY + Math.sin(nb.a) * NRING;
+      const mx = (ax + bx) / 2 + (Math.random() - 0.5) * 22;
+      const my = (ay + by) / 2 + (Math.random() - 0.5) * 22;
+      oc.save();
+      oc.globalAlpha = arc.life * 0.75;
+      oc.strokeStyle = `rgba(180,240,255,${arc.life})`;
+      oc.lineWidth = 0.9;
+      oc.beginPath(); oc.moveTo(ax, ay); oc.quadraticCurveTo(mx, my, bx, by); oc.stroke();
+      oc.restore();
+    }
+  }
+
+  // ── Inner arc reactor geometry ──
+  oc.save();
+  oc.translate(CX, CY);
+  // Outer triangle (slowly rotating)
+  const ta = ts * 0.00035;
+  oc.rotate(ta);
+  oc.strokeStyle = `rgba(0,200,255,${speaking ? 0.65 : 0.32})`;
+  oc.lineWidth = 0.9;
+  oc.beginPath();
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+    const x = Math.cos(a) * 62, y = Math.sin(a) * 62;
+    if (i === 0) oc.moveTo(x, y); else oc.lineTo(x, y);
+  }
+  oc.closePath(); oc.stroke();
+  // Inner inverted triangle
+  oc.rotate(Math.PI); // invert = Iron Man arc reactor look
+  oc.strokeStyle = `rgba(0,200,255,${speaking ? 0.4 : 0.2})`;
+  oc.lineWidth = 0.8;
+  oc.beginPath();
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+    const x = Math.cos(a) * 40, y = Math.sin(a) * 40;
+    if (i === 0) oc.moveTo(x, y); else oc.lineTo(x, y);
+  }
+  oc.closePath(); oc.stroke();
+  // Hexagon (counter-rotating)
+  oc.rotate(-ta * 2.5 - Math.PI);
+  oc.strokeStyle = `rgba(0,200,255,${speaking ? 0.45 : 0.22})`;
+  oc.lineWidth = 0.8;
+  oc.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 - Math.PI / 6;
+    const x = Math.cos(a) * 28, y = Math.sin(a) * 28;
+    if (i === 0) oc.moveTo(x, y); else oc.lineTo(x, y);
+  }
+  oc.closePath(); oc.stroke();
+  oc.restore();
+
+  // ── Waveform ring (speaking only) ──
+  if (speaking) {
+    waveT += 0.065;
+    const N = 64;
+    oc.save();
+    oc.strokeStyle = 'rgba(0,212,255,0.6)';
+    oc.lineWidth = 1.3;
+    oc.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const w = 1 + Math.sin(a * 8 + waveT) * 0.085 + Math.sin(a * 5 - waveT * 1.4) * 0.055;
+      const rx = CX + Math.cos(a) * 135 * w;
+      const ry = CY + Math.sin(a) * 135 * w;
+      if (i === 0) oc.moveTo(rx, ry); else oc.lineTo(rx, ry);
+    }
+    oc.closePath(); oc.stroke();
+    oc.restore();
+  }
+}
+requestAnimationFrame(drawOrb);
+
+// ════════════════════════════════════════════════════════════════
+//  LOAD SEGMENTS
+// ════════════════════════════════════════════════════════════════
+const ldSegs = document.getElementById('ld-segs');
+const SEG = 20;
+for (let i = 0; i < SEG; i++) {
+  const s = document.createElement('div'); s.className = 'seg'; ldSegs.appendChild(s);
+}
+function setLoadSegs(pct) {
+  const on = Math.round(pct / 100 * SEG);
+  Array.from(ldSegs.children).forEach((s, i) => {
+    s.className = 'seg' + (i < on ? (pct > 85 ? ' on crit' : pct > 65 ? ' on warn' : ' on') : '');
+  });
+  document.getElementById('load-txt').textContent = pct > 85 ? 'CRIT' : pct > 65 ? 'HIGH' : pct > 35 ? 'MOD' : 'LOW';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  METRICS POLLING  /metrics
+// ════════════════════════════════════════════════════════════════
+async function pollMetrics() {
+  try {
+    const d = await (await fetch('/metrics')).json();
+    const p = v => String(v);
+    document.getElementById('cpu-bar').style.width  = d.cpu_percent  + '%';
+    document.getElementById('ram-bar').style.width  = d.ram_percent  + '%';
+    document.getElementById('disk-bar').style.width = d.disk_percent + '%';
+    document.getElementById('cpu-val').textContent  = d.cpu_percent  + '%';
+    document.getElementById('ram-val').textContent  = d.ram_used_gb + ' GB';
+    document.getElementById('disk-val').textContent = d.disk_used_gb + ' GB';
+    document.getElementById('c-cpu').textContent = d.cpu_percent + '%';
+    document.getElementById('c-ram').textContent = d.ram_used_gb + ' GB';
+    document.getElementById('c-dsk').textContent = d.disk_used_gb + '/' + d.disk_total_gb;
+    document.getElementById('stats-badge').textContent = 'LIVE';
+    setLoadSegs(d.cpu_percent);
+  } catch (_) {
+    document.getElementById('stats-badge').textContent = 'OFFLINE';
+  }
+}
+setInterval(pollMetrics, 3000); pollMetrics();
+
+// ════════════════════════════════════════════════════════════════
+//  STATE POLLING  /state
+// ════════════════════════════════════════════════════════════════
+let lastText = '';
+let txtTimer = null;
+let cmdCount = 0;
+const jstatus = document.getElementById('jstatus');
+const speechEl = document.getElementById('speech');
+const pttModePill = document.getElementById('ptt-mode-pill');
+const pttModeLbl  = document.getElementById('ptt-mode-lbl');
+
+async function pollState() {
+  try {
+    const d = await (await fetch('/state')).json();
+    speaking = d.speaking;
+    jstatus.textContent = d.status || (d.speaking ? 'SPEAKING' : 'STANDBY');
+    jstatus.className   = d.speaking ? 'on' : '';
+    if (d.ptt_mode === 'on') {
+      pttModePill.className = 'on';
+      pttModeLbl.textContent = 'PTT MODE';
+    } else {
+      pttModePill.className = 'off';
+      pttModeLbl.textContent = 'PASSIVE';
+    }
+    if (d.text && d.text !== lastText) {
+      lastText = d.text;
+      speechEl.textContent = '« ' + d.text + ' »';
+      speechEl.style.opacity = '1';
+      clearTimeout(txtTimer);
+      txtTimer = setTimeout(() => { speechEl.style.opacity = '0'; }, 7000);
+      addActivity(d.text, d.last_success != null ? d.last_success : null);
+      cmdCount++;
+      document.getElementById('cmd-cnt').textContent = cmdCount;
+    }
+  } catch (_) {}
+}
+setInterval(pollState, 120); pollState();
+
+// ════════════════════════════════════════════════════════════════
+//  MUSIC POLLING + CONTROLS  /music, /music_ctl
+// ════════════════════════════════════════════════════════════════
+const musTrack   = document.getElementById('mus-track');
+const musArtist  = document.getElementById('mus-artist');
+const musSrc     = document.getElementById('mus-src');
+const musStatus  = document.getElementById('mus-status');
+const musStatLbl = document.getElementById('mus-status-lbl');
+const musProg    = document.getElementById('mus-prog');
+const musToggle  = document.getElementById('mus-toggle');
+const musVol     = document.getElementById('mus-vol');
+const musVolVal  = document.getElementById('mus-vol-val');
+
+let fakeProg = 0;
+let lastMusStatus = '';
+
+async function pollMusic() {
+  try {
+    const d = await (await fetch('/music')).json();
+    const track  = d.track  || d.last_track  || '';
+    const artist = d.artist || d.last_artist || '';
+    const src    = d.source || d.last_source || '';
+    const st     = (d.status || 'idle').toLowerCase();
+
+    musTrack.textContent  = track  ? track.toUpperCase()  : 'NO TRACK';
+    musArtist.textContent = artist ? artist.toUpperCase() : '—';
+    musSrc.textContent    = src    ? src.toUpperCase()    : '—';
+
+    musStatus.className = 'mus-status' + (st === 'playing' ? ' playing' : st === 'paused' ? ' paused' : '');
+    musStatLbl.textContent = st.toUpperCase();
+    musToggle.textContent  = st === 'playing' ? 'PAUSE' : 'PLAY';
+
+    // Fake progress — reset when status/track changes; advance while playing
+    const key = track + '|' + st;
+    if (key !== lastMusStatus) { fakeProg = 0; lastMusStatus = key; }
+    if (st === 'playing') {
+      fakeProg = Math.min(100, fakeProg + 0.4);
+    } else if (st !== 'paused') {
+      fakeProg = 0;
+    }
+    musProg.style.width = fakeProg + '%';
+  } catch (_) {}
+}
+setInterval(pollMusic, 1000); pollMusic();
+
+async function musicCtl(body) {
+  try {
+    await fetch('/music_ctl', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  } catch (_) {}
+}
+
+document.querySelectorAll('.mus-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    const a = b.dataset.act;
+    if (a === 'toggle') {
+      const playing = musToggle.textContent === 'PAUSE';
+      musicCtl({ action: playing ? 'pause' : 'play' });
+    } else if (a === 'prev')  musicCtl({ action: 'prev' });
+    else   if (a === 'next')  musicCtl({ action: 'next' });
+  });
+});
+
+let volTimer = null;
+musVol.addEventListener('input', () => {
+  musVolVal.textContent = musVol.value + '%';
+  clearTimeout(volTimer);
+  volTimer = setTimeout(() => musicCtl({ action: 'volume', level: parseInt(musVol.value, 10) }), 180);
+});
+
+// ════════════════════════════════════════════════════════════════
+//  ACTIVITY LOG  (live session + persistent history)
+// ════════════════════════════════════════════════════════════════
+const actLog = [];   // {t, msg, ok}  ok=true|false|null
+let historyLoaded = false;
+
+function _fmtTs(ts) {
+  if (!ts) return '--:--';
+  const d = new Date(ts * 1000);
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+function addActivity(msg, ok = null) {
+  const n = new Date();
+  const t = String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
+  actLog.unshift({ msg, t, ok, fresh: true });
+  if (actLog.length > 20) actLog.pop();
+  renderActivity();
+}
+
+function renderActivity() {
+  const list  = document.getElementById('act-list');
+  const empty = document.getElementById('act-empty');
+  if (!actLog.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  list.innerHTML = actLog.map((a, i) => {
+    const dot = a.ok === false
+      ? '<div class="act-err"></div>'
+      : a.ok === true
+        ? '<div class="act-ok"></div>'
+        : '';
+    return `<div class="act-item ${a.fresh ? 'fresh' : ''}">
+      <div class="act-time">${a.t}</div>
+      ${dot}
+      <div>${a.msg}</div>
+    </div>`;
+  }).join('');
+  setTimeout(() => { actLog.forEach(a => a.fresh = false); }, 2200);
+}
+
+async function loadHistory() {
+  try {
+    const eps = await (await fetch('/history')).json();
+    if (!Array.isArray(eps) || !eps.length) return;
+    // Prepend historical episodes below current session entries
+    const existing = new Set(actLog.map(a => a.msg));
+    for (const ep of eps) {
+      const msg = ep.text || ep.intent || '(unknown)';
+      if (!existing.has(msg)) {
+        actLog.push({ t: _fmtTs(ep.ts), msg, ok: ep.success, fresh: false });
+        existing.add(msg);
+      }
+    }
+    if (actLog.length > 30) actLog.length = 30;
+    renderActivity();
+    document.getElementById('act-badge').textContent = 'LIVE+HIST';
+  } catch (_) {}
+}
+
+document.getElementById('hist-badge').addEventListener('click', () => {
+  if (!historyLoaded) { historyLoaded = true; loadHistory(); }
+});
+
+// Load history automatically on startup
+loadHistory();
+
+// ════════════════════════════════════════════════════════════════
+//  CLOCK / DATE
+// ════════════════════════════════════════════════════════════════
+const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const DAYS   = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+function tick() {
+  const n = new Date(), p = v => String(v).padStart(2,'0');
+  document.getElementById('hdr-clock').textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+  document.getElementById('hdr-date').textContent  = `${DAYS[n.getDay()]} ${p(n.getDate())} ${MONTHS[n.getMonth()]} ${n.getFullYear()}`;
+}
+setInterval(tick, 1000); tick();
+
+// ════════════════════════════════════════════════════════════════
+//  UPTIME
+// ════════════════════════════════════════════════════════════════
+const t0 = Date.now();
+function tickUptime() {
+  const s = Math.floor((Date.now() - t0) / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
+  const p = v => String(v).padStart(2,'0');
+  document.getElementById('uptime').textContent = `${p(h)}:${p(m)}:${p(ss)}`;
+}
+setInterval(tickUptime, 1000); tickUptime();
+
+// ════════════════════════════════════════════════════════════════
+//  WEATHER  (Open-Meteo, no API key)
+// ════════════════════════════════════════════════════════════════
+const WMO = {
+  0:'CLEAR SKY',1:'MAINLY CLEAR',2:'PARTLY CLOUDY',3:'OVERCAST',
+  45:'FOG',48:'RIME FOG',51:'LT DRIZZLE',53:'DRIZZLE',55:'HVY DRIZZLE',
+  61:'SLT RAIN',63:'MOD RAIN',65:'HVY RAIN',
+  71:'SLT SNOW',73:'MOD SNOW',75:'HVY SNOW',
+  80:'RAIN SHOWERS',81:'MOD SHOWERS',82:'VIO SHOWERS',
+  95:'THUNDERSTORM',96:'T-STORM+HAIL',99:'T-STORM+H.HAIL'
+};
+const WMO_ICON = {
+  0:'☀️',1:'🌤',2:'⛅',3:'☁️',45:'🌫',48:'🌫',
+  51:'🌦',53:'🌧',55:'🌧',61:'🌧',63:'🌧',65:'🌧',
+  71:'❄️',73:'❄️',75:'❄️',80:'🌧',81:'🌧',82:'⛈',
+  95:'⛈',96:'⛈',99:'⛈'
+};
+async function fetchWeather() {
+  try {
+    const geo = await (await fetch('https://ipapi.co/json/')).json();
+    document.getElementById('w-loc').textContent = `${geo.city}, ${geo.country_code}`.toUpperCase();
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${geo.latitude}&longitude=${geo.longitude}`
+      + `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,visibility`
+      + `&wind_speed_unit=ms&forecast_days=1`;
+    const wd = await (await fetch(url)).json();
+    const c = wd.current, code = c.weather_code;
+    document.getElementById('w-temp').textContent = Math.round(c.temperature_2m);
+    document.getElementById('w-desc').textContent = WMO[code] || 'UNKNOWN';
+    document.getElementById('w-icon').textContent = WMO_ICON[code] || '🌐';
+    document.getElementById('w-hum').textContent  = c.relative_humidity_2m + '%';
+    document.getElementById('w-wind').textContent = c.wind_speed_10m.toFixed(1) + ' m/s';
+    document.getElementById('w-feel').textContent = Math.round(c.apparent_temperature) + '°C';
+    document.getElementById('w-vis').textContent  = c.visibility ? (c.visibility / 1000).toFixed(1) + ' km' : '—';
+    document.getElementById('w-badge').textContent = 'LIVE';
+  } catch (_) {
+    document.getElementById('w-badge').textContent = 'ERROR';
+  }
+}
+fetchWeather(); setInterval(fetchWeather, 600000);
+
+// ════════════════════════════════════════════════════════════════
+//  CAMERA
+// ════════════════════════════════════════════════════════════════
+let camOn = false, camStream = null;
+const camVid = document.getElementById('cam-vid');
+const camBtn = document.getElementById('cam-btn');
+const camOff = document.getElementById('cam-off');
+const camLive = document.getElementById('cam-live');
+
+camBtn.addEventListener('click', async () => {
+  if (!camOn) {
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      camVid.srcObject = camStream;
+      camVid.style.display = 'block';
+      camOff.style.display = 'none';
+      camLive.classList.add('on');
+      document.getElementById('cam-badge').textContent = 'LIVE';
+      camBtn.textContent = 'DISABLE CAMERA';
+      camOn = true;
+    } catch (_) {
+      document.getElementById('cam-badge').textContent = 'NO ACCESS';
+    }
+  } else {
+    if (camStream) camStream.getTracks().forEach(t => t.stop());
+    camVid.style.display = 'none';
+    camOff.style.display = '';
+    camLive.classList.remove('on');
+    document.getElementById('cam-badge').textContent = 'INACTIVE';
+    camBtn.textContent = 'ENABLE CAMERA';
+    camOn = false;
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+//  ANALYTICS  /analytics
+// ════════════════════════════════════════════════════════════════
+async function pollAnalytics() {
+  try {
+    const d = await (await fetch('/analytics')).json();
+    if (d.total_episodes != null) document.getElementById('ana-total').textContent = d.total_episodes;
+    if (d.success_rate   != null) document.getElementById('ana-rate').textContent  = d.success_rate + '%';
+
+    const topEl = document.getElementById('ana-top');
+    if (Array.isArray(d.top_actions) && d.top_actions.length) {
+      const max = d.top_actions[0].count || 1;
+      topEl.innerHTML = d.top_actions.slice(0,5).map(a =>
+        `<div class="ana-row">
+           <span style="min-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.action.replace(/_/g,' ')}</span>
+           <div class="ana-bar-wrap"><div class="ana-bar" style="width:${Math.round(a.count/max*100)}%"></div></div>
+           <span class="ana-cnt">${a.count}</span>
+         </div>`
+      ).join('');
+    }
+  } catch (_) {}
+}
+pollAnalytics(); setInterval(pollAnalytics, 30000);
+
+// ════════════════════════════════════════════════════════════════
+//  PTT
+// ════════════════════════════════════════════════════════════════
+const pttEl = document.getElementById('ptt');
+async function pttReq(action) {
+  try { await fetch('/ptt', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action}) }); } catch (_) {}
+}
+function pttPress()   { pttEl.classList.add('held');    pttEl.textContent = 'LISTENING…'; pttReq('press');   }
+function pttRelease() { pttEl.classList.remove('held'); pttEl.textContent = 'HOLD TO SPEAK'; pttReq('release'); }
+
+pttEl.addEventListener('mousedown',  pttPress);
+pttEl.addEventListener('mouseup',    pttRelease);
+pttEl.addEventListener('mouseleave', pttRelease);
+pttEl.addEventListener('touchstart', e => { e.preventDefault(); pttPress(); },   { passive: false });
+pttEl.addEventListener('touchend',   e => { e.preventDefault(); pttRelease(); }, { passive: false });
+</script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+listener:
+  push_to_talk_key: "ctrl+`"
+  sample_rate: 16000
+  silence_timeout_sec: 1.5
+  max_record_sec: 15
+  clap_detection:
+    threshold: 0.08        # Audio peak level to count as a clap (lower = more sensitive)
+    min_gap_sec: 0.1       # Minimum time between two claps
+    max_gap_sec: 1.0       # Maximum time between two claps
+
+transcriber:
+  # distil-small.en is faster and lighter than base.en; requires ~1 GB VRAM.
+  # Fall back to "base.en" if distil-small.en is unavailable on your system.
+  model_size: "distil-small.en"
+  device: "cuda"          # use "cpu" if no CUDA-capable GPU
+  compute_type: "float16" # float16 on GPU, int8 on CPU
+
+llm:
+  provider: "groq"            # "groq" | "claude" | "ollama"
+  model: "llama-3.1-8b-instant"        # fast free-tier Groq model
+  # base_url: "http://localhost:11434"  # only needed for provider: ollama
+  temperature: 0.1
+  max_tokens: 512
+
+speaker:
+  voice: "en-GB-SoniaNeural"   # British female — NORA's voice
+  rate: "+20%"                  # Faster than default. Try "+30%" or "+40%" if you want snappier
+
+music:
+  # Seconds of audio played when a command is wake-triggered (entrance + first command).
+  # Set to 0 to disable the cap and always play the full track.
+  wake_playback_limit_seconds: 40
+
+commands:
+  require_confirmation_for:
+    - "delete_file"
+    - "shutdown"
+    - "close_all_apps"
+
+logging:
+  level: "DEBUG"
+  file: "nora.log"
+
+ambient:
+  # Set to true to run a background mic loop that captures everything you say
+  # (not just NORA commands) into the personal knowledge base.
+  # Requires WASAPI shared-mode mic (default on Windows) — safe to enable.
+  enabled: false
+  sample_rate: 16000
+  chunk_sec: 5.0
+
+cognitive_memory:
+  # ChromaDB persistent store for semantic + episodic memory.
+  # Embedder: all-MiniLM-L6-v2 (~80 MB download on first run).
+  # Set embedder_device to "cpu" if no GPU or if startup is slow.
+  embedder_device: "cuda"          # "cuda" | "cpu"
+  embedder_model: "all-MiniLM-L6-v2"
+
+proactive:
+  # Proactive intelligence engine — suggests actions based on learned patterns.
+  enabled: true
+  idle_threshold_sec: 120          # Seconds of silence before proactive trigger
+  suggestion_cooldown_sec: 1800    # Minimum gap between proactive suggestions
+  min_pattern_confidence: 5        # Min times a pattern must be seen before suggesting
+
+timeouts:
+  transcribe_sec: 30               # Max seconds for Whisper transcription before giving up
+  llm_sec: 20                      # Max seconds for LLM intent parsing before giving up
+  command_sec: 15                  # Max seconds per command step execution
+
+security:
+  # Actions that are NEVER allowed regardless of what the LLM decides.
+  blocked_actions: []
+  # Actions that ALWAYS require voice confirmation, even if the LLM didn't flag them.
+  destructive_actions:
+    - delete_file
+    - shutdown
+    - close_all_apps
+    - lock_screen
+
+neurosym:
+  # NeuroSym-AI guardrail settings.
+  # input_guard: blocks adversarial voice commands before they reach the LLM.
+  # action_guard: validates parsed action plans before execution.
+  enabled: true
+  # Severity threshold for the input guard. Inputs at or above this are blocked.
+  # Options: info | low | medium | high | critical
+  input_deny_above: "high"
+  # Maximum number of steps the LLM is allowed to plan in a single command.
+  max_plan_steps: 15
+
+plugins:
+  enabled: true
+  dir: "~/.nora/plugins"           # Drop .py files here; @register handlers auto-load
