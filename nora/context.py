@@ -123,6 +123,49 @@ def active_apps() -> list[str]:
         return sorted(_active_apps)
 
 
+# ── Session context (short-term conversational buffer) ───────────────────────
+
+@dataclass
+class SessionTurn:
+    text: str
+    intent: str
+    actions: list[str]
+    result_summary: str
+    success: bool
+    ts: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "text": self.text,
+            "intent": self.intent,
+            "actions": self.actions,
+            "result_summary": self.result_summary,
+            "success": self.success,
+            "ts": self.ts,
+        }
+
+
+_session_turns: list[SessionTurn] = []
+_MAX_SESSION = 10
+
+
+def add_session_turn(text: str, intent: str, actions: list[str], result_summary: str, success: bool) -> None:
+    with _lock:
+        _session_turns.insert(0, SessionTurn(
+            text=text,
+            intent=intent,
+            actions=actions,
+            result_summary=result_summary,
+            success=success,
+        ))
+        del _session_turns[_MAX_SESSION:]
+
+
+def get_session_turns(n: int = 5) -> list[SessionTurn]:
+    with _lock:
+        return list(_session_turns[:n])
+
+
 # ── Cancellation signal (for interruption handling) ──────────────────────────
 
 _cancel_event = threading.Event()

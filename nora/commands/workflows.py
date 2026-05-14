@@ -1,4 +1,4 @@
-﻿"""Multi-step workflow macros â€” one voice command triggers a full dev setup.
+"""Multi-step workflow macros -- one voice command triggers a full dev setup.
 
 Workflows call other registered command functions directly (no pipeline round-trip).
 Project scaffolding creates directories, boilerplate files, and a venv, then opens
@@ -15,7 +15,8 @@ from nora.command_engine import register
 logger = logging.getLogger("nora.commands.workflows")
 
 
-@register("coding_session")
+@register("coding_session", sig="coding_session()",
+           description="Open VS Code, Chrome, and play focus music", category="workflow")
 def coding_session() -> str:
     """Open VS Code, Chrome, and play focus music to kick off a coding session."""
     from nora.commands.app_launcher import open_app
@@ -46,7 +47,8 @@ def coding_session() -> str:
     return "Coding session ready."
 
 
-@register("research_session")
+@register("research_session", sig='research_session(topic: str = "")',
+           description="Open Chrome and search a topic", category="workflow")
 def research_session(topic: str = "") -> str:
     """Open Chrome and search for a topic to kick off a research session."""
     from nora.commands.app_launcher import open_app
@@ -59,7 +61,9 @@ def research_session(topic: str = "") -> str:
     return "Research session started. Chrome is open and ready."
 
 
-@register("setup_project")
+@register("setup_project", sig='setup_project(project_type: str = "python", project_name: str = "new_project")',
+           description="Scaffold project dir + venv, open in VS Code. Types: python | ml | cybersecurity",
+           category="workflow")
 def setup_project(project_type: str = "python", project_name: str = "new_project") -> str:
     """Scaffold a new project with folder structure, venv, and open in VS Code.
 

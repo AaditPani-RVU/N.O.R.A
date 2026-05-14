@@ -1,4 +1,4 @@
-﻿"""Recall command â€” search the personal knowledge base by voice."""
+"""Recall command -- search the personal knowledge base by voice."""
 from __future__ import annotations
 
 import logging
@@ -10,7 +10,8 @@ from nora.command_engine import register
 logger = logging.getLogger("nora.commands.recall")
 
 
-@register("recall")
+@register("recall", sig="recall(query: str)",
+           description="Search the personal knowledge base for past commands or things said.", category="memory")
 def recall(query: str) -> str:
     """Search the personal knowledge base for things said or commanded before."""
     if not query or not query.strip():

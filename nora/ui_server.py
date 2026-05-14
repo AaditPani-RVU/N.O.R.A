@@ -1,15 +1,15 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """Lightweight HTTP server that serves the NORA dashboard UI.
 
 Endpoints
 ---------
-GET  /           â†’ index.html
-GET  /state      â†’ {speaking, text, status, ptt_mode}
-GET  /metrics    â†’ system vitals
-GET  /music      â†’ {track, artist, source, status}
-POST /ptt        â†’ push-to-talk button control
-POST /music_ctl  â†’ dispatch playback controls from the UI (play/pause/next/prev/volume)
+GET  /           â†' index.html
+GET  /state      â†' {speaking, text, status, ptt_mode}
+GET  /metrics    â†' system vitals
+GET  /music      â†' {track, artist, source, status}
+POST /ptt        â†' push-to-talk button control
+POST /music_ctl  â†' dispatch playback controls from the UI (play/pause/next/prev/volume)
 """
 
 import json
@@ -27,10 +27,10 @@ except ImportError:  # graceful fallback if psutil missing
 
 logger = logging.getLogger("nora.ui_server")
 
-_state: dict = {"speaking": False, "text": "", "status": "STANDBY"}
+_state: dict = {"speaking": False, "text": "", "status": "STANDBY", "stage": "idle"}
 _lock = threading.Lock()
 
-# Push-to-talk state â€” set by the UI button, read by listener.py
+# Push-to-talk state -- set by the UI button, read by listener.py
 _ptt_event = threading.Event()
 
 
@@ -45,14 +45,22 @@ _STATIC_DIR = Path(__file__).parent / "static"
 # Public API
 # ---------------------------------------------------------------------------
 
-def notify(speaking: bool, text: str = "", status: str = "") -> None:
-    """Update UI state. Thread-safe â€” call from anywhere."""
+def notify(speaking: bool, text: str = "", status: str = "", stage: str = "") -> None:
+    """Update UI state. Thread-safe -- call from anywhere."""
     with _lock:
         _state["speaking"] = speaking
         if text:
             _state["text"] = text
         if status:
             _state["status"] = status
+        if stage:
+            _state["stage"] = stage
+
+
+def notify_stage(stage: str) -> None:
+    """Update just the pipeline stage indicator. Thread-safe."""
+    with _lock:
+        _state["stage"] = stage
 
 
 def notify_ptt_mode(enabled: bool) -> None:
@@ -120,6 +128,19 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 body = {}
             self._dispatch_music(body)
+            self._json_ok(b"{}")
+        elif self.path == "/type_command":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception:
+                body = {}
+            text = (body.get("text") or "").strip()
+            if text:
+                print(f"[NORA UI] /type_command received: {text!r}", flush=True)
+                from nora import text_input
+                text_input._queue.put(text)
+                print(f"[NORA UI] Queued. Queue size now: {text_input._queue.qsize()}", flush=True)
             self._json_ok(b"{}")
         else:
             self.send_response(404)
@@ -249,6 +270,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 

@@ -1,0 +1,26 @@
+{
+  "b943cde6": {
+    "id": "b943cde6",
+    "title": "Test the Sprint 2 cognition layer",
+    "status": "closed",
+    "notes": "created during sprint implementation",
+    "log": [],
+    "associated_files": [],
+    "commands": [],
+    "created_at": 1778753293.7675009,
+    "updated_at": 1778753293.7685006,
+    "closed_at": 1778753293.7685006
+  },
+  "c12445f3": {
+    "id": "c12445f3",
+    "title": "Verify sprint 2 integration",
+    "status": "closed",
+    "notes": "",
+    "log": [],
+    "associated_files": [],
+    "commands": [],
+    "created_at": 1778753352.7706258,
+    "updated_at": 1778753359.206317,
+    "closed_at": 1778753359.206317
+  }
+}

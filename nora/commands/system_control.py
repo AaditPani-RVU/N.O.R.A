@@ -13,7 +13,7 @@ from nora.command_engine import register
 logger = logging.getLogger("nora.commands.system_control")
 
 
-@register("set_volume")
+@register("set_volume", sig="set_volume(level: int)", description="0-100", category="system")
 def set_volume(level: int) -> str:
     """Set system volume (0-100) using Windows API."""
     try:
@@ -38,7 +38,7 @@ def set_volume(level: int) -> str:
         return f"Failed to set volume: {e}"
 
 
-@register("take_screenshot")
+@register("take_screenshot", sig="take_screenshot()", category="system")
 def take_screenshot() -> str:
     """Take a screenshot and save it to the desktop."""
     desktop = Path.home() / "Desktop"
@@ -49,7 +49,7 @@ def take_screenshot() -> str:
     return f"Screenshot saved to {filepath}"
 
 
-@register("lock_screen")
+@register("lock_screen", sig="lock_screen()", category="system")
 def lock_screen() -> str:
     """Lock the Windows workstation."""
     ctypes.windll.user32.LockWorkStation()

@@ -1,4 +1,4 @@
-﻿"""Proactive Intelligence Engine.
+"""Proactive Intelligence Engine.
 
 Runs as a background daemon thread. Periodically:
   1. Analyzes current time context vs. learned behavioral patterns
@@ -22,14 +22,14 @@ from typing import Callable
 
 logger = logging.getLogger("nora.proactive")
 
-# â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Configuration â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 CHECK_INTERVAL_SEC = 60          # How often to evaluate patterns
 IDLE_THRESHOLD_SEC = 120         # User must be idle this long before suggestion fires
 SUGGESTION_COOLDOWN_SEC = 1800   # 30 minutes between proactive suggestions
 MIN_PATTERN_CONFIDENCE = 5       # Minimum occurrences before suggesting
 
-# â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 _last_command_ts: float = time.time()
 _last_suggestion_ts: float = 0.0
@@ -68,7 +68,7 @@ def _mark_suggested() -> None:
         _last_suggestion_ts = time.time()
 
 
-# â”€â”€ Pattern matching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Pattern matching â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _time_bin(dt: datetime) -> str:
     h = dt.hour
@@ -85,7 +85,7 @@ def _action_to_phrase(action: str) -> str:
 
 
 def _evaluate_proactive() -> None:
-    """Core evaluation logic â€” check patterns and fire suggestion if warranted."""
+    """Core evaluation logic -- check patterns and fire suggestion if warranted."""
     try:
         from nora.cognitive_memory import get_behavioral_patterns
         patterns = get_behavioral_patterns()
@@ -118,7 +118,7 @@ def _evaluate_proactive() -> None:
             trigger = _action_to_phrase(wf["trigger"])
             follows = _action_to_phrase(wf["follows"])
             suggestion = f"You often {follows} after {trigger}. Want me to do that?"
-            logger.info("Workflow proactive: %s â†’ %s (x%d)",
+            logger.info("Workflow proactive: %s â†' %s (x%d)",
                         wf["trigger"], wf["follows"], wf["confidence"])
             if _callback:
                 _callback(suggestion)
@@ -126,7 +126,7 @@ def _evaluate_proactive() -> None:
             return
 
 
-# â”€â”€ Background loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Background loop â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _loop() -> None:
     global _running

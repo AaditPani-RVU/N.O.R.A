@@ -13,7 +13,7 @@ logger = logging.getLogger("nora.commands.typing_commands")
 pyautogui.FAILSAFE = True
 
 
-@register("type_text")
+@register("type_text", sig="type_text(text: str)", category="system")
 def type_text(text: str) -> str:
     """Type text at the current cursor position."""
     time.sleep(0.3)  # Brief delay to ensure focus
@@ -21,7 +21,7 @@ def type_text(text: str) -> str:
     return f"Typed: {text}"
 
 
-@register("press_keys")
+@register("press_keys", sig="press_keys(keys: str)", description='e.g. "ctrl+s", "alt+tab", "enter"', category="system")
 def press_keys(keys: str) -> str:
     """Press a key combination (e.g., 'ctrl+s', 'alt+tab', 'enter')."""
     key_list = [k.strip() for k in keys.split("+")]

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 NORA Claude Code voice notification hook.
 
@@ -34,26 +34,26 @@ logging.basicConfig(
 log = logging.getLogger("hook_notify")
 
 # ---------------------------------------------------------------------------
-# NORA system prompt â€” stable across every call â†’ gets cached after first use
+# NORA system prompt -- stable across every call â†' gets cached after first use
 # Prompt caching saves ~90% on input tokens from the 2nd call onward.
 # ---------------------------------------------------------------------------
 _SYSTEM_PROMPT = """\
 You are J.A.R.V.I.S., providing spoken status updates to your creator.
 
-RULES â€” follow every one without exception:
+RULES -- follow every one without exception:
 1. Respond with EXACTLY 1-2 short sentences, 10-25 words total.
 2. Always begin with "Sir,"
 3. Speak in first person as NORA doing the work:
-   - Completions  â†’ "Sir, I have [verb] [subject]."
-   - Errors       â†’ "Sir, I have encountered [problem] with [subject]."
-   - Decisions    â†’ "Sir, I require your input regarding [topic]."
+   - Completions  â†' "Sir, I have [verb] [subject]."
+   - Errors       â†' "Sir, I have encountered [problem] with [subject]."
+   - Decisions    â†' "Sir, I require your input regarding [topic]."
 4. Format for text-to-speech (spell out acronyms, no symbols):
-   - API â†’ A P I   |  JWT â†’ J W T   |  URL â†’ U R L   |  HTTP â†’ H T T P
-   - JSON â†’ jason  |  SQL â†’ sequel  |  OAuth â†’ oh-auth
+   - API â†' A P I   |  JWT â†' J W T   |  URL â†' U R L   |  HTTP â†' H T T P
+   - JSON â†' jason  |  SQL â†' sequel  |  OAuth â†' oh-auth
    - Avoid colons, parentheses, dashes used as punctuation
 5. NEVER mention: file paths, line numbers, markdown syntax, code blocks,
    function names, or variable names.
-6. Output ONLY the spoken text â€” no preamble, no quotes, no labels.\
+6. Output ONLY the spoken text -- no preamble, no quotes, no labels.\
 """
 
 
@@ -95,7 +95,7 @@ def _read_last_assistant_message(transcript_path: str) -> str | None:
 
 
 def _trim(text: str, max_chars: int = 3000) -> str:
-    """Keep the start and end of long messages â€” the summary lives there."""
+    """Keep the start and end of long messages -- the summary lives there."""
     if len(text) <= max_chars:
         return text
     head = text[: max_chars // 2]
@@ -111,7 +111,7 @@ def _summarize_with_claude(text: str) -> str:
     - System prompt (~200 tokens) is cached after the first call (cache_control ephemeral)
     - Subsequent calls pay ~0.1Ã— on those tokens instead of full price
     - max_tokens=80 keeps output tight and fast
-    - Haiku 4.5: $1/1M input, $5/1M output â€” cheapest model, perfect for this task
+    - Haiku 4.5: $1/1M input, $5/1M output -- cheapest model, perfect for this task
     """
     import anthropic  # imported here so startup is instant when voice is off
 

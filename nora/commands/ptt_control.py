@@ -1,7 +1,7 @@
-﻿"""Push-to-talk mode control â€” voice-togglable in real time.
+"""Push-to-talk mode control -- voice-togglable in real time.
 
-When PTT is ON  â†’ listener records only while PTT key/UI button is held.
-When PTT is OFF â†’ listener uses passive wake detection (clap + wake phrase).
+When PTT is ON  â†' listener records only while PTT key/UI button is held.
+When PTT is OFF â†' listener uses passive wake detection (clap + wake phrase).
 
 Changes apply instantly to the next listen() cycle. No restart needed.
 """
@@ -15,7 +15,7 @@ from nora.command_engine import register
 logger = logging.getLogger("nora.commands.ptt_control")
 
 
-@register("set_ptt_mode")
+@register("set_ptt_mode", sig="set_ptt_mode(enabled: bool)", description="Toggle push-to-talk at runtime", category="ptt")
 def set_ptt_mode(enabled: bool) -> str:
     """Enable or disable push-to-talk mode at runtime."""
     enabled = _coerce_bool(enabled)
@@ -25,7 +25,7 @@ def set_ptt_mode(enabled: bool) -> str:
     return "Push to talk enabled." if enabled else "Push to talk disabled. Passive listening active."
 
 
-@register("get_ptt_mode")
+@register("get_ptt_mode", sig="get_ptt_mode()", category="ptt")
 def get_ptt_mode() -> str:
     enabled = context.get_ptt_enabled()
     return "Push to talk is on." if enabled else "Push to talk is off."

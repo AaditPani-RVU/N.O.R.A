@@ -1,4 +1,4 @@
-﻿"""Ask Claude command â€” enriches questions with clipboard + active window context."""
+"""Ask Claude command -- enriches questions with clipboard + active window context."""
 from __future__ import annotations
 
 import logging
@@ -48,7 +48,8 @@ def _build_context_block() -> str:
     return "[Current context]\n" + "\n".join(parts) + "\n\n"
 
 
-@register("ask_claude")
+@register("ask_claude", sig="ask_claude(question: str)",
+           description="Ask Claude + SPEAK. Use for coding/opinion/advice.", category="web")
 def ask_claude(question: str) -> str:
     """Send a question to Claude Code CLI, enriched with clipboard and active window context."""
     context_block = _build_context_block()
@@ -60,7 +61,7 @@ def ask_claude(question: str) -> str:
     prompt = (
         f"{context_block}"
         f"Answer this question concisely in 2-4 spoken sentences. "
-        f"No bullet points, no markdown, no formatting â€” just plain conversational text "
+        f"No bullet points, no markdown, no formatting -- just plain conversational text "
         f"as if you're speaking to someone. Question: {question}"
     )
 

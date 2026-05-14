@@ -1,4 +1,4 @@
-﻿"""NORA — Never Off, Rarely Asked. Local Voice-Controlled AI Assistant.
+"""NORA — Never Off, Rarely Asked. Local Voice-Controlled AI Assistant.
 
 Usage:
     python main.py
@@ -45,7 +45,7 @@ def check_prerequisites() -> bool:
 
     from nora.intent_parser import check_ollama_connection
     if not check_ollama_connection():
-        logger.error("LLM backend not reachable. Check config.yaml â†’ llm.provider and API keys.")
+        logger.error("LLM backend not reachable. Check config.yaml â†' llm.provider and API keys.")
         ok = False
     else:
         logger.info("LLM backend: OK")

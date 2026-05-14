@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -21,13 +21,15 @@ class Listener:
         self.silence_timeout = cfg.get("silence_timeout_sec", 1.5)
         self.max_duration = cfg.get("max_record_sec", 15)
 
+        self._text_interrupted = False
+
         # Clap detection settings
         clap_cfg = cfg.get("clap_detection", {})
         self.clap_threshold = clap_cfg.get("threshold", 0.08)
         self.clap_min_gap = clap_cfg.get("min_gap_sec", 0.1)
         self.clap_max_gap = clap_cfg.get("max_gap_sec", 1.0)
 
-    # â”€â”€ Clap detection (for wake sequence) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Clap detection (for wake sequence) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     async def wait_for_double_clap(self) -> bool:
         """Continuously listen for two loud spikes (claps) in quick succession."""
@@ -83,7 +85,7 @@ class Listener:
             logger.error(f"Clap detection error: {e}")
             return False
 
-    # â”€â”€ Passive voice listening (for wake phrase after clap) â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Passive voice listening (for wake phrase after clap) â"€â"€â"€â"€â"€â"€â"€
 
     async def listen_for_wake_phrase(self, timeout: float = 4.0) -> np.ndarray | None:
         """Record audio for a short window after double clap."""
@@ -120,7 +122,7 @@ class Listener:
 
         return audio
 
-    # â”€â”€ Passive listening (continuous) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Passive listening (continuous) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     async def listen_passive(self, chunk_seconds: float = 3.0) -> np.ndarray | None:
         """Record a short audio chunk passively (no key press required)."""
@@ -180,29 +182,86 @@ class Listener:
 
         return audio.astype(np.float32)
 
-    # â”€â”€ Unified listening (branches on PTT mode, read per-call) â”€â”€â”€â”€
+    # â"€â"€ Wakeword mode â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+
+    async def listen_wakeword(self) -> np.ndarray | None:
+        """Check for wakeword trigger; if detected, play ack and record command."""
+        from nora import wakeword as _ww, ack as _ack
+
+        triggered = _ww.wait_for_trigger(timeout=0.1)
+        if not triggered:
+            return None
+
+        logger.info("Wakeword triggered -- acknowledging and recording command")
+        _ack.speak_ack()
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._record, False)
+
+    # â"€â"€ Wakeword + PTT secondary â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+
+    def _check_ptt_now(self) -> bool:
+        """Non-blocking: is PTT key or UI button held right now?"""
+        try:
+            if keyboard.is_pressed(self.hotkey):
+                return True
+        except Exception:
+            pass
+        try:
+            from nora import ui_server
+            if ui_server.is_ptt_pressed():
+                return True
+        except Exception:
+            pass
+        return False
+
+    # â"€â"€ Unified listening (branches on PTT / wakeword / passive) â"€â"€â"€â"€â"€
 
     async def listen(self) -> np.ndarray | None:
         """Record a command utterance.
 
-        Branches in real time on `context.get_ptt_enabled()`:
-            PTT on  â†’ wait for hotkey/UI button, then record until release.
-            PTT off â†’ continuous passive listening (rolling chunk).
+        Priority:
+          1. Wakeword (primary when enabled) — polls the trigger event.
+          2. PTT key/button — works as secondary even when wakeword is enabled.
+          3. PTT primary mode — blocks on key when wakeword is off.
+          4. Passive — continuous rolling chunk (always-on transcription).
         """
-        from nora import context
+        from nora import ack as _ack, context, wakeword as _ww
+
+        if _ww.is_enabled():
+            # Short-poll wakeword trigger (non-blocking at 50 ms granularity)
+            # Do NOT call listen_wakeword() here — it checks the event again and
+            # it will already be cleared. Play ack and record directly.
+            if _ww.wait_for_trigger(timeout=0.05):
+                logger.info("Wakeword confirmed -- acknowledging and recording")
+                _ack.speak_ack()
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(None, self._record, False)
+
+            # PTT secondary: if key/button held, fire immediately
+            loop = asyncio.get_event_loop()
+            if await loop.run_in_executor(None, self._check_ptt_now):
+                _ack.speak_ack()
+                return await loop.run_in_executor(None, self._record, True)
+
+            return None  # neither triggered; caller loops
 
         if context.get_ptt_enabled():
-            logger.info(f"PTT mode â€” press [{self.hotkey}] or UI button to speak...")
+            logger.info(f"PTT mode -- press [{self.hotkey}] or UI button to speak...")
             loop = asyncio.get_event_loop()
+            self._text_interrupted = False
             await loop.run_in_executor(None, self._wait_for_key_press)
+            if self._text_interrupted:
+                return None  # pipeline picks up queued text on next iteration
             return await loop.run_in_executor(None, self._record)
 
-        # Passive mode â€” return a short chunk of mic audio for transcription
-        logger.debug("Passive mode â€” sampling mic chunk")
+        # Passive mode -- return a short chunk of mic audio for transcription
+        logger.debug("Passive mode -- sampling mic chunk")
         return await self.listen_passive(chunk_seconds=3.0)
 
     def _wait_for_key_press(self) -> None:
-        """Block until the push-to-talk key OR the UI button is pressed."""
+        """Block until the push-to-talk key, UI button, or queued text input."""
+        from nora import text_input as _ti
         while True:
             try:
                 if keyboard.is_pressed(self.hotkey):
@@ -215,13 +274,25 @@ class Listener:
                     return
             except Exception:
                 pass
+            if not _ti._queue.empty():
+                print(f"[NORA] Text queue detected in listener ({_ti._queue.qsize()} item(s)) — interrupting PTT wait", flush=True)
+                self._text_interrupted = True
+                return
             time.sleep(0.02)
 
-    def _record(self) -> np.ndarray | None:
-        """Record audio from microphone until key release, silence, or max duration."""
+    def _record(self, ptt_mode: bool = True) -> np.ndarray | None:
+        """Record audio until key release (PTT) or VAD silence (wakeword).
+
+        ptt_mode=False: skip key-release check; stop on silence after speech,
+        or bail if no speech detected within speech_start_timeout seconds.
+        """
         logger.info("Recording...")
+        label = "(release key to stop)" if ptt_mode else "(wakeword mode)"
+        print(f"[NORA] Recording... {label}", flush=True)
         frames: list[np.ndarray] = []
         silence_start: float | None = None
+        speech_detected = False
+        speech_start_timeout = 2.0  # bail if silent for first 2s in wakeword mode
         start_time = time.time()
         rms_threshold = 0.01
 
@@ -244,33 +315,40 @@ class Listener:
                         logger.info("Max recording duration reached.")
                         break
 
-                    last_key = self.hotkey.split("+")[-1]
-                    key_held = False
-                    try:
-                        key_held = keyboard.is_pressed(last_key)
-                    except Exception:
-                        pass
-                    ui_held = False
-                    try:
-                        from nora import ui_server
-                        ui_held = ui_server.is_ptt_pressed()
-                    except Exception:
-                        pass
-                    if not key_held and not ui_held and elapsed > 0.3:
-                        logger.info("PTT released, stopping recording.")
-                        break
+                    if ptt_mode:
+                        last_key = self.hotkey.split("+")[-1]
+                        key_held = False
+                        try:
+                            key_held = keyboard.is_pressed(last_key)
+                        except Exception:
+                            pass
+                        ui_held = False
+                        try:
+                            from nora import ui_server
+                            ui_held = ui_server.is_ptt_pressed()
+                        except Exception:
+                            pass
+                        if not key_held and not ui_held and elapsed > 0.3:
+                            logger.info("PTT released, stopping recording.")
+                            break
 
                     if frames:
                         recent = frames[-1]
                         rms = np.sqrt(np.mean(recent ** 2))
-                        if rms < rms_threshold:
-                            if silence_start is None:
-                                silence_start = time.time()
-                            elif time.time() - silence_start >= self.silence_timeout:
-                                logger.info("Silence detected, stopping recording.")
-                                break
-                        else:
+                        if rms >= rms_threshold:
+                            speech_detected = True
                             silence_start = None
+                        else:
+                            if not ptt_mode and not speech_detected:
+                                if elapsed >= speech_start_timeout:
+                                    logger.info("No speech detected after wakeword -- discarding.")
+                                    return None
+                            else:
+                                if silence_start is None:
+                                    silence_start = time.time()
+                                elif time.time() - silence_start >= self.silence_timeout:
+                                    logger.info("Silence detected, stopping recording.")
+                                    break
 
         except Exception as e:
             logger.error(f"Recording error: {e}")
@@ -282,4 +360,5 @@ class Listener:
         audio = np.concatenate(frames, axis=0).flatten()
         duration = len(audio) / self.sample_rate
         logger.info(f"Recorded {duration:.1f}s of audio.")
+        print(f"[NORA] Recorded {duration:.1f}s -- transcribing...", flush=True)
         return audio

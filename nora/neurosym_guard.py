@@ -1,4 +1,4 @@
-﻿"""NeuroSym-AI integration: voice-input injection detection and action policy validation.
+"""NeuroSym-AI integration: voice-input injection detection and action policy validation.
 
 Two guards sit at different points in the pipeline:
   - input_guard  : runs on raw transcription before the LLM sees it
@@ -26,7 +26,7 @@ try:
 except ImportError:
     _AVAILABLE = False
     logger.warning(
-        "neurosym-ai not installed â€” security guardrails disabled. "
+        "neurosym-ai not installed -- security guardrails disabled. "
         "Run: pip install neurosym-ai"
     )
 
@@ -60,7 +60,7 @@ def _action() -> object:
                 max_steps(15),
                 no_path_outside_sandbox(_SANDBOX),
             ],
-            # Don't auto-block "high" â€” destructive_needs_confirmation is high and we
+            # Don't auto-block "high" -- destructive_needs_confirmation is high and we
             # handle it by requiring confirmation rather than outright blocking.
             deny_above="critical",
         )
@@ -85,8 +85,8 @@ def check_intent(intent: IntentResponse) -> tuple[bool, bool, list[dict]]:
     """Action-policy check on a parsed intent plan.
 
     Returns (is_safe, needs_confirmation, violations).
-      - is_safe           : False â†’ block execution entirely
-      - needs_confirmation: True  â†’ set intent.requires_confirmation before running
+      - is_safe           : False â†' block execution entirely
+      - needs_confirmation: True  â†' set intent.requires_confirmation before running
     """
     guard = _action()
     if guard is None:

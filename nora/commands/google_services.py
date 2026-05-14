@@ -1,4 +1,4 @@
-﻿"""Google Calendar and Gmail integration via the Claude CLI + MCP servers.
+"""Google Calendar and Gmail integration via the Claude CLI + MCP servers.
 
 The Claude CLI must have Google Calendar and Gmail MCP servers configured
 and authenticated. Run `claude` interactively and authenticate once if needed.
@@ -63,20 +63,22 @@ def _claude(prompt: str, tools: str, timeout: int = 60) -> str | None:
         return None
 
 
-@register("check_calendar")
+@register("check_calendar", sig='check_calendar(when: str = "today")',
+           description="Check Google Calendar for upcoming events via MCP", category="notification")
 def check_calendar(when: str = "today") -> str:
     """Check Google Calendar for upcoming events."""
     prompt = (
         f"Check my Google Calendar for events {when}. "
         "List them concisely in plain spoken text with no markdown or bullet points. "
-        "Say something like: You have 3 events today â€” standup at 9am, lunch at noon, and a review at 3pm. "
+        "Say something like: You have 3 events today -- standup at 9am, lunch at noon, and a review at 3pm. "
         "If there are no events, say so briefly."
     )
     response = _claude(prompt, _CALENDAR_TOOLS)
     return response or _NOT_AUTH_MSG.format("Google Calendar")
 
 
-@register("add_calendar_event")
+@register("add_calendar_event", sig='add_calendar_event(title: str, date: str = "today", time: str = "")',
+           description="Add an event to Google Calendar via MCP", category="notification")
 def add_calendar_event(title: str, date: str = "today", time: str = "") -> str:
     """Add an event to Google Calendar."""
     time_clause = f" at {time}" if time else ""
@@ -88,19 +90,21 @@ def add_calendar_event(title: str, date: str = "today", time: str = "") -> str:
     return response or _NOT_AUTH_MSG.format("Google Calendar")
 
 
-@register("check_email")
+@register("check_email", sig='check_email(filter: str = "unread")',
+           description="Check Gmail for recent messages via MCP", category="notification")
 def check_email(filter: str = "unread") -> str:
     """Check Gmail for recent messages."""
     prompt = (
         f"Check my Gmail for {filter} emails. "
-        "Summarize the most important ones in 3-5 conversational sentences â€” no markdown, no formatting. "
+        "Summarize the most important ones in 3-5 conversational sentences -- no markdown, no formatting. "
         "Include sender names and brief subjects. If there are no emails, say so."
     )
     response = _claude(prompt, _GMAIL_TOOLS)
     return response or _NOT_AUTH_MSG.format("Gmail")
 
 
-@register("send_email")
+@register("send_email", sig="send_email(to: str, subject: str, body: str)",
+           description="Compose and send an email via Gmail MCP", category="notification")
 def send_email(to: str, subject: str, body: str) -> str:
     """Compose and send an email via Gmail."""
     prompt = (

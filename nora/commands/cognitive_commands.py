@@ -1,4 +1,4 @@
-﻿"""Cognitive memory commands â€” semantic recall, pattern introspection, knowledge injection."""
+"""Cognitive memory commands -- semantic recall, pattern introspection, knowledge injection."""
 from __future__ import annotations
 
 import time
@@ -7,7 +7,8 @@ from datetime import datetime
 from nora.command_engine import register
 
 
-@register("semantic_recall")
+@register("semantic_recall", sig="semantic_recall(query: str)",
+           description="Deep semantic similarity search over all memory (smarter than recall)", category="memory")
 def semantic_recall(query: str) -> str:
     """Semantic similarity search over episodes and knowledge base."""
     from nora.cognitive_memory import semantic_search
@@ -25,7 +26,8 @@ def semantic_recall(query: str) -> str:
     return "Here's what I recall: " + ". Next: ".join(parts[:3])
 
 
-@register("show_patterns")
+@register("show_patterns", sig="show_patterns()",
+           description="Show user's behavioral patterns (time-of-day habits, workflows)", category="memory")
 def show_patterns() -> str:
     """Explain the user's behavioral patterns extracted from memory."""
     from nora.cognitive_memory import get_behavioral_patterns
@@ -56,7 +58,8 @@ def show_patterns() -> str:
     return " ".join(lines) if lines else "Not enough data yet to identify patterns."
 
 
-@register("inject_knowledge")
+@register("inject_knowledge", sig="inject_knowledge(text: str)",
+           description="Store a fact or note in memory permanently", category="memory")
 def inject_knowledge(text: str) -> str:
     """Manually inject a fact or note into the semantic knowledge base."""
     from nora.cognitive_memory import record_knowledge
@@ -64,7 +67,8 @@ def inject_knowledge(text: str) -> str:
     return f"Stored in memory: {text[:80]}"
 
 
-@register("memory_status")
+@register("memory_status", sig="memory_status()",
+           description="Show cognitive memory statistics", category="memory")
 def memory_status() -> str:
     """Report cognitive memory system status and statistics."""
     from nora.cognitive_memory import _get_collections, _load_user_model

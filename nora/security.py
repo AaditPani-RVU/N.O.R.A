@@ -1,4 +1,4 @@
-﻿"""Security layer â€” action blocking and mandatory confirmation enforcement."""
+"""Security layer -- action blocking and mandatory confirmation enforcement."""
 from __future__ import annotations
 
 import logging

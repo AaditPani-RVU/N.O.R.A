@@ -11,7 +11,7 @@ from nora.command_engine import register
 logger = logging.getLogger("nora.commands.system_info")
 
 
-@register("get_system_info")
+@register("get_system_info", sig="get_system_info()", category="system")
 def get_system_info() -> str:
     """Get current system information."""
     cpu = psutil.cpu_percent(interval=0.5)
@@ -34,7 +34,7 @@ def get_system_info() -> str:
     return ". ".join(lines)
 
 
-@register("get_time")
+@register("get_time", sig="get_time()", category="system")
 def get_time() -> str:
     """Get current date and time."""
     now = datetime.datetime.now()

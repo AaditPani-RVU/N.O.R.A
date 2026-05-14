@@ -1,8 +1,8 @@
-﻿"""Desktop notifications, timed reminders, and WhatsApp messaging.
+"""Desktop notifications, timed reminders, and WhatsApp messaging.
 
-notify_me   â†’ Windows toast notification (no extra deps)
-remind_me   â†’ Timed voice + toast reminder (background thread)
-send_whatsapp â†’ pywhatkit (requires WhatsApp Web open in default browser)
+notify_me   â†' Windows toast notification (no extra deps)
+remind_me   â†' Timed voice + toast reminder (background thread)
+send_whatsapp â†' pywhatkit (requires WhatsApp Web open in default browser)
               Contacts can be phone numbers (+countrycode) or names
               mapped in config.yaml under contacts:
 """
@@ -43,14 +43,16 @@ def _toast(title: str, message: str) -> None:
         logger.debug("Toast notification failed (non-critical): %s", e)
 
 
-@register("notify_me")
+@register("notify_me", sig="notify_me(message: str)",
+           description="Send a Windows desktop notification", category="notification")
 def notify_me(message: str) -> str:
     """Send a Windows desktop notification with the given message."""
     _toast("NORA", message)
     return f"Notification sent: {message}"
 
 
-@register("remind_me")
+@register("remind_me", sig="remind_me(message: str, delay_minutes: float = 5.0)",
+           description="Timed voice + toast reminder", category="notification")
 def remind_me(message: str, delay_minutes: float = 5.0) -> str:
     """Set a timed voice and desktop reminder."""
     delay_sec = float(delay_minutes) * 60
@@ -83,7 +85,8 @@ def _resolve_contact(contact: str) -> str:
     return contact  # pass through and let pywhatkit error naturally
 
 
-@register("send_whatsapp")
+@register("send_whatsapp", sig="send_whatsapp(contact: str, message: str)",
+           description="Send WhatsApp message via pywhatkit (needs WhatsApp Web open)", category="notification")
 def send_whatsapp(contact: str, message: str) -> str:
     """Send a WhatsApp message (requires WhatsApp Web open in default browser).
 

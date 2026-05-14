@@ -30,7 +30,8 @@ _pomodoro_thread: threading.Thread | None = None
 _pomodoro_stop = threading.Event()
 
 
-@register("focus_mode")
+@register("focus_mode", sig="focus_mode(duration_minutes: int = 25)",
+           description="Close distracting apps, start focus timer", category="focus")
 def focus_mode(duration_minutes: int = 25) -> str:
     global _focus_timer
 
@@ -56,7 +57,7 @@ def focus_mode(duration_minutes: int = 25) -> str:
     return msg
 
 
-@register("end_focus")
+@register("end_focus", sig="end_focus()", description="End focus session early", category="focus")
 def end_focus() -> str:
     global _focus_timer
     if _focus_timer and _focus_timer.is_alive():
@@ -78,7 +79,8 @@ def _pomodoro_loop(work_min: int, break_min: int) -> None:
         session += 1
 
 
-@register("pomodoro")
+@register("pomodoro", sig="pomodoro(minutes: int = 25, break_minutes: int = 5)",
+           description="Start repeating pomodoro timer", category="focus")
 def pomodoro(minutes: int = 25, break_minutes: int = 5) -> str:
     global _pomodoro_thread, _pomodoro_stop
 
@@ -97,7 +99,7 @@ def pomodoro(minutes: int = 25, break_minutes: int = 5) -> str:
     return f"Pomodoro started — {minutes} minute sessions, {break_minutes} minute breaks."
 
 
-@register("stop_pomodoro")
+@register("stop_pomodoro", sig="stop_pomodoro()", description="Stop pomodoro", category="focus")
 def stop_pomodoro() -> str:
     _pomodoro_stop.set()
     return "Pomodoro stopped."

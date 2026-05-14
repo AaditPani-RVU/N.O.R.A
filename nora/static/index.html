@@ -462,6 +462,29 @@
     .ana-bar { height:100%; background: linear-gradient(90deg, #003888, var(--c)); transition: width 0.8s ease; }
     .ana-cnt { font-size:8px; color:var(--c); min-width:22px; text-align:right; }
 
+    /* ════════════════════ PIPELINE STAGE BAR ════════════════════ */
+    #stage-bar {
+      display: flex; align-items: center; gap: 4px;
+      margin-top: 6px;
+    }
+    .stg {
+      font-family: var(--mono);
+      font-size: 7px; letter-spacing: 2px; color: var(--dim);
+      padding: 3px 7px; border: 1px solid rgba(0,212,255,0.08);
+      background: rgba(0,212,255,0.02);
+      transition: color 0.2s, border-color 0.2s, background 0.2s, text-shadow 0.2s;
+      white-space: nowrap;
+    }
+    .stg.active {
+      color: var(--c);
+      border-color: rgba(0,212,255,0.55);
+      background: rgba(0,212,255,0.1);
+      text-shadow: 0 0 8px var(--cg);
+    }
+    .stg-sep {
+      font-size: 8px; color: rgba(0,212,255,0.2);
+    }
+
     /* PTT-mode pill on the center panel */
     #ptt-mode-pill {
       display: flex; align-items: center; gap: 5px;
@@ -474,6 +497,43 @@
     }
     #ptt-mode-pill.on .dot { background: #00ff88; box-shadow: 0 0 5px #00ff88; }
     #ptt-mode-pill.off .dot { background: #ffaa00; box-shadow: 0 0 5px #ffaa00; }
+
+    /* Input mode toggle */
+    #input-mode-btn {
+      margin-top: 8px;
+      width: 158px; height: 30px;
+      border: 1px solid var(--cd);
+      background: rgba(0,212,255,0.03);
+      color: var(--dim); font-family: var(--mono);
+      font-size: 8px; letter-spacing: 3px; cursor: pointer;
+      text-transform: uppercase; transition: all 0.18s;
+    }
+    #input-mode-btn:hover { background: rgba(0,212,255,0.08); color: var(--c); border-color: rgba(0,212,255,0.4); }
+    #input-mode-btn.text-active { border-color: var(--c); color: var(--c); background: rgba(0,212,255,0.07); }
+
+    /* Text input area */
+    #text-input-wrap {
+      display: none;
+      flex-direction: column; align-items: center; gap: 6px;
+      margin-top: 4px; width: 280px;
+    }
+    #text-input-wrap.visible { display: flex; }
+    #text-cmd {
+      width: 100%; padding: 8px 10px;
+      background: rgba(0,212,255,0.04); border: 1px solid var(--cd);
+      color: var(--c); font-family: var(--mono); font-size: 10px; letter-spacing: 1px;
+      outline: none; transition: border-color 0.18s;
+    }
+    #text-cmd::placeholder { color: var(--dim); letter-spacing: 2px; font-size: 9px; }
+    #text-cmd:focus { border-color: rgba(0,212,255,0.6); }
+    #text-send {
+      width: 100%; height: 32px;
+      background: rgba(0,212,255,0.06); border: 1px solid rgba(0,212,255,0.35);
+      color: var(--c); font-family: var(--mono);
+      font-size: 9px; letter-spacing: 4px; cursor: pointer; text-transform: uppercase;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    #text-send:hover { background: rgba(0,212,255,0.14); border-color: var(--c); }
   </style>
 </head>
 <body>
@@ -573,12 +633,36 @@
         <div id="jstatus">STANDBY</div>
       </div>
 
+      <!-- Pipeline stage bar -->
+      <div id="stage-bar">
+        <div class="stg" id="stg-listening">LISTEN</div>
+        <div class="stg-sep">›</div>
+        <div class="stg" id="stg-transcribing">STT</div>
+        <div class="stg-sep">›</div>
+        <div class="stg" id="stg-guarding">GUARD</div>
+        <div class="stg-sep">›</div>
+        <div class="stg" id="stg-thinking">LLM</div>
+        <div class="stg-sep">›</div>
+        <div class="stg" id="stg-acting">ACT</div>
+        <div class="stg-sep">›</div>
+        <div class="stg" id="stg-speaking">SPEAK</div>
+      </div>
+
       <!-- Transcription -->
       <div id="speech"></div>
 
       <!-- PTT -->
       <div id="ptt">HOLD TO SPEAK</div>
       <div id="ptt-mode-pill" class="off"><div class="dot"></div><span id="ptt-mode-lbl">PASSIVE</span></div>
+
+      <!-- Input mode toggle -->
+      <button id="input-mode-btn">⌨ TEXT MODE</button>
+
+      <!-- Text input (shown when text mode active) -->
+      <div id="text-input-wrap">
+        <input id="text-cmd" type="text" placeholder="TYPE A COMMAND..." autocomplete="off" spellcheck="false" />
+        <button id="text-send">SEND</button>
+      </div>
 
     </div><!-- /center -->
 
@@ -930,10 +1014,32 @@ setInterval(pollMetrics, 3000); pollMetrics();
 let lastText = '';
 let txtTimer = null;
 let cmdCount = 0;
+let lastStage = '';
 const jstatus = document.getElementById('jstatus');
 const speechEl = document.getElementById('speech');
 const pttModePill = document.getElementById('ptt-mode-pill');
 const pttModeLbl  = document.getElementById('ptt-mode-lbl');
+
+const STAGE_IDS = ['listening','transcribing','guarding','thinking','acting','speaking'];
+const STAGE_ACTIVE_SET = {
+  idle:         [],
+  listening:    ['listening'],
+  transcribing: ['listening','transcribing'],
+  guarding:     ['listening','transcribing','guarding'],
+  thinking:     ['listening','transcribing','guarding','thinking'],
+  acting:       ['listening','transcribing','guarding','thinking','acting'],
+  speaking:     ['listening','transcribing','guarding','thinking','acting','speaking'],
+};
+
+function setStage(stage) {
+  if (stage === lastStage) return;
+  lastStage = stage;
+  const active = new Set(STAGE_ACTIVE_SET[stage] || []);
+  STAGE_IDS.forEach(id => {
+    const el = document.getElementById('stg-' + id);
+    if (el) el.className = 'stg' + (active.has(id) ? ' active' : '');
+  });
+}
 
 async function pollState() {
   try {
@@ -948,6 +1054,7 @@ async function pollState() {
       pttModePill.className = 'off';
       pttModeLbl.textContent = 'PASSIVE';
     }
+    if (d.stage) setStage(d.stage);
     if (d.text && d.text !== lastText) {
       lastText = d.text;
       speechEl.textContent = '« ' + d.text + ' »';
@@ -1223,17 +1330,73 @@ pollAnalytics(); setInterval(pollAnalytics, 30000);
 //  PTT
 // ════════════════════════════════════════════════════════════════
 const pttEl = document.getElementById('ptt');
+let pttActive = false;
 async function pttReq(action) {
   try { await fetch('/ptt', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action}) }); } catch (_) {}
 }
-function pttPress()   { pttEl.classList.add('held');    pttEl.textContent = 'LISTENING…'; pttReq('press');   }
-function pttRelease() { pttEl.classList.remove('held'); pttEl.textContent = 'HOLD TO SPEAK'; pttReq('release'); }
+function pttToggle() {
+  pttActive = !pttActive;
+  if (pttActive) {
+    pttEl.classList.add('held');
+    pttEl.textContent = 'LISTENING… (CLICK TO STOP)';
+    pttReq('press');
+  } else {
+    pttEl.classList.remove('held');
+    pttEl.textContent = 'CLICK TO SPEAK';
+    pttReq('release');
+  }
+}
+pttEl.textContent = 'CLICK TO SPEAK';
+pttEl.addEventListener('click', pttToggle);
+pttEl.addEventListener('touchstart', e => { e.preventDefault(); pttToggle(); }, { passive: false });
 
-pttEl.addEventListener('mousedown',  pttPress);
-pttEl.addEventListener('mouseup',    pttRelease);
-pttEl.addEventListener('mouseleave', pttRelease);
-pttEl.addEventListener('touchstart', e => { e.preventDefault(); pttPress(); },   { passive: false });
-pttEl.addEventListener('touchend',   e => { e.preventDefault(); pttRelease(); }, { passive: false });
+// ════════════════════════════════════════════════════════════════
+//  INPUT MODE TOGGLE  (voice ↔ text)
+// ════════════════════════════════════════════════════════════════
+const inputModeBtn  = document.getElementById('input-mode-btn');
+const textInputWrap = document.getElementById('text-input-wrap');
+const textCmd       = document.getElementById('text-cmd');
+const textSend      = document.getElementById('text-send');
+let textModeActive  = false;
+
+inputModeBtn.addEventListener('click', () => {
+  textModeActive = !textModeActive;
+  if (textModeActive) {
+    inputModeBtn.textContent = '🎙 VOICE MODE';
+    inputModeBtn.classList.add('text-active');
+    pttEl.style.display = 'none';
+    textInputWrap.classList.add('visible');
+    textCmd.focus();
+  } else {
+    inputModeBtn.textContent = '⌨ TEXT MODE';
+    inputModeBtn.classList.remove('text-active');
+    pttEl.style.display = '';
+    textInputWrap.classList.remove('visible');
+  }
+});
+
+async function sendTextCommand() {
+  const text = textCmd.value.trim();
+  if (!text) return;
+  textCmd.value = '';
+  try {
+    const resp = await fetch('/type_command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (resp.ok) {
+      addActivity(text, null);
+    } else {
+      console.error('[NORA] /type_command returned', resp.status);
+    }
+  } catch (err) {
+    console.error('[NORA] /type_command fetch failed:', err);
+  }
+}
+
+textSend.addEventListener('click', sendTextCommand);
+textCmd.addEventListener('keydown', e => { if (e.key === 'Enter') sendTextCommand(); });
 </script>
 </body>
 </html>

@@ -65,7 +65,7 @@ proactive:
 
 timeouts:
   transcribe_sec: 30               # Max seconds for Whisper transcription before giving up
-  llm_sec: 20                      # Max seconds for LLM intent parsing before giving up
+  llm_sec: 45                      # Max seconds for LLM intent parsing before giving up
   command_sec: 15                  # Max seconds per command step execution
 
 security:
@@ -92,3 +92,59 @@ neurosym:
 plugins:
   enabled: true
   dir: "./plugins"                  # Drop .py files here; @register handlers auto-load
+
+# ── Sprint 1: Feel (Perception Layer) ─────────────────────────────────────
+
+ack:
+  # Pre-synthesized acknowledgement tokens for sub-300ms first phoneme response.
+  # Plays immediately when PTT is released, before Whisper or LLM has responded.
+  enabled: true
+
+barge_in:
+  # Suppress TTS mid-sentence when the user starts speaking.
+  # threshold_rms: mic level required to count as speech (0.0–1.0).
+  # delay_sec: seconds to wait after TTS starts before monitoring mic (avoids echo).
+  enabled: true
+  threshold_rms: 0.06
+  delay_sec: 0.35
+
+wakeword:
+  # Always-on wakeword detection via openWakeWord.
+  # Requires: pip install openwakeword
+  # Primary activation mode — PTT key/button still works as a secondary fallback.
+  # model: "hey_jarvis_v0.1" is the closest pre-trained phrase.
+  # sensitivity: 0.0–1.0 (lower = more sensitive, more false triggers).
+  # cooldown_sec: minimum gap between consecutive triggers.
+  enabled: true
+  model: "hey_jarvis_v0.1"
+  sensitivity: 0.5
+  cooldown_sec: 1.5
+
+# ── Sprint 2: Know (Durable Cognition) ────────────────────────────────────────
+
+session_briefing:
+  # Deliver a spoken summary on first wake of a new session (gap >4h or new day).
+  enabled: true
+
+consolidation:
+  # Nightly consolidation job — runs once per day at run_hour:run_minute.
+  # Produces nora_daily_brief.json and stores a ChromaDB knowledge entry.
+  enabled: true
+  run_hour: 23
+  run_minute: 0
+
+task_ledger:
+  # Persistent store for open/closed tasks (nora_tasks.json at project root).
+  enabled: true
+
+# ── Sprint 3: Dev Mode (Voice-Native Developer Tools) ─────────────────────────
+
+terminal_monitor:
+  # Clipboard watcher — alerts when copied text looks like a stack trace.
+  enabled: true
+
+repo_context:
+  # Repo-Aware Context Pack — auto-injected into system prompt.
+  # cache_ttl_sec: how long to cache git metadata between LLM calls.
+  enabled: true
+  cache_ttl_sec: 30

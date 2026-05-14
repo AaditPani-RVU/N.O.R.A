@@ -1,4 +1,4 @@
-﻿"""Cognitive Memory System v2 â€” Semantic + Episodic memory engine.
+"""Cognitive Memory System v2 -- Semantic + Episodic memory engine.
 
 Architecture:
   - ChromaDB persistent store (local, no cloud)
@@ -35,7 +35,7 @@ _USER_MODEL_PATH = _ROOT / "nora_user_model.json"
 
 _lock = threading.RLock()
 
-# â”€â”€ Lazy singletons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Lazy singletons â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 _chroma_client = None
 _episodes_col = None
@@ -55,7 +55,7 @@ def _get_embedder():
         _embedder_ready = True
         logger.info("Embedder loaded: all-MiniLM-L6-v2")
     except Exception as e:
-        logger.warning("sentence-transformers unavailable (%s) â€” using TF-IDF fallback", e)
+        logger.warning("sentence-transformers unavailable (%s) -- using TF-IDF fallback", e)
         _embedder = None
         _embedder_ready = True
     return _embedder
@@ -97,16 +97,16 @@ def _get_collections():
             "knowledge",
             metadata={"hnsw:space": "cosine"},
         )
-        logger.info("ChromaDB loaded â€” episodes: %d, knowledge: %d",
+        logger.info("ChromaDB loaded -- episodes: %d, knowledge: %d",
                     _episodes_col.count(), _knowledge_col.count())
     except Exception as e:
-        logger.error("ChromaDB init failed: %s â€” cognitive memory degraded", e)
+        logger.error("ChromaDB init failed: %s -- cognitive memory degraded", e)
         _episodes_col = None
         _knowledge_col = None
     return _episodes_col, _knowledge_col
 
 
-# â”€â”€ User Model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ User Model â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 _user_model: dict[str, Any] | None = None
 
@@ -187,7 +187,7 @@ def _update_user_model(actions: list[str], active_apps: list[str], ts: float) ->
     _save_user_model()
 
 
-# â”€â”€ Public API â€” Episode recording â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Public API -- Episode recording â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def record_episode(
     text: str,
@@ -265,7 +265,7 @@ def record_knowledge(text: str, source: str = "ambient", tags: list[str] | None 
             logger.warning("Knowledge recording failed: %s", e)
 
 
-# â”€â”€ Public API â€” Retrieval â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Public API -- Retrieval â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def semantic_search(query: str, n: int = 5, collection: str = "both") -> list[dict[str, Any]]:
     """Semantic similarity search. collection = 'episodes' | 'knowledge' | 'both'."""
@@ -330,7 +330,7 @@ def get_context_for_prompt(current_text: str = "", n: int = 3) -> dict[str, Any]
     }
 
 
-# â”€â”€ Behavioral pattern analysis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Behavioral pattern analysis â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def get_behavioral_patterns() -> list[dict[str, Any]]:
     """Extract human-readable behavioral patterns from user model."""

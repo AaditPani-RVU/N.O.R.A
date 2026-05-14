@@ -10,7 +10,7 @@ from nora.command_engine import register
 logger = logging.getLogger("nora.commands.file_operations")
 
 
-@register("create_file")
+@register("create_file", sig="create_file(path: str, content: str)", category="file")
 def create_file(path: str, content: str = "") -> str:
     """Create a file with optional content."""
     p = Path(path)
@@ -19,7 +19,8 @@ def create_file(path: str, content: str = "") -> str:
     return f"Created file: {p}"
 
 
-@register("delete_file")
+@register("delete_file", sig="delete_file(path: str)", description="requires_confirmation: true",
+           risk="high", requires_confirmation=True, category="file")
 def delete_file(path: str) -> str:
     """Delete a file or directory. Requires confirmation."""
     p = Path(path)
@@ -34,7 +35,7 @@ def delete_file(path: str) -> str:
     return f"Cannot delete: {p}"
 
 
-@register("move_file")
+@register("move_file", sig="move_file(source: str, destination: str)", risk="medium", category="file")
 def move_file(source: str, destination: str) -> str:
     """Move or rename a file/directory."""
     src = Path(source)
@@ -46,7 +47,7 @@ def move_file(source: str, destination: str) -> str:
     return f"Moved {src} to {dst}"
 
 
-@register("list_files")
+@register("list_files", sig="list_files(path: str)", category="file")
 def list_files(path: str = ".") -> str:
     """List files and directories at the given path."""
     p = Path(path)

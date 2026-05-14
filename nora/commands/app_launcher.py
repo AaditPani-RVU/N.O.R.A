@@ -30,7 +30,10 @@ APP_MAP: dict[str, str] = {
 }
 
 
-@register("open_app")
+@register("open_app",
+           sig='open_app(name: str)',
+           description='examples: "chrome", "notepad", "vscode", "terminal", "explorer", "spotify"',
+           category="app")
 def open_app(name: str) -> str:
     """Open an application by friendly name."""
     name_lower = name.lower().strip()
@@ -52,7 +55,7 @@ def open_app(name: str) -> str:
         return f"Could not open {name}: {e}"
 
 
-@register("close_app")
+@register("close_app", sig="close_app(name: str)", category="app")
 def close_app(name: str) -> str:
     """Close an application by name using taskkill."""
     name_lower = name.lower().strip()

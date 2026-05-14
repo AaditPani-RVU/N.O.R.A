@@ -21,7 +21,8 @@ def _ensure_notes_dir() -> Path:
     return _NOTES_DIR
 
 
-@register("quick_note")
+@register("quick_note", sig='quick_note(content: str, title: str = "")',
+           description="Save a note to ~/Documents/NORA Notes/", category="focus")
 def quick_note(content: str, title: str = "") -> str:
     notes_dir = _ensure_notes_dir()
     now = datetime.datetime.now()
@@ -41,7 +42,8 @@ def quick_note(content: str, title: str = "") -> str:
         return f"Note created: {content[:60]}{'…' if len(content) > 60 else ''}."
 
 
-@register("daily_briefing")
+@register("daily_briefing", sig="daily_briefing()",
+           description="Speak time, battery, memory, today's note count", category="focus")
 def daily_briefing() -> str:
     now = datetime.datetime.now()
     hour = now.hour

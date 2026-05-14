@@ -29,46 +29,42 @@ The name is literal: **Never Off, Rarely Asked** — the proactive intelligence 
 ## Architecture
 
 ```
-  Voice / Text Input
+  User input  (voice · text · WhatsApp · UI)
          │
          ▼
-  ┌─────────────────┐
-  │  Whisper STT    │  faster-whisper · local GPU · distil-small.en
-  └────────┬────────┘
+  ┌──────────────────────────────────────────────────────┐
+  │  NEUROSYM GUARD  ─── input stage                     │
+  │  PromptInjectionRule · 9 attack categories · <1ms    │
+  │  Blocks adversarial commands before LLM sees them    │
+  └────────┬─────────────────────────────────────────────┘
            │
            ▼
-  ┌─────────────────────────────────────────────────────┐
-  │  NeuroSym Input Guard                               │  ← your voice is untrusted input
-  │  PromptInjectionRule · 9 attack categories · <1ms   │
-  └────────┬──────────────────────────────────────────--┘
+  ┌──────────────────────────────────────────────────────┐
+  │  LLM INTENT PARSER                                   │
+  │  Natural language  →  structured JSON action plan    │
+  │  Groq · Claude · Ollama  (provider-agnostic)         │
+  └────────┬─────────────────────────────────────────────┘
            │
            ▼
-  ┌─────────────────┐
-  │  Intent Parser  │  Groq · Claude · Ollama (provider-agnostic)
-  └────────┬────────┘
+  ┌──────────────────────────────────────────────────────┐
+  │  SEMANTIC MEMORY  (ChromaDB + RAG)                   │
+  │  all-MiniLM-L6-v2 embeddings · episodic + knowledge  │
+  │  Behavioral model · proactive suggestions            │
+  └────────┬─────────────────────────────────────────────┘
            │
            ▼
-  ┌─────────────────────────────────────────────────────┐
-  │  NeuroSym Action Guard                              │
-  │  destructive_needs_confirmation · max_steps(15)     │
-  │  no_path_outside_sandbox · full audit trace         │
-  └────────┬──────────────────────────────────────────--┘
+  ┌──────────────────────────────────────────────────────┐
+  │  NEUROSYM GUARD  ─── action stage                    │
+  │  destructive_needs_confirmation · max_steps(15)      │
+  │  no_path_outside_sandbox · full audit trace          │
+  └────────┬─────────────────────────────────────────────┘
            │
            ▼
-  ┌─────────────────┐
-  │  Command Engine │  20+ built-in actions · plugin support
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Windows API /  │  pyautogui · pywin32 · subprocess
-  │  System Calls   │
-  └────────┬────────┘
-           │
-           ▼
-  ┌─────────────────┐
-  │  Edge TTS       │  en-GB-SoniaNeural · streaming · no latency
-  └─────────────────┘
+  ┌──────────────────────────────────────────────────────┐
+  │  ACTION ENGINE  +  TTS RESPONSE                      │
+  │  20+ built-in actions · plugin support               │
+  │  pyautogui · pywin32 · edge-tts en-GB-RyanNeural     │
+  └──────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -243,7 +239,7 @@ def brew_coffee(parameters: dict) -> str:
 | 1 — Core pipeline | ✅ Done | Voice → Intent → Action → TTS |
 | 2 — Cognitive Memory | ✅ Done | Semantic store, episodic memory, proactive engine |
 | 5 — Security | ✅ Done | NeuroSym-AI input + action guardrails |
-| 3 — Screen Intelligence | 🔄 In progress | OCR, UI element detection, context from screen |
+| 3 — Screen Intelligence | ✅ Done | OCR, click-by-description, code explanation, clipboard extraction, screen monitor |
 | 4 — Autonomous Planning | 🔜 Planned | Multi-step goal decomposition, long-horizon tasks |
 
 ---

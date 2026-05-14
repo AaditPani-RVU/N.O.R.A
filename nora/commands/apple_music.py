@@ -1,9 +1,9 @@
-﻿"""Apple Music control for NORA â€” keyboard-driven, no mouse coordinates.
+"""Apple Music control for NORA -- keyboard-driven, no mouse coordinates.
 
 Strategy (in order of reliability):
-  1. Media keys (play/pause/next/prev) â€” global, no window focus needed
+  1. Media keys (play/pause/next/prev) -- global, no window focus needed
   2. Window focus via pygetwindow for search
-  3. Ctrl+F â†’ type â†’ Enter to search in the desktop app
+  3. Ctrl+F â†' type â†' Enter to search in the desktop app
   4. Fallback: open web player URL if app window not found
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ _APP_TITLES = ("Apple Music", "iTunes")
 _WEB_URL    = "https://music.apple.com/"
 
 
-# â”€â”€ Window helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Window helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _find_window():
     """Return the first Apple Music / iTunes window, or None."""
@@ -51,8 +51,8 @@ def _focus_or_open() -> bool:
         except Exception as exc:
             logger.warning("Could not activate window: %s", exc)
 
-    # App not open â€” launch web player and re-check
-    logger.info("Apple Music window not found â€” opening web player")
+    # App not open -- launch web player and re-check
+    logger.info("Apple Music window not found -- opening web player")
     webbrowser.open(_WEB_URL)
     time.sleep(3.5)
 
@@ -67,7 +67,7 @@ def _focus_or_open() -> bool:
     return False
 
 
-# â”€â”€ Media key helpers (global â€” no window focus required) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Media key helpers (global -- no window focus required) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _media_key(key: str) -> bool:
     """Send a media key via pyautogui. Returns True on success."""
@@ -81,14 +81,14 @@ def _media_key(key: str) -> bool:
         return False
 
 
-# â”€â”€ Search flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Search flow â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _search_and_play(query: str) -> None:
     """Focus Apple Music, search, select first autocomplete result, play.
 
     Key insight: use Down+Enter BEFORE pressing Enter on the search bar.
     This picks from the autocomplete dropdown while focus is still in the
-    search input â€” so Down moves through suggestions, not the page.
+    search input -- so Down moves through suggestions, not the page.
     """
     import pyautogui
     pyautogui.FAILSAFE = False
@@ -99,7 +99,7 @@ def _search_and_play(query: str) -> None:
     pyautogui.hotkey("ctrl", "f")
     time.sleep(0.4)
 
-    # Clear and type â€” do NOT press Enter yet
+    # Clear and type -- do NOT press Enter yet
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.1)
     pyautogui.write(query, interval=0.05)
@@ -117,7 +117,7 @@ def _search_and_play(query: str) -> None:
     pyautogui.press("enter")
     time.sleep(3.0)  # wait for results page to load if needed
 
-    # On the results page the first song is usually auto-focused â€”
+    # On the results page the first song is usually auto-focused --
     # pressing Enter again plays it. Harmless if already playing.
     pyautogui.press("enter")
     time.sleep(0.3)
@@ -126,15 +126,15 @@ def _search_and_play(query: str) -> None:
     _media_key("playpause")
 
 
-# â”€â”€ Registered commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Registered commands â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-@register("open_apple_music")
+@register("open_apple_music", sig="open_apple_music()", category="apple_music")
 def open_apple_music() -> str:
     _focus_or_open()
     return "Opening Apple Music."
 
 
-@register("apple_music_play_song")
+@register("apple_music_play_song", sig="apple_music_play_song(song: str)", category="apple_music")
 def apple_music_play_song(song: str) -> str:
     if not song:
         return "Please tell me which song to play."
@@ -143,7 +143,7 @@ def apple_music_play_song(song: str) -> str:
     return f"Playing {song} on Apple Music."
 
 
-@register("apple_music_play_artist")
+@register("apple_music_play_artist", sig="apple_music_play_artist(artist: str)", category="apple_music")
 def apple_music_play_artist(artist: str) -> str:
     if not artist:
         return "Please tell me which artist to play."
@@ -152,20 +152,20 @@ def apple_music_play_artist(artist: str) -> str:
     return f"Playing music by {artist} on Apple Music."
 
 
-@register("apple_music_pause")
+@register("apple_music_pause", sig="apple_music_pause()", category="apple_music")
 def apple_music_pause() -> str:
-    """Toggle play/pause via global media key â€” no window focus needed."""
+    """Toggle play/pause via global media key -- no window focus needed."""
     _media_key("playpause")
     return "Toggled playback."
 
 
-@register("apple_music_next_track")
+@register("apple_music_next_track", sig="apple_music_next_track()", category="apple_music")
 def apple_music_next_track() -> str:
     _media_key("nexttrack")
     return "Next track."
 
 
-@register("apple_music_previous_track")
+@register("apple_music_previous_track", sig="apple_music_previous_track()", category="apple_music")
 def apple_music_previous_track() -> str:
     _media_key("prevtrack")
     return "Previous track."

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -6,13 +6,13 @@ import re
 
 import requests
 
-from nora.command_engine import get_available_actions
+from nora.command_engine import get_available_actions, get_action_signatures
 from nora.config import get_config
 from nora.schemas import IntentResponse
 
 logger = logging.getLogger("nora.intent_parser")
 
-SYSTEM_PROMPT_TEMPLATE = """You are NORA â€” a high-performance, local, voice-controlled AI operating system.
+SYSTEM_PROMPT_TEMPLATE = """You are NORA — a high-performance, local, voice-controlled AI operating system.
 
 You are NOT a chatbot. You are an execution engine. Your purpose:
 1. Understand user intent with precision
@@ -22,7 +22,7 @@ You are NOT a chatbot. You are an execution engine. Your purpose:
 
 CORE EXECUTION RULES
 - ALWAYS return strictly valid JSON. No prose, no markdown fences, no explanation.
-- NEVER hallucinate actions â€” only use the registered commands below.
+- NEVER hallucinate actions — only use the registered commands below.
 - Prefer the smallest number of steps. Combine actions intelligently.
 - If the command is ambiguous, return a clarification instead of guessing.
 
@@ -34,68 +34,35 @@ EFFICIENCY
 
 CONTEXT AWARENESS
 - Active apps, current music state (track/artist/source/status), PTT mode, and recent
-  commands are maintained by the runtime. You don't need to ask â€” the runtime fills gaps.
+  commands are maintained by the runtime. You don't need to ask — the runtime fills gaps.
 - For "play something" with no details, emit play_music with empty parameters;
   the runtime substitutes the user's preferred track.
 
 INPUT / PTT
-- PTT is toggled in real time by voice. "Enable push to talk" â†’ set_ptt_mode(true).
-  "Disable push to talk" / "turn off push to talk" â†’ set_ptt_mode(false).
+- PTT is toggled in real time by voice. "Enable push to talk" â†' set_ptt_mode(true).
+  "Disable push to talk" / "turn off push to talk" â†' set_ptt_mode(false).
 
 INTERRUPTION
-- "stop", "cancel", "pause everything", "shut up" â†’ stop_all().
+- "stop", "cancel", "pause everything", "shut up" â†' stop_all().
   This halts TTS, stops music, and clears pending steps.
 
 MUSIC PRIORITY
-- play_music handles the chain automatically: local â†’ Apple Music COM â†’ Apple Music URI â†’ YouTube.
-- "resume music" â†’ resume_music().
+- play_music handles the chain automatically: local â†' Apple Music COM â†' Apple Music URI â†' YouTube.
+- "resume music" â†' resume_music().
 - For a specific song/artist on Apple Music, use apple_music_play_song / apple_music_play_artist.
 
-RESPONSE FORMAT (exactly one of these three shapes):
+RESPONSE FORMAT (exactly one of these four shapes):
   Execution plan: {{"intent": "...", "steps": [{{"action": "name", "parameters": {{}}}}], "requires_confirmation": false}}
   Clarification:  {{"intent": "clarify", "steps": [], "error": "..."}}
   System message: {{"intent": "...", "steps": [], "error": null}}
+  Conversation:   {{"intent": "chat", "steps": [], "response": "your spoken reply", "error": null}}
+
+Use the Conversation shape for greetings, small talk, or questions that need a spoken answer but no action.
 
 Available actions: {actions}
 
 Action parameter signatures:
-- open_app(name: str)                  examples: "chrome", "notepad", "vscode", "terminal", "explorer", "spotify"
-- close_app(name: str)
-- type_text(text: str)
-- press_keys(keys: str)                e.g. "ctrl+s", "alt+tab", "enter"
-- create_file(path: str, content: str)
-- delete_file(path: str)               requires_confirmation: true
-- move_file(source: str, destination: str)
-- list_files(path: str)
-- web_search(query: str)               ONLY when user says "search for" / "google". Opens browser silently.
-- open_url(url: str)
-- get_system_info()
-- get_time()
-- set_volume(level: int)               0-100
-- take_screenshot()
-- lock_screen()
-- tell_me_about(query: str)            Research + SPEAK aloud. Use for "tell me about", "what is", "who is".
-- ask_claude(question: str)            Ask Claude + SPEAK. Use for coding/opinion/advice.
-- daddys_home()                        "daddy's home" welcome
-- play_music(track: str, artist: str)  Priority-chain playback (local â†’ Apple Music â†’ YouTube)
-- resume_music()                       Resume last-played / paused track
-- stop_music()
-- pause_music()
-- stop_all()                           Kill TTS + music + pending steps â€” use for "stop", "cancel", "pause everything"
-- speaker_stop()                       Stop only the TTS utterance
-- set_ptt_mode(enabled: bool)          Toggle push-to-talk at runtime
-- get_ptt_mode()
-- open_apple_music()
-- apple_music_play_song(song: str)
-- apple_music_play_artist(artist: str)
-- apple_music_pause()
-- apple_music_next_track()
-- apple_music_previous_track()
-- recall(query: str)                Search the personal knowledge base for past commands or things said.
-- semantic_recall(query: str)       Deep semantic similarity search over all memory (smarter than recall)
-- show_patterns()                   Show user's behavioral patterns (time-of-day habits, workflows)
-- inject_knowledge(text: str)       Store a fact or note in memory permanently
-- memory_status()                   Show cognitive memory statistics
+{action_signatures}
 
 Examples:
 User: "open chrome"
@@ -152,6 +119,12 @@ User: "delete test.txt"
 User: "daddy's home"
 {{"intent": "greeting", "steps": [{{"action": "daddys_home", "parameters": {{}}}}], "requires_confirmation": false}}
 
+User: "hello how are you"
+{{"intent": "chat", "steps": [], "response": "Doing well, sir. Ready for your commands.", "error": null}}
+
+User: "are you there"
+{{"intent": "chat", "steps": [], "response": "Always here, sir. What do you need?", "error": null}}
+
 User: "what did I say about the auth bug"
 {{"intent": "recall past notes", "steps": [{{"action": "recall", "parameters": {{"query": "auth bug"}}}}], "requires_confirmation": false}}
 
@@ -162,8 +135,11 @@ CRITICAL: Return ONLY the JSON object. No explanation, no markdown fences, no ex
 
 
 def _build_system_prompt(memory_ctx: dict | None = None) -> str:
-    actions = ", ".join(get_available_actions())
-    prompt = SYSTEM_PROMPT_TEMPLATE.format(actions=actions)
+    action_set = set(get_available_actions())
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        actions=", ".join(action_set),
+        action_signatures=get_action_signatures(),
+    )
 
     if not memory_ctx:
         return prompt
@@ -172,7 +148,7 @@ def _build_system_prompt(memory_ctx: dict | None = None) -> str:
 
     music = memory_ctx.get("preferred_music", {})
     if music.get("track") or music.get("artist"):
-        lines.append(f"- Preferred music: {music.get('artist', '').strip()} â€” {music.get('track', '').strip()}")
+        lines.append(f"- Preferred music: {music.get('artist', '').strip()} — {music.get('track', '').strip()}")
 
     top_apps = memory_ctx.get("top_apps", [])
     if top_apps:
@@ -196,8 +172,37 @@ def _build_system_prompt(memory_ctx: dict | None = None) -> str:
     if relevant:
         lines.append(f"- Relevant past context: {' | '.join(relevant[:2])}")
 
+    # Inject user card from User Model Layer
+    try:
+        from nora.user_model import format_user_card_for_prompt
+        user_card = format_user_card_for_prompt()
+        if user_card:
+            lines.extend(user_card.splitlines())
+    except Exception:
+        pass
+
     if lines:
-        prompt += "\n\nUSER PROFILE (use to personalize â€” do not echo back):\n" + "\n".join(lines)
+        prompt += "\n\nUSER PROFILE (use to personalize — do not echo back):\n" + "\n".join(lines)
+
+    # Inject repo context pack (branch, dirty files, recent commits)
+    try:
+        from nora.repo_context import format_for_prompt as _repo_fmt
+        repo_block = _repo_fmt()
+        if repo_block:
+            prompt += "\n\n" + repo_block
+    except Exception:
+        pass
+
+    session_turns = memory_ctx.get("session_turns", [])
+    if session_turns:
+        turn_lines = ["RECENT SESSION (use for follow-up commands like 'do that again', 'fix the error'):"]
+        for turn in reversed(session_turns):
+            status = "[ok]" if turn.get("success") else "[fail]"
+            line = f'  {status} User: "{turn["text"]}" -> {turn["intent"]}'
+            if not turn.get("success") and turn.get("result_summary"):
+                line += f' [ERROR: {turn["result_summary"]}]'
+            turn_lines.append(line)
+        prompt += "\n\n" + "\n".join(turn_lines)
 
     return prompt
 
@@ -225,10 +230,21 @@ def _extract_json(text: str) -> dict:
 
 
 def check_ollama_connection() -> bool:
-    """Check if Ollama is reachable (only relevant when provider=ollama)."""
+    """Verify the configured LLM backend is reachable/configured before starting."""
+    import os
     cfg = get_config().get("llm", {})
-    if cfg.get("provider", "ollama") == "claude":
-        return True  # Claude API availability checked at call time
+    provider = cfg.get("provider", "ollama").lower()
+
+    if provider == "claude":
+        return True  # checked at call time via ANTHROPIC_API_KEY
+
+    if provider == "groq":
+        if not os.environ.get("GROQ_API_KEY", ""):
+            logger.error("GROQ_API_KEY is not set. Add it to your .env file.")
+            return False
+        return True  # actual connectivity verified on first call
+
+    # Ollama — check the local server is up
     base_url = cfg.get("base_url", "http://localhost:11434")
     try:
         resp = requests.get(f"{base_url}/api/tags", timeout=5)
@@ -319,7 +335,11 @@ def _parse_via_claude(text: str, cfg: dict, memory_ctx: dict | None = None) -> I
                 msg = client.messages.create(
                     model=model,
                     max_tokens=max_tokens,
-                    system=system_prompt,
+                    system=[{
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
                 )

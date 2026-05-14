@@ -8,7 +8,7 @@ from nora.commands.system_info import get_system_info, get_time
 logger = logging.getLogger("nora.commands.greetings")
 
 
-@register("daddys_home")
+@register("daddys_home", sig="daddys_home()", description='"daddy\'s home" welcome')
 def daddys_home() -> str:
     """Respond to the 'daddy's home' activation phrase with a status briefing."""
     time_info = get_time()

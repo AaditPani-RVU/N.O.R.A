@@ -11,7 +11,8 @@ def setup_logger() -> logging.Logger:
     level = getattr(logging, cfg.get("level", "INFO").upper(), logging.INFO)
     log_file = cfg.get("file", "nora.log")
 
-    logger = logging.getLogger("NORA")
+    # "nora" is the parent of every nora.* module logger — one handler catches all
+    logger = logging.getLogger("nora")
     logger.setLevel(level)
 
     if not logger.handlers:

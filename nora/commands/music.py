@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import threading
@@ -11,7 +11,7 @@ from nora.config import get_config
 
 logger = logging.getLogger("nora.commands.music")
 
-# â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Config â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 TRACK_NAME   = "Should I Stay or Should I Go"
 ARTIST_NAME  = "The Clash"
@@ -20,13 +20,13 @@ ARTIST_NAME  = "The Clash"
 # Accepted filenames (case-insensitive, any order):
 #   should i stay or should i go.mp3
 #   the clash - should i stay.mp3
-#   should_i_stay.mp3   â€¦ etc.
+#   should_i_stay.mp3   --¦ etc.
 SOUNDS_DIR   = Path(__file__).parent.parent.parent / "sounds"
 
 # Keywords that must all appear in the filename for it to match
 _MATCH_WORDS = {"should", "stay", "go"}
 
-# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _wake_limit_ms() -> int:
     """Return the configured wake-triggered playback cap in milliseconds."""
@@ -72,7 +72,7 @@ def _play_local_limited(path: Path, duration_ms: int) -> None:
         "Playing local file (limited to %.0fs): %s", seconds, path.name
     )
 
-    # â”€â”€ pydub + simpleaudio (spec-preferred) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ pydub + simpleaudio (spec-preferred) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try:
         from pydub import AudioSegment          # type: ignore
         import simpleaudio as sa                 # type: ignore
@@ -100,7 +100,7 @@ def _play_local_limited(path: Path, duration_ms: int) -> None:
     except Exception as exc:
         logger.warning("pydub playback failed (%s); using pygame timed stop", exc)
 
-    # â”€â”€ pygame fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ pygame fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     import pygame
     pygame.mixer.init()
     pygame.mixer.music.load(str(path))
@@ -126,7 +126,7 @@ def _play_local(path: Path, wake_triggered: bool = False) -> None:
         _play_local_full(path)
 
 
-# â”€â”€ Iron Man entrance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Iron Man entrance â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def iron_man_entrance() -> None:
     """Play the wake-up track when the wake phrase is spoken.
@@ -136,9 +136,9 @@ def iron_man_entrance() -> None:
     (default 10 s) because this is always a wake-triggered event.
 
     Strategy (in order):
-      1. Local MP3 in  d:/JARVIS/sounds/  â€” instant, no browser
-      2. iTunes COM   â€” if classic iTunes is installed
-      3. YouTube      â€” always available, opens in default browser
+      1. Local MP3 in  d:/JARVIS/sounds/  -- instant, no browser
+      2. iTunes COM   -- if classic iTunes is installed
+      3. YouTube      -- always available, opens in default browser
     """
     thread = threading.Thread(
         target=_entrance_worker, daemon=True, name="iron-man-entrance"
@@ -147,11 +147,11 @@ def iron_man_entrance() -> None:
 
 
 def _entrance_worker() -> None:
-    # â”€â”€ Strategy 1: local file (fastest, best) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Strategy 1: local file (fastest, best) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     local = _find_local_track()
     if local is not None:
         try:
-            # Entrance is always wake-triggered â†’ enforce playback limit
+            # Entrance is always wake-triggered â†' enforce playback limit
             _play_local(local, wake_triggered=True)
             context.update_music(
                 track=local.stem, artist=ARTIST_NAME,
@@ -162,12 +162,12 @@ def _entrance_worker() -> None:
             logger.warning("Local playback failed (%s), trying next strategy", exc)
     else:
         logger.info(
-            "No local track found in %s â€” "
-            "drop an MP3 there to enable offline playback. Trying YouTubeâ€¦",
+            "No local track found in %s -- "
+            "drop an MP3 there to enable offline playback. Trying YouTube--¦",
             SOUNDS_DIR,
         )
 
-    # â”€â”€ Strategy 2: iTunes COM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Strategy 2: iTunes COM â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try:
         _play_via_itunes_com()
         logger.info("Iron Man entrance: playing via iTunes COM")
@@ -175,7 +175,7 @@ def _entrance_worker() -> None:
     except Exception as exc:
         logger.warning("iTunes COM unavailable (%s), falling back to YouTube", exc)
 
-    # â”€â”€ Strategy 3: YouTube in browser â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ Strategy 3: YouTube in browser â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try:
         _play_via_youtube()
         logger.info("Iron Man entrance: playing via YouTube")
@@ -183,7 +183,7 @@ def _entrance_worker() -> None:
         logger.error("All music strategies failed: %s", exc)
 
 
-# â”€â”€ Strategy implementations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Strategy implementations â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 def _play_via_itunes_com() -> None:
     """Try Apple Music (new app) then classic iTunes COM."""
@@ -213,7 +213,7 @@ def _play_via_itunes_com() -> None:
         if ARTIST_NAME.lower() in t.Artist.lower():
             chosen = t
             break
-    logger.info("Playing via COM: %s â€” %s", chosen.Name, chosen.Artist)
+    logger.info("Playing via COM: %s -- %s", chosen.Name, chosen.Artist)
     chosen.Play()
 
 
@@ -235,9 +235,10 @@ def _play_via_youtube() -> None:
     pyautogui.click(click_x, click_y)
 
 
-# â”€â”€ Registered voice commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â"€â"€ Registered voice commands â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-@register("play_music")
+@register("play_music", sig="play_music(track: str, artist: str)",
+           description="Priority-chain playback (local -> Apple Music -> YouTube)", category="music")
 def play_music(track: str = "", artist: str = "") -> str:
     """Play a track with the priority chain:
 
@@ -253,7 +254,7 @@ def play_music(track: str = "", artist: str = "") -> str:
     """
     wake = context.wake_triggered
 
-    # "play something" / empty â†’ use preferred or Iron-Man default
+    # "play something" / empty â†' use preferred or Iron-Man default
     if not track:
         pref = memory.get_preferred_music()
         if pref.get("track"):
@@ -269,7 +270,7 @@ def play_music(track: str = "", artist: str = "") -> str:
     ):
         return f"{current['track']} is already playing."
 
-    # â”€â”€ 1. Local file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ 1. Local file â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     if track.lower() in TRACK_NAME.lower() or track.lower() == "default":
         local = _find_local_track()
         if local:
@@ -285,7 +286,7 @@ def play_music(track: str = "", artist: str = "") -> str:
             except Exception as exc:
                 logger.warning("Local playback failed: %s", exc)
 
-    # â”€â”€ 2. Apple Music / iTunes COM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ 2. Apple Music / iTunes COM â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try:
         import win32com.client
 
@@ -301,7 +302,7 @@ def play_music(track: str = "", artist: str = "") -> str:
         if itunes is not None:
             results = itunes.LibraryPlaylist.Search(track, 5)
             if results is None or results.Count == 0:
-                logger.warning("'%s' not found in Apple Music library â€” trying URI fallback", track)
+                logger.warning("'%s' not found in Apple Music library -- trying URI fallback", track)
             else:
                 chosen = results.Item(1)
                 if artist:
@@ -331,9 +332,9 @@ def play_music(track: str = "", artist: str = "") -> str:
                     return f"Playing {chosen.Name} by {chosen.Artist} (10 s preview)."
                 return f"Playing {chosen.Name} by {chosen.Artist}."
     except Exception as exc:
-        logger.warning("Apple Music / iTunes COM error: %s â€” trying URI fallback", exc)
+        logger.warning("Apple Music / iTunes COM error: %s -- trying URI fallback", exc)
 
-    # â”€â”€ 3. Apple Music URI fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ 3. Apple Music URI fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try:
         import subprocess
         query = f"{track} {artist}".strip().replace(" ", "+")
@@ -347,9 +348,9 @@ def play_music(track: str = "", artist: str = "") -> str:
         memory.remember_music(track, artist, "apple_music_web")
         return f"Opening Apple Music for '{track}'."
     except Exception as exc:
-        logger.warning("URI fallback failed: %s â€” trying YouTube", exc)
+        logger.warning("URI fallback failed: %s -- trying YouTube", exc)
 
-    # â”€â”€ 4. YouTube fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # â"€â"€ 4. YouTube fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try:
         import webbrowser
         query = f"{track} {artist}".strip().replace(" ", "+")
@@ -367,10 +368,10 @@ def play_music(track: str = "", artist: str = "") -> str:
     return f"I couldn't play '{track}'."
 
 
-@register("resume_music")
+@register("resume_music", sig="resume_music()", description="Resume last-played / paused track", category="music")
 def resume_music() -> str:
     """Resume the last-played track (after a stop or pause)."""
-    # Paused pygame â†’ unpause
+    # Paused pygame â†' unpause
     try:
         import pygame
         if pygame.mixer.get_init() and not pygame.mixer.music.get_busy():
@@ -394,7 +395,7 @@ def resume_music() -> str:
     return play_music(track=track, artist=artist)
 
 
-@register("stop_music")
+@register("stop_music", sig="stop_music()", category="music")
 def stop_music() -> str:
     """Stop all music playback (local, iTunes, and pygame TTS-adjacent)."""
     stopped = False
@@ -422,7 +423,7 @@ def stop_music() -> str:
     return "Music stopped." if stopped else "Nothing was playing."
 
 
-@register("pause_music")
+@register("pause_music", sig="pause_music()", category="music")
 def pause_music() -> str:
     """Pause or resume music playback."""
     # Pygame pause/unpause

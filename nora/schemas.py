@@ -15,6 +15,7 @@ class IntentResponse(BaseModel):
     steps: list[ActionStep]
     requires_confirmation: bool = False
     error: str | None = None
+    response: str | None = None  # spoken reply for conversational inputs (no steps)
 
 
 class StepResult(BaseModel):

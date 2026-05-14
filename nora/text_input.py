@@ -1,4 +1,4 @@
-﻿"""Keyboard text input fallback â€” lets you type commands when mic is unavailable."""
+"""Keyboard text input fallback -- lets you type commands when mic is unavailable."""
 from __future__ import annotations
 
 import queue
@@ -14,7 +14,7 @@ _started = False
 
 def _stdin_reader() -> None:
     try:
-        print("[NORA] Text input active â€” type a command and press Enter:", flush=True)
+        print("[NORA] Text input active -- type a command and press Enter:", flush=True)
         for line in sys.stdin:
             text = line.strip()
             if text:
