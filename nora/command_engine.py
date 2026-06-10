@@ -63,7 +63,13 @@ def get_action_meta(action_name: str) -> CommandMeta | None:
 # Category ordering for prompt generation
 _MAIN_CATEGORIES = ("app", "file", "web", "system", "tts", "ptt", "music", "apple_music", "memory", "tasks", "notification", "workflow", "")
 _SCREEN_CATEGORY = "screen"
-_OPTIONAL_CATEGORIES = (("dev", "Developer Tools:"), ("focus", "Focus & Productivity:"))
+_OPTIONAL_CATEGORIES = (
+    ("dev", "Developer Tools:"),
+    ("observe", "System Observability (Linux):"),
+    ("time", "Time-Travel & Sessions (Linux):"),
+    ("focus", "Focus & Ambient (Linux):"),
+    ("mcp", "MCP Tools:"),
+)
 
 
 def _fmt(name: str, meta: CommandMeta) -> str:
@@ -108,7 +114,7 @@ def discover_commands() -> None:
         try:
             importlib.import_module(full_name)
             logger.debug(f"Loaded command module: {full_name}")
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"Failed to load command module {full_name}: {e}")
 
     # User plugins
@@ -125,7 +131,7 @@ def discover_commands() -> None:
         try:
             importlib.import_module(plugin_file.stem)
             logger.info(f"Loaded plugin: {plugin_file.name}")
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"Failed to load plugin {plugin_file.name}: {e}")
 
 
@@ -167,15 +173,44 @@ async def execute(intent: IntentResponse) -> list[StepResult]:
                 coro = loop.run_in_executor(None, lambda h=handler, p=params: h(**p))
             output = await asyncio.wait_for(coro, timeout=timeout)
             msg = output if isinstance(output, str) else "Done."
-            results.append(StepResult(action=action, success=True, message=msg))
+            result = StepResult(action=action, success=True, message=msg)
+            results.append(result)
+            _log_audit(action, params, msg, True, intent)
         except asyncio.TimeoutError:
             msg = f"Action '{action}' timed out after {timeout:.0f}s."
             logger.error(msg)
-            results.append(StepResult(action=action, success=False, message=msg))
+            result = StepResult(action=action, success=False, message=msg)
+            results.append(result)
+            _log_audit(action, params, msg, False, intent)
             break
         except Exception as e:
             logger.error(f"Action {action} failed: {e}")
-            results.append(StepResult(action=action, success=False, message=str(e)))
+            msg = str(e)
+            result = StepResult(action=action, success=False, message=msg)
+            results.append(result)
+            _log_audit(action, params, msg, False, intent)
             break
 
     return results
+
+
+def _log_audit(
+    action: str,
+    params: dict,
+    result_msg: str,
+    success: bool,
+    intent: "IntentResponse",
+) -> None:
+    """Fire-and-forget audit log write; never raises."""
+    try:
+        from nora import audit_log
+        user_text = getattr(intent, "_user_text", "")
+        audit_log.record(
+            action=action,
+            params=params,
+            result=result_msg,
+            success=success,
+            user_text=user_text,
+        )
+    except Exception:
+        pass

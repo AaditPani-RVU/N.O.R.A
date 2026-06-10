@@ -16,6 +16,8 @@ class IntentResponse(BaseModel):
     requires_confirmation: bool = False
     error: str | None = None
     response: str | None = None  # spoken reply for conversational inputs (no steps)
+    is_autonomous: bool = False  # set by pipeline when routed to ReAct planner
+    _user_text: str = ""         # set by pipeline for audit log attribution
 
 
 class StepResult(BaseModel):

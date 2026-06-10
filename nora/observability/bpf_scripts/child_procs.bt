@@ -1,0 +1,8 @@
+#!/usr/bin/env bpftrace
+// child_procs.bt — track process spawns (useful for "what launched that?")
+// Output: per-(parent,child) exec count; killed by runner after duration_sec.
+
+tracepoint:sched:sched_process_exec
+{
+    @spawns[comm, pid, args->filename] = count();
+}

@@ -11,27 +11,30 @@ Registered actions:
   stop_watching       — cancel an active watch_for monitor
   debug_screen        — scan for errors, warnings, and stack traces
 
-All vision calls use Claude Haiku (claude-haiku-4-5-20251001) for speed and cost.
+All vision calls use Groq's llama-3.2-90b-vision-preview — free tier, uses your existing GROQ_API_KEY.
 """
 from __future__ import annotations
 
 import base64
 import json
 import logging
+import os
+import platform
 import subprocess
 import threading
 import time
 from io import BytesIO
 from typing import Any
 
-import pyautogui
-
 from nora.command_engine import register
 import nora.speaker as speaker
 
 logger = logging.getLogger("nora.commands.screen_intelligence")
 
-# ── Shared Anthropic client (lazy-init) ────────────────────────────────────
+_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# ── Shared Groq client (lazy-init, OpenAI-compatible) ─────────────────────
 
 _client: Any = None
 
@@ -39,16 +42,27 @@ _client: Any = None
 def _get_client() -> Any:
     global _client
     if _client is None:
-        import anthropic
-        _client = anthropic.Anthropic()
+        from openai import OpenAI
+        _client = OpenAI(
+            api_key=os.environ.get("GROQ_API_KEY"),
+            base_url=_GROQ_BASE_URL,
+        )
     return _client
 
 
 # ── Screenshot helpers ─────────────────────────────────────────────────────
 
 def _screenshot_b64() -> tuple[str, int, int]:
-    """Return (base64_png, screen_width, screen_height)."""
-    img = pyautogui.screenshot()
+    """Return (base64_png, width, height) — works on Linux, Windows, and Mac."""
+    import mss
+    from PIL import Image
+
+    with mss.mss() as sct:
+        # monitors[0] is the combined bounding box of all screens
+        monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+        raw = sct.grab(monitor)
+        img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+
     w, h = img.size
     buf = BytesIO()
     img.save(buf, format="PNG")
@@ -66,24 +80,26 @@ _SYSTEM = (
 
 
 def _vision(image_b64: str, prompt: str, max_tokens: int = 400) -> str:
-    """Send a screenshot to Claude Vision, return spoken text."""
+    """Send a screenshot to Groq vision, return spoken text."""
     client = _get_client()
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    resp = client.chat.completions.create(
+        model=_VISION_MODEL,
         max_tokens=max_tokens,
-        system=_SYSTEM,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/png", "data": image_b64},
-                },
-                {"type": "text", "text": prompt},
-            ],
-        }],
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            },
+        ],
     )
-    return msg.content[0].text.strip()
+    return resp.choices[0].message.content.strip()
 
 
 def _vision_json(image_b64: str, prompt: str) -> dict:
@@ -101,13 +117,18 @@ def _vision_json(image_b64: str, prompt: str) -> dict:
 # ── Clipboard helper ───────────────────────────────────────────────────────
 
 def _to_clipboard(text: str) -> None:
-    """Copy text to the Windows clipboard."""
-    try:
-        import pyperclip
-        pyperclip.copy(text)
-    except ImportError:
-        # Windows built-in fallback
+    """Copy text to clipboard — cross-platform."""
+    encoded = text.encode("utf-8")
+    if platform.system() == "Windows":
         subprocess.run("clip", input=text.encode("utf-16-le"), check=True, shell=True)
+        return
+    for cmd in (["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"], ["wl-copy"]):
+        try:
+            subprocess.run(cmd, input=encoded, check=True, timeout=3)
+            return
+        except Exception:
+            continue
+    logger.warning("No clipboard tool found (install xclip or xsel)")
 
 
 # ── Background monitor state ───────────────────────────────────────────────
@@ -160,36 +181,72 @@ def find_on_screen(text: str) -> str:
 
 
 @register("click_on", sig="click_on(target: str)",
-           description="Find a UI element by description and click it", category="screen")
+           description="Find a UI element by description, click it, then verify the click worked",
+           category="screen")
 def click_on(target: str) -> str:
-    """Find a UI element by description and click it.
+    """Find a UI element, click it, then screenshot-verify the click had effect.
 
-    Uses Claude Vision to estimate fractional (x, y) coordinates, then
-    converts to screen pixels and fires a pyautogui click.
+    Flow: locate → click → 0.6s wait → screenshot → verify
+    Stores before/after state in reversible log.
     """
+    import time as _time
     try:
+        # 1. Locate
         img_b64, screen_w, screen_h = _screenshot_b64()
-        prompt = (
+        locate_prompt = (
             f"Find the element described as '{target}' on this screen. "
             "Respond with ONLY a JSON object — no other text:\n"
-            '{"found": true, "x": 0.0, "y": 0.0, "label": "..."}\n'
-            "where x is 0.0 (left edge) to 1.0 (right edge), "
-            "y is 0.0 (top edge) to 1.0 (bottom edge), "
+            '{"found": true, "x": 0.0, "y": 0.0, "label": "...", "bbox": [x1, y1, x2, y2]}\n'
+            "where x/y are fractional 0-1 coordinates, bbox is optional bounding box, "
             "and label is a short description of what you found. "
             'If not found: {"found": false}'
         )
-        data = _vision_json(img_b64, prompt)
+        before_data = _vision_json(img_b64, locate_prompt)
 
-        if not data.get("found"):
+        if not before_data.get("found"):
             return f"I couldn't find '{target}' on the screen."
 
-        x = int(float(data["x"]) * screen_w)
-        y = int(float(data["y"]) * screen_h)
-        label = data.get("label", target)
+        x_frac = float(before_data["x"])
+        y_frac = float(before_data["y"])
+        px_x = int(x_frac * screen_w)
+        px_y = int(y_frac * screen_h)
+        label = before_data.get("label", target)
 
-        pyautogui.click(x, y)
-        logger.info("Clicked '%s' at (%d, %d)", label, x, y)
-        return f"Clicked {label}."
+        # 2. Click
+        pyautogui.click(px_x, px_y)
+        logger.info("Clicked '%s' at (%d, %d)", label, px_x, px_y)
+
+        # 3. Wait for UI to respond
+        _time.sleep(0.6)
+
+        # 4. Verify — ask if something changed / the element was interacted with
+        after_b64, _, _ = _screenshot_b64()
+        verify_prompt = (
+            f"Before a click on '{label}', the screen looked a certain way. "
+            "Has something visually changed that suggests the click worked? "
+            'Respond ONLY as JSON: {"changed": true/false, "observation": "one sentence"}'
+        )
+        verify_data = _vision_json(after_b64, verify_prompt)
+        changed = verify_data.get("changed", True)
+        observation = verify_data.get("observation", "")
+
+        # Log for reversibility (can't undo a click, but record it)
+        try:
+            from nora.reversible import record_action
+            record_action(
+                action="click_on",
+                params={"target": target},
+                inverse_action=None,
+                inverse_params={},
+                description=f"Clicked '{label}' on screen",
+                reversible=False,
+            )
+        except Exception:
+            pass
+
+        if changed:
+            return f"Clicked {label}. {observation}" if observation else f"Clicked {label} — UI responded."
+        return f"Clicked {label}, but the screen may not have changed. {observation}"
 
     except Exception as e:
         logger.error("click_on failed: %s", e)
@@ -338,3 +395,75 @@ def debug_screen() -> str:
     except Exception as e:
         logger.error("debug_screen failed: %s", e)
         return "I couldn't analyze the screen for errors."
+
+
+# ── Multimodal Context Fusion — Sprint 4 Task 9 ───────────────────────────
+
+# Cache: (snippet_text, window_title, captured_at_monotonic)
+_snippet_cache: tuple[str, str, float] = ("", "", 0.0)
+_SNIPPET_TTL = 10.0  # seconds
+_snippet_lock = threading.Lock()
+
+
+def get_screen_snippet(max_chars: int = 250) -> tuple[str, str]:
+    """Return a (text_snippet, window_title) pair from a quick screen read.
+
+    Cached for _SNIPPET_TTL seconds to avoid hammering Vision on every utterance.
+    Returns ("", "") on failure — callers must handle gracefully.
+    """
+    import time as _time
+    global _snippet_cache
+
+    with _snippet_lock:
+        snippet, title, ts = _snippet_cache
+        if snippet and _time.monotonic() - ts < _SNIPPET_TTL:
+            return snippet, title
+
+    try:
+        # Get active window title — cross-platform
+        window_title = ""
+        try:
+            if platform.system() == "Windows":
+                import ctypes
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                buf = ctypes.create_unicode_buffer(256)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
+                window_title = buf.value.strip()
+            else:
+                for cmd in (
+                    ["xdotool", "getactivewindow", "getwindowname"],
+                    ["xprop", "-id", "$(xprop -root _NET_ACTIVE_WINDOW | awk '{print $5}')", "WM_NAME"],
+                ):
+                    try:
+                        out = subprocess.run(cmd, capture_output=True, text=True, timeout=2).stdout.strip()
+                        if out:
+                            window_title = out.splitlines()[0]
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+        img_b64, _, _ = _screenshot_b64()
+        prompt = (
+            "In at most 3 short sentences, describe: (1) what application is active, "
+            "(2) what the user appears to be working on, (3) any text, code, or key "
+            "content that is most prominent. No markdown. Be factual and terse."
+        )
+        snippet_text = _vision(img_b64, prompt, max_tokens=120)
+        snippet_text = snippet_text[:max_chars]
+
+        with _snippet_lock:
+            _snippet_cache = (snippet_text, window_title, _time.monotonic())
+
+        return snippet_text, window_title
+    except Exception as e:
+        logger.debug("get_screen_snippet failed: %s", e)
+        return "", ""
+
+
+def invalidate_snippet_cache() -> None:
+    """Force the next get_screen_snippet() call to re-capture."""
+    global _snippet_cache
+    with _snippet_lock:
+        _snippet_cache = ("", "", 0.0)

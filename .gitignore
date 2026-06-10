@@ -65,3 +65,10 @@ coverage.xml
 Thumbs.db
 desktop.ini
 .DS_Store
+ydotool/
+nora_session_state.json
+nora_tasks.json
+nora_audit_log.jsonl
+nora_consolidation_state.json
+nora_daily_brief.json
+.agents/

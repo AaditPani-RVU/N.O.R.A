@@ -1,7 +1,7 @@
 listener:
   push_to_talk_key: "ctrl+`"
   sample_rate: 16000
-  silence_timeout_sec: 1.5
+  silence_timeout_sec: 0.7
   max_record_sec: 15
   clap_detection:
     threshold: 0.08        # Audio peak level to count as a clap (lower = more sensitive)
@@ -66,7 +66,7 @@ proactive:
 timeouts:
   transcribe_sec: 30               # Max seconds for Whisper transcription before giving up
   llm_sec: 45                      # Max seconds for LLM intent parsing before giving up
-  command_sec: 15                  # Max seconds per command step execution
+  command_sec: 45                  # Max seconds per command step execution
 
 security:
   # Actions that are NEVER allowed regardless of what the LLM decides.
@@ -148,3 +148,100 @@ repo_context:
   # cache_ttl_sec: how long to cache git metadata between LLM calls.
   enabled: true
   cache_ttl_sec: 30
+
+# ── Sprint 4: Autonomous Planning & Trust ────────────────────────────────────
+
+anomaly_watchdog:
+  # Background system metrics monitor — speaks alert when threshold is crossed.
+  # Requires: pip install psutil  (pynvml optional for GPU metrics)
+  enabled: true
+  poll_sec: 30                   # How often to poll (seconds)
+  cpu_percent: 90                # Alert when CPU sustained above this %
+  ram_percent: 90                # Alert when RAM usage above this %
+  gpu_percent: 94                # Alert when GPU utilization above this %
+  gpu_vram_percent: 90           # Alert when GPU VRAM above this %
+  disk_write_mbps: 500           # Alert when disk write throughput above this MB/s
+
+planner:
+  # ReAct autonomous planner — observe → decide → act → verify loop.
+  # Activated when the user's utterance matches is_autonomous_task() heuristic.
+  enabled: true
+
+workflows:
+  # Dynamic workflow recording & replay.
+  # save_workflow(name) snapshots recent session turns as a named macro.
+  # run_workflow(name) replays the macro via command_engine.
+  enabled: true
+
+audit_log:
+  # Structured JSON-lines log of every action NORA takes.
+  # Stored at nora_audit_log.jsonl in the project root.
+  enabled: true
+
+reversible_actions:
+  # Record compensating inverses for state-changing actions.
+  # Voice: "undo the last thing you did" / "undo everything you did this morning"
+  enabled: true
+
+# ── Remote Mic (Mac → Windows bridge) ────────────────────────────────────────
+remote_mic:
+  # Accept microphone audio from a remote machine (e.g. a MacBook).
+  # Set enabled: true, then run nora_remote.py on the Mac:
+  #   python nora_remote.py --host <THIS_WINDOWS_IP> [--ptt]
+  # Find your Windows IP: run `ipconfig` in PowerShell → IPv4 Address (Wi-Fi).
+  # Windows Firewall: allow inbound TCP on the port below.
+  enabled: true
+  host: "0.0.0.0"    # bind to all interfaces so the Mac can reach it
+  port: 8767
+
+multimodal_context:
+  # Pre-attach active window title + OCR screen snippet to ambiguous commands.
+  # Only fires for commands containing deictic words ("this", "that", "here", etc.)
+  enabled: true
+
+# ── Sprint 5: Ecosystem Expansion ─────────────────────────────────────────────
+
+mcp_servers:
+  - name: playwright
+    transport: stdio
+    command: ["npx", "@playwright/mcp@latest"]
+
+  - name: github
+    transport: stdio
+    command: ["npx", "@modelcontextprotocol/server-github@latest"]
+    # GITHUB_TOKEN is inherited automatically from .env
+
+  - name: memory
+    transport: stdio
+    command: ["npx", "@modelcontextprotocol/server-memory@latest"]
+
+  - name: brave_search
+    transport: stdio
+    command: ["npx", "@modelcontextprotocol/server-brave-search@latest"]
+    # Requires BRAVE_API_KEY in .env — free at brave.com/search/api
+
+  - name: fetch
+    transport: stdio
+    command: ["uvx", "mcp-server-fetch"]
+
+  - name: obsidian
+    transport: stdio
+    command: ["npx", "mcp-obsidian", "C:/path/to/your/vault"]
+    # 1. Replace path with your actual Obsidian vault path (use forward slashes)
+    # 2. Install "Local REST API" community plugin in Obsidian
+    # 3. Add OBSIDIAN_API_KEY from plugin settings to .env
+
+websocket_api:
+  # Authenticated WebSocket API for mobile PTT, typed commands, and push notifications.
+  # Clients connect to ws://<host>:<port>
+  # Set NORA_API_TOKEN in .env to require token auth; leave unset for localhost-only access.
+  # Install dependency: pip install websockets
+  enabled: true
+  host: "0.0.0.0"
+  port: 8765
+
+persona:
+  # Persona Calibration — voice-tunable communication style.
+  # Settings are stored in nora_persona.json and applied to every response.
+  # Voice: "be more concise", "use a casual tone", "reset your persona"
+  enabled: true

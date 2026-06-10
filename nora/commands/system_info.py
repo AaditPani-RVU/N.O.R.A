@@ -27,7 +27,7 @@ def get_system_info() -> str:
 
     if battery:
         status = "charging" if battery.power_plugged else "on battery"
-        lines.append(f"Battery: {battery.percent}% ({status})")
+        lines.append(f"Battery: {round(battery.percent)}% ({status})")
 
     lines.append(f"OS: {platform.system()} {platform.release()}")
 

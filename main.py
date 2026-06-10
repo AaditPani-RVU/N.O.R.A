@@ -96,9 +96,11 @@ def main() -> None:
         asyncio.run(run())
     except KeyboardInterrupt:
         logger.info("Nora shut down by user.")
+    except Exception as e:
+        logger.exception(f"Nora crashed: {e}")
+        raise
     finally:
         logger.info("Nora process terminated.")
-        sys.exit(0)
 
 
 if __name__ == "__main__":

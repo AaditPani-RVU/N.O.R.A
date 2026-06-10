@@ -1,7 +1,9 @@
-"""Security layer -- action blocking and mandatory confirmation enforcement."""
+"""Security layer — action blocking, confirmation enforcement, and API auth."""
 from __future__ import annotations
 
 import logging
+import os
+
 from nora.config import get_config
 
 logger = logging.getLogger("nora.security")
@@ -30,3 +32,20 @@ def check_steps(steps) -> tuple[bool, bool]:
     blocked = any(is_blocked(s.action) for s in steps)
     confirm = any(needs_confirmation(s.action) for s in steps)
     return blocked, confirm
+
+
+# ---------------------------------------------------------------------------
+# WebSocket / REST API token auth (Sprint 5)
+# ---------------------------------------------------------------------------
+
+def check_api_token(provided: str) -> bool:
+    """Return True if the provided token matches NORA_API_TOKEN.
+
+    If NORA_API_TOKEN is not set in .env, the check always passes — suitable
+    for localhost-only deployments where network isolation is the security
+    boundary.
+    """
+    expected = os.environ.get("NORA_API_TOKEN", "")
+    if not expected:
+        return True
+    return provided == expected

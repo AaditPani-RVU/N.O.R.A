@@ -34,7 +34,13 @@ def transcribe(audio: np.ndarray) -> str:
     if audio.dtype != np.float32:
         audio = audio.astype(np.float32)
 
-    segments, info = model.transcribe(audio, beam_size=5, language="en")
+    segments, info = model.transcribe(
+        audio,
+        beam_size=1,
+        language="en",
+        vad_filter=True,
+        condition_on_previous_text=False,
+    )
 
     text_parts = []
     for segment in segments:

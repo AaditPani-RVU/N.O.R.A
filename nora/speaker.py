@@ -63,9 +63,31 @@ def _init_pygame() -> None:
 
 
 def _split_sentences(text: str) -> list[str]:
-    """Split text into sentence-sized chunks for pipelined playback."""
-    parts = re.split(r'(?<=[.!?;])\s+', text.strip())
-    return [p.strip() for p in parts if p.strip()]
+    """Split text into sentence-sized chunks for pipelined playback.
+
+    Merges short fragments (<60 chars) with the next sentence to avoid
+    one HTTP round-trip per full stop — the main cause of mid-speech gaps.
+    """
+    raw = re.split(r'(?<=[.!?;])\s+', text.strip())
+    parts = [p.strip() for p in raw if p.strip()]
+
+    merged: list[str] = []
+    carry = ""
+    for part in parts:
+        if carry:
+            carry = carry + " " + part
+        else:
+            carry = part
+        # Only flush when the accumulated chunk is long enough to justify a TTS call
+        if len(carry) >= 60:
+            merged.append(carry)
+            carry = ""
+    if carry:
+        if merged:
+            merged[-1] = merged[-1] + " " + carry  # attach trailing fragment to previous
+        else:
+            merged.append(carry)
+    return merged
 
 
 def speak(text: str, mood: str | None = None) -> None:

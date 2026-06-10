@@ -6,7 +6,7 @@ import threading
 
 import numpy as np
 
-from nora import ambient, cognitive_memory, command_engine, consolidation, context, intent_parser, memory, neurosym_guard, proactive, security, session_briefing, speaker, terminal_monitor, text_input, transcriber
+from nora import ambient, anomaly_watchdog, audit_log, cognitive_memory, command_engine, consolidation, context, intent_parser, memory, neurosym_guard, proactive, reversible, security, session_briefing, speaker, terminal_monitor, text_input, transcriber
 from nora import ack as _ack
 from nora import wakeword as _ww
 from nora.config import get_config
@@ -100,6 +100,53 @@ async def run() -> None:
 
     # Start terminal co-pilot clipboard watcher
     terminal_monitor.start(speak_callback=speaker.speak)
+
+    # Start anomaly watchdog (Sprint 4 #24 — background metrics alerts)
+    anomaly_watchdog.start(speak_callback=speaker.speak)
+
+    # Start remote mic server (accepts audio from e.g. a MacBook)
+    _remote_cfg = get_config().get("remote_mic", {})
+    if _remote_cfg.get("enabled", False):
+        from nora import remote_mic as _rmic
+        _rm_host = _remote_cfg.get("host", "0.0.0.0")
+        _rm_port = int(_remote_cfg.get("port", 8767))
+        _rmic.start(host=_rm_host, port=_rm_port)
+        print(f"[NORA] Remote mic server listening on {_rm_host}:{_rm_port}")
+
+    # Load MCP server tools (Sprint 5 — Ecosystem Expansion)
+    from nora import mcp_bridge as _mcp
+    _mcp.load_all()
+
+    # Linux flagship modules (F3/F4/F5 hooks) — no-op on non-Linux or missing deps
+    import sys as _sys
+    if _sys.platform.startswith("linux"):
+        try:
+            from nora.commands import why_engine as _we
+            _we.register_with_watchdog()
+        except Exception as _e:
+            logger.debug("why_engine hook skipped: %s", _e)
+        try:
+            from nora.commands import time_travel as _tt
+            _tt.register_with_reversible()
+        except Exception as _e:
+            logger.debug("time_travel hook skipped: %s", _e)
+        try:
+            from nora.commands import ambient_linux as _al
+            _al.register_with_wakeword()
+        except Exception as _e:
+            logger.debug("ambient_linux hook skipped: %s", _e)
+
+    # Start authenticated WebSocket API (Sprint 5)
+    _ws_cfg = get_config().get("websocket_api", {})
+    if _ws_cfg.get("enabled", True):
+        import os
+        from nora import ui_server as _ui
+        _ws_port = int(_ws_cfg.get("port", 8765))
+        _ws_token = os.environ.get("NORA_API_TOKEN", "")
+        _ws_url = _ui.start_ws(port=_ws_port, token=_ws_token)
+        if _ws_url:
+            auth_note = " (token auth enabled)" if _ws_token else " (no auth — localhost only)"
+            print(f"[NORA] WebSocket API: {_ws_url}{auth_note}")
 
     # â"€â"€ Activate immediately â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     context.wake_triggered = True
@@ -201,71 +248,135 @@ async def run() -> None:
                 speaker.speak("I'm already here, sir.")
                 continue
 
-            # 3. Build enriched memory context (legacy + cognitive) and parse intent
-            mem_ctx = memory.get_context_summary()
-            mem_ctx["recent_commands"] = context.recent_commands()[:3]
-            cog_ctx = cognitive_memory.get_context_for_prompt(text, n=2)
-            mem_ctx["typical_actions_now"] = cog_ctx.get("typical_actions_now", [])
-            mem_ctx["relevant_context"] = cog_ctx.get("relevant_context", [])
-            mem_ctx["session_turns"] = [t.to_dict() for t in context.get_session_turns(5)]
-
-            print(f"[NORA] Parsing intent...")
-            ui_server.notify_stage("thinking")
-            try:
-                intent = await asyncio.wait_for(
-                    loop.run_in_executor(None, intent_parser.parse_intent, text, mem_ctx),
-                    timeout=llm_timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("Intent parsing timed out")
-                print("[NORA] Intent parsing timed out")
-                speaker.speak("That took too long. Please try again.", mood="error")
-                frustration.record(text_lower, rms=rms, success=False)
-                ui_server.notify_stage("idle")
-                continue
-            except Exception as e:
-                logger.warning(f"Intent parsing failed: {e}")
-                print(f"[NORA] Intent parsing error: {e}")
-                speaker.speak("I didn't understand that. Could you repeat?", mood="error")
-                frustration.record(text_lower, rms=rms, success=False)
-                ui_server.notify_stage("idle")
-                continue
-
-            if intent.error:
-                print(f"[NORA] LLM returned error: {intent.error}")
-                speaker.speak(f"I'm not sure what to do: {intent.error}", mood="error")
-                frustration.record(text_lower, rms=rms, success=False)
-                ui_server.notify_stage("idle")
-                continue
-
-            # NeuroSym: validate action plan before execution
-            ui_server.notify_stage("guarding")
-            plan_safe, plan_needs_confirm, plan_violations = neurosym_guard.check_intent(intent)
-            if not plan_safe:
-                speaker.speak("That action plan was blocked by the security policy.", mood="error")
-                frustration.record(text_lower, rms=rms, success=False)
-                ui_server.notify_stage("idle")
-                continue
-            if plan_needs_confirm:
-                intent.requires_confirmation = True
-
-            # Config-based block list (secondary layer -- catches custom blocked_actions from config.yaml)
-            has_blocked, needs_confirm = security.check_steps(intent.steps)
-            if has_blocked:
-                speaker.speak("That action is blocked by the security policy.")
-                frustration.record(text_lower, rms=rms, success=False)
-                continue
-            if needs_confirm:
-                intent.requires_confirmation = True
-
-            # Conversational response — no actionable steps
-            if not intent.steps and not intent.error:
-                reply = intent.response or "I'm not sure what to do with that. Try a command."
+            # 3a. Fast-path: deterministic resolution before the LLM is ever touched.
+            # Handles ~40-50% of real commands (music, volume, time, open/close, etc.)
+            # in <50ms with zero network calls.
+            from nora import fast_path as _fp
+            _fast_intent = _fp.resolve(text)
+            if _fast_intent is not None and not _fast_intent.steps and _fast_intent.response:
+                # Pure conversational shortcut — speak and loop immediately
                 ui_server.notify_stage("speaking")
-                speaker.speak(reply, mood="chat")
+                speaker.speak(_fast_intent.response, mood="chat")
                 ui_server.notify_stage("idle")
                 frustration.record(text_lower, rms=rms, success=True)
                 continue
+
+            if _fast_intent is not None and _fast_intent.steps:
+                logger.info(f"Fast-path hit: {_fast_intent.intent}")
+                print(f"[NORA] Fast-path: {_fast_intent.intent}")
+                intent = _fast_intent
+                has_blocked, needs_confirm = security.check_steps(intent.steps)
+                if has_blocked:
+                    speaker.speak("That action is blocked by the security policy.")
+                    frustration.record(text_lower, rms=rms, success=False)
+                    ui_server.notify_stage("idle")
+                    continue
+                if needs_confirm:
+                    intent.requires_confirmation = True
+            else:
+                # 3b. No fast-path match — build enriched context and call the LLM
+                mem_ctx = memory.get_context_summary()
+                mem_ctx["recent_commands"] = context.recent_commands()[:3]
+                cog_ctx = cognitive_memory.get_context_for_prompt(text, n=2)
+                mem_ctx["typical_actions_now"] = cog_ctx.get("typical_actions_now", [])
+                mem_ctx["relevant_context"] = cog_ctx.get("relevant_context", [])
+                mem_ctx["session_turns"] = [t.to_dict() for t in context.get_session_turns(5)]
+
+                # Multimodal context fusion — pre-attach screen snippet for deictic commands
+                screen_ctx: dict | None = None
+                if intent_parser.needs_screen_context(text):
+                    try:
+                        from nora.commands.screen_intelligence import get_screen_snippet
+                        snippet, win_title = get_screen_snippet()
+                        if snippet or win_title:
+                            screen_ctx = {"snippet": snippet, "window_title": win_title}
+                    except Exception:
+                        pass
+
+                print(f"[NORA] Parsing intent...")
+                ui_server.notify_stage("thinking")
+                try:
+                    intent = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None, intent_parser.parse_intent, text, mem_ctx, screen_ctx
+                        ),
+                        timeout=llm_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Intent parsing timed out")
+                    print("[NORA] Intent parsing timed out")
+                    speaker.speak("That took too long. Please try again.", mood="error")
+                    frustration.record(text_lower, rms=rms, success=False)
+                    ui_server.notify_stage("idle")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Intent parsing failed: {e}")
+                    print(f"[NORA] Intent parsing error: {e}")
+                    speaker.speak("I didn't understand that. Could you repeat?", mood="error")
+                    frustration.record(text_lower, rms=rms, success=False)
+                    ui_server.notify_stage("idle")
+                    continue
+
+                if intent.error:
+                    print(f"[NORA] LLM returned error: {intent.error}")
+                    _clarify_words = (
+                        "context", "specific", "clarif", "which", "what do you mean",
+                        "more information", "more detail", "please provide",
+                    )
+                    if any(w in intent.error.lower() for w in _clarify_words):
+                        speaker.speak("I didn't catch that — could you rephrase?", mood="error")
+                    else:
+                        speaker.speak(f"Something went wrong: {intent.error}", mood="error")
+                    frustration.record(text_lower, rms=rms, success=False)
+                    ui_server.notify_stage("idle")
+                    continue
+
+                # NeuroSym: validate action plan before execution
+                ui_server.notify_stage("guarding")
+                plan_safe, plan_needs_confirm, plan_violations = neurosym_guard.check_intent(intent)
+                if not plan_safe:
+                    speaker.speak("That action plan was blocked by the security policy.", mood="error")
+                    frustration.record(text_lower, rms=rms, success=False)
+                    ui_server.notify_stage("idle")
+                    continue
+                if plan_needs_confirm:
+                    intent.requires_confirmation = True
+
+                # Config-based block list
+                has_blocked, needs_confirm = security.check_steps(intent.steps)
+                if has_blocked:
+                    speaker.speak("That action is blocked by the security policy.")
+                    frustration.record(text_lower, rms=rms, success=False)
+                    ui_server.notify_stage("idle")
+                    continue
+                if needs_confirm:
+                    intent.requires_confirmation = True
+
+                # Conversational response — no actionable steps
+                if not intent.steps and not intent.error:
+                    _clarify_words = (
+                        "more context", "more information", "more detail",
+                        "be more specific", "what do you mean", "please specify",
+                        "which one", "i'm not sure what", "i don't understand",
+                        "can you tell me more",
+                    )
+                    _raw_reply = intent.response or ""
+                    if any(w in _raw_reply.lower() for w in _clarify_words):
+                        reply = "I didn't quite catch that — could you rephrase?"
+                    else:
+                        reply = _raw_reply or "I'm not sure how to handle that."
+                    ui_server.notify_stage("speaking")
+                    speaker.speak(reply, mood="chat")
+                    ui_server.notify_stage("idle")
+                    frustration.record(text_lower, rms=rms, success=bool(_raw_reply))
+                    continue
+
+            # Tag intent with user text for audit log
+            object.__setattr__(intent, "_user_text", text) if hasattr(intent, "__fields__") else None
+            try:
+                intent._user_text = text
+            except Exception:
+                pass
 
             actions_str = " → ".join(s.action for s in intent.steps)
             print(f"[NORA] {intent.intent}  [{actions_str}]")
@@ -277,9 +388,33 @@ async def run() -> None:
                 actions=[s.action for s in intent.steps],
             )
 
-            # 4. Confirmation if needed
+            # 4a. Autonomous task routing — ReAct planner for complex goals
+            if intent_parser.is_autonomous_task(text) and len(intent.steps) == 0:
+                # No steps planned yet: route to ReAct planner
+                from nora import planner
+                ui_server.notify_stage("acting")
+                results = await planner.run_plan(text, mem_ctx, listener)
+                context.wake_triggered = False
+                summary = summarize_results(results)
+                if summary:
+                    ui_server.notify_stage("speaking")
+                    speaker.speak(summary, mood="info" if all(r.success for r in results) else "error")
+                ui_server.notify_stage("idle")
+                continue
+
+            # 4b. Confirmation only for genuinely destructive actions — not just multi-step.
+            # Being asked to confirm "open chrome then search google" breaks flow.
+            _destructive = {"delete_file", "shutdown", "close_all_apps", "patch_file",
+                            "git_smart_commit", "move_file"}
+            _has_destructive = any(s.action in _destructive for s in intent.steps)
+
+            if _has_destructive and not intent.requires_confirmation:
+                intent.requires_confirmation = True
+
+            # 4c. Confirmation prompt — kept brief so it doesn't feel like bureaucracy
             if intent.requires_confirmation:
-                speaker.speak(f"I'm about to {intent.intent}.", mood="confirmation")
+                step_labels = " → ".join(s.action.replace("_", " ") for s in intent.steps[:6])
+                speaker.speak(f"{step_labels}. Confirm?", mood="confirmation")
                 confirmed = await confirmation_flow(listener)
                 if not confirmed:
                     speaker.speak("Cancelled.")
@@ -332,15 +467,14 @@ async def run() -> None:
                 active_apps=active_apps,
             )
 
-            # Workflow prediction -- cognitive memory bigrams take priority
+            # Workflow prediction — log only; speaking mid-flow breaks momentum
             if executed_actions:
                 last_action = executed_actions[-1]
                 predicted = cognitive_memory.predict_next_action(last_action, min_confidence=3)
                 if not predicted:
                     predicted = memory.predict_next_action(last_action)
                 if predicted:
-                    logger.info(f"Workflow prediction: {last_action} â†' {predicted}")
-                    speaker.speak(f"Based on your habits, should I also {predicted.replace('_', ' ')}?", mood="proactive")
+                    logger.info(f"Workflow prediction: {last_action} → {predicted}")
 
             # Check for frustration -- offer help if detected (Feature 5)
             all_ok = all(r.success for r in results) if results else True
@@ -355,6 +489,7 @@ async def run() -> None:
             proactive.stop()
             consolidation.stop()
             terminal_monitor.stop()
+            anomaly_watchdog.stop()
             break
         except Exception as e:
             logger.error(f"Pipeline error: {e}", exc_info=True)

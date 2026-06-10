@@ -1,0 +1,18 @@
+#!/usr/bin/env bpftrace
+// dev_opens.bt — track which processes open a specific path
+// Usage: bpftrace -f json dev_opens.bt -e 'BEGIN { @target = "/dev/video0"; }'
+// Runner injects the target path via the WATCH_PATH environment variable.
+
+BEGIN
+{
+    @target_path = str($1);
+    printf("Watching opens for: %s\n", @target_path);
+}
+
+tracepoint:syscalls:sys_enter_openat
+{
+    $path = str(args->filename);
+    if ($path == @target_path) {
+        @opens[comm, pid, uid] = count();
+    }
+}

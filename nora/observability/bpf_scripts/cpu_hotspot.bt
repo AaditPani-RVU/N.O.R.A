@@ -1,0 +1,8 @@
+#!/usr/bin/env bpftrace
+// cpu_hotspot.bt — top CPU consumers (sampled at 99Hz)
+// Output: per-process CPU sample count; killed by runner after duration_sec.
+
+profile:hz:99
+{
+    @samples[comm, pid] = count();
+}

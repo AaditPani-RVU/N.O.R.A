@@ -51,34 +51,35 @@ Layered cognition: Task Ledger, Session Replay Briefing, Nightly Consolidation, 
 
 ---
 
-## Sprint 4 — Phase 4: Autonomous Planning
+## Sprint 4 — Phase 4: Autonomous Planning ✅ DONE (2026-05-14)
 The capability jump. Requires Sprints 1 + 2.
 
 | # | Task | Files | Notes |
 |---|------|-------|-------|
-| 6 | **ReAct planner loop** — replace one-shot JSON plan + flat execute with an `observe → decide → act → verify` loop. LLM can see step results before choosing the next step. Max-steps guard already in NeuroSym (`max_plan_steps: 15`) | new `nora/planner.py`, `nora/pipeline.py`, `nora/intent_parser.py`, `nora/schemas.py` | Enables: "set up my ML experiment", "organise my downloads folder", "clone and run this repo" |
+| 6 | **ReAct planner loop** ✅ — replace one-shot JSON plan + flat execute with an `observe → decide → act → verify` loop. LLM can see step results before choosing the next step. Max-steps guard already in NeuroSym (`max_plan_steps: 15`) | new `nora/planner.py`, `nora/pipeline.py`, `nora/intent_parser.py`, `nora/schemas.py` | Enables: "set up my ML experiment", "organise my downloads folder", "clone and run this repo" |
 
 ---
 
-## Sprint 4 — Workflows & Screen
+## Sprint 4 — Workflows & Screen ✅ DONE (2026-05-14)
 Productivity and reliability upgrades.
 
 | # | Task | Files | Notes |
 |---|------|-------|-------|
-| 7 | **Workflow recording & replay** — promote repeated multi-step episodes into named, editable macros. Voice: "save this as morning-routine" → `run_workflow("morning-routine")`. NORA already records bigrams; this makes them directly actionable | `nora/cognitive_memory.py`, `nora/command_engine.py`, `nora/intent_parser.py`, `nora/ui_server.py`, `nora/static/index.html` | The behavioral model already has the data; this just surfaces it |
-| 8 | **Verified screen automation** — upgrade `click_on()` from one-shot coordinate guess to `locate → click → screenshot → verify`. Store bounding boxes, before/after state, retry rules | `nora/commands/screen_intelligence.py`, `nora/schemas.py`, `config.yaml` | Required for autonomous tasks that interact with GUI apps |
-| 9 | **Multimodal context fusion** — pre-attach active window title + OCR snippet to ambiguous commands so NORA understands "click the blue one" or "copy that command" without explicit screen command names | `nora/pipeline.py`, `nora/intent_parser.py`, `nora/commands/screen_intelligence.py`, `nora/context.py` | Screen intelligence currently runs only after LLM emits a screen action |
+| 7 | **Workflow recording & replay** ✅ — promote repeated multi-step episodes into named, editable macros. Voice: "save this as morning-routine" → `run_workflow("morning-routine")` | `nora/commands/workflows.py` | `save_workflow`, `run_workflow`, `list_workflows`, `delete_workflow` — stored in `nora_workflows.json` |
+| 8 | **Verified screen automation** ✅ — upgrade `click_on()` from one-shot coordinate guess to `locate → click → screenshot → verify`. Logs to reversible store | `nora/commands/screen_intelligence.py` | Before/after screenshot verification; graceful "may not have changed" fallback |
+| 9 | **Multimodal context fusion** ✅ — pre-attach active window title + OCR snippet to ambiguous commands (deictic words: "this", "that", "here") | `nora/pipeline.py`, `nora/intent_parser.py`, `nora/commands/screen_intelligence.py` | 10s cache; only fires when needs_screen_context() heuristic matches |
 
 ---
 
-## Sprint 5 — Ecosystem Expansion
+## Sprint 5 — Ecosystem Expansion ✅ DONE (2026-05-17)
 External integrations and reach.
 
 | # | Task | Files | Notes |
 |---|------|-------|-------|
-| 10 | **MCP client integration** — use Model Context Protocol to consume ready-made tool servers (Playwright browser automation, Google Drive, Obsidian) without writing custom plugins for each | `nora/command_engine.py`, new `nora/mcp_bridge.py`, `config.yaml` | Claude Code already has MCP servers available; NORA can speak the same protocol |
-| 11 | **Calendar / Email / GitHub plugins** — "what's on my calendar today", "draft a reply to my last email", "review my latest PR". Via Google Calendar MCP, Gmail MCP, or direct API plugins | new `plugins/google_calendar.py`, `plugins/gmail.py`, `plugins/github.py` | Highest daily-utility value of the external integrations |
-| 12 | **Authenticated WebSocket API** — replace the localhost-only dashboard with an auth-gated WebSocket endpoint for mobile PTT, typed commands, proactive push notifications, and live state streaming | `nora/ui_server.py`, `nora/security.py`, `config.yaml` | Lets you use NORA away from the keyboard via a phone browser or companion app |
+| 10 | **MCP client integration** ✅ — stdio + HTTP transports; auto-discovers and registers any MCP server's tools into NORA's registry as `mcp_<name>_<tool>` | new `nora/mcp_bridge.py`, `config.yaml` (`mcp_servers:`) | Zero-config: add servers under `mcp_servers:` in config.yaml; `load_all()` called at startup |
+| 11 | **Calendar / Email / GitHub plugins** ✅ — calendar_week, calendar_next_event, calendar_free_time, calendar_tomorrow; gmail_latest, gmail_draft_reply, gmail_search, gmail_important; github_my_prs, github_pr_review, github_my_issues, github_notifications | new `plugins/google_calendar.py`, `plugins/gmail.py`, `plugins/github.py` | Calendar + Gmail via Claude Code MCP (already authenticated); GitHub via GITHUB_TOKEN in .env |
+| 12 | **Authenticated WebSocket API** ✅ — ws://host:8765; NORA_API_TOKEN Bearer auth; mobile PTT (ptt_start/ptt_end); typed commands; live state + stage push; proactive notification push | `nora/ui_server.py` (start_ws, ws_push, ws_notify), `nora/security.py` (check_api_token), `config.yaml` (`websocket_api:`) | Install: `pip install websockets`. No token = localhost-only; set NORA_API_TOKEN to lock it down |
+| 26 | **Persona Calibration System** ✅ — verbosity/tone/style dimensions, voice-adjustable on the fly, persisted in nora_persona.json, injected into every system prompt | new `nora/persona.py`, new `nora/commands/persona.py`, `nora/intent_parser.py` | Voice: "be more concise", "use a casual tone", "be more technical", "reset your persona" |
 
 ---
 

@@ -25,6 +25,16 @@ logger = logging.getLogger("nora.wakeword")
 
 _enabled = False
 _detector: "_WakewordDetector | None" = None
+_wake_callbacks: list[Callable] = []
+
+
+def register_on_wake_callback(cb: Callable[[], None]) -> None:
+    """Register a callback that fires each time the wakeword is triggered.
+
+    Used by the PipeWire ducker (F5) to duck music on wake. No-op when no
+    subscriber is registered; wakeword behavior is otherwise unchanged.
+    """
+    _wake_callbacks.append(cb)
 
 
 def is_enabled() -> bool:
@@ -156,6 +166,11 @@ class _WakewordDetector:
                             )
                             last_trigger = now
                             self._event.set()
+                            for _cb in _wake_callbacks:
+                                try:
+                                    _cb()
+                                except Exception:
+                                    pass
                             break
 
         except Exception as exc:

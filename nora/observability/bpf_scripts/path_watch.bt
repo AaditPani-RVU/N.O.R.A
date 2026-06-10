@@ -1,0 +1,16 @@
+#!/usr/bin/env bpftrace
+// path_watch.bt — persistent watcher for file opens (run until killed)
+// Runner calls with the watched path as arg $1.
+
+BEGIN
+{
+    printf("path_watch started for: %s\n", str($1));
+}
+
+tracepoint:syscalls:sys_enter_openat
+{
+    if (str(args->filename) == str($1)) {
+        @access[comm, pid, uid, nsecs] = count();
+        printf("OPEN %s by %s (pid %d)\n", str(args->filename), comm, pid);
+    }
+}

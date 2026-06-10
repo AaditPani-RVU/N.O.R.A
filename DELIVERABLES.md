@@ -55,21 +55,33 @@ _The actual job the user does. These make NORA reach for instead of typing._
 
 ---
 
-## Sprint 4 — Autonomous & Trustworthy
+## Sprint 4 — Autonomous & Trustworthy ✅ DONE (2026-05-14)
 _The permission system that lets users say yes to autonomy._
 
 | # | Name | What it is | Why it matters | Complexity | Priority |
 |---|------|-----------|----------------|------------|----------|
-| 21 | **Counterfactual Pre-Flight** (O) | Before any multi-step plan with destructive or external-side-effect steps, NORA renders a structured preview: "I will: open Notion → search 'sprint review' → append 3 bullets → close. Affects: 1 doc. Reversible: yes. Confirm?" User can voice-edit any step before execution. | This is the feature that makes autonomy trusted. Without it, ReAct loops are scary; with it, they feel like piloting. Ships as part of the Sprint 3 ReAct planner. | Medium | P1 |
-| 22 | **Reversible Actions & Time-Machine Undo** (O) | Every state-changing action records a compensating inverse: `move_file` → reverse path, `delete_file` → recycle-bin path, `git_commit` → SHA snapshot, `patch_file` → original content. Voice: "undo the last thing you did" / "undo everything you did this morning". | Lowering the cost of mistakes is what makes users say yes to autonomy. Pairs with NeuroSym's destructive-action layer. This is table stakes for trusting NORA with multi-step plans. | High | P1 |
-| 23 | **Audit Log with Voice Playback** (C+O) | Every NORA action is timestamped and logged in a structured, searchable format. "What did you do in the last hour?" gets a spoken summary. Full log visible in the dashboard. Pairs with Action Confirmation for the full trust loop. | Transparency is trust. Users who can audit NORA's actions are users who grant it more permissions over time. Without this, security-conscious users keep NORA's access conservative. | Low | P1 |
-| 24 | **Anomaly Watchdog** (C) | NORA runs as a background observer of system state — GPU utilization, memory, disk I/O, running processes. Speaks an alert when something crosses a threshold: "GPU memory spiked to 94%, training job may be about to OOM." User-configurable thresholds per metric. | ML researchers lose hours to silent failures. Proactive alerting before a crash, not after, is the difference between a tool and a guardian. | Low | P1 |
-| 25 | **Plan Repair & Self-Critique** (O) | When a step fails or verification disagrees with intent, the planner enters a `reflect → repair` micro-loop instead of immediately escalating to the user. Capped at N retries, failure signature logged so the same trap is avoided next time. | Real autonomy fails gracefully. Currently a single click_on miss aborts the whole task. | Medium | P2 |
-| 26 | **Persona Calibration System** (C) | NORA learns the user's preferred verbosity, formality, and interruption tolerance from explicit feedback ("too verbose", "stop asking for confirmation on volume changes") and implicit signals (commands that get cancelled immediately). Preferences persist and evolve via User Model. | Default assistant behavior is calibrated for the average user. The power user here is not average. This is what separates a tool that gets disabled from one that gets promoted to startup. | Medium | P2 |
+| 21 | **Counterfactual Pre-Flight** ✅ (O) | Before any multi-step (≥3 steps) or destructive plan, NORA renders a structured preview: "I'm about to X. Steps: A → B → C. I'll log everything so you can undo. Confirm?" | This is the feature that makes autonomy trusted. Integrated into pipeline.py confirmation flow with step preview and reversibility note. | Medium | P1 |
+| 22 | **Reversible Actions & Time-Machine Undo** ✅ (O) | `nora/reversible.py` — every state-changing action records a compensating inverse. Voice: `undo_last_action()`, `undo_actions_since(minutes)`, `list_reversible_actions()`. Store: `nora_reversible_log.json`. | Lowering the cost of mistakes is what makes users say yes to autonomy. `click_on` logs to reversible store after verify. | High | P1 |
+| 23 | **Audit Log with Voice Playback** ✅ (C+O) | `nora/audit_log.py` — JSON-lines log (`nora_audit_log.jsonl`) of every action. Voice: `audit_log_summary(minutes)`, `what_did_you_do_last(count)`. In-memory ring buffer for fast recent lookups. Wired into `command_engine.execute()`. | Transparency is trust. Every action is now attributed, timestamped, and speakable. | Low | P1 |
+| 24 | **Anomaly Watchdog** ✅ (C) | `nora/anomaly_watchdog.py` — background thread polling CPU, RAM, GPU (pynvml/nvidia-smi), disk write throughput via psutil. Configurable thresholds + 5-min cooldown per metric. Started in pipeline.py. | ML researchers lose hours to silent failures. Proactive alerting before a crash. | Low | P1 |
+| 25 | **Plan Repair & Self-Critique** ✅ (O) | Built into `nora/planner.py` — when a ReAct step fails, a `reflect → repair` micro-loop runs up to 2 retries before escalating to user. Failure details logged to history so the LLM doesn't repeat the same mistake. | Real autonomy fails gracefully. | Medium | P2 |
+| 26 | **Persona Calibration System** ✅ (C) | `nora/persona.py` + `nora/commands/persona.py` — verbosity (concise/normal/detailed), tone (casual/professional/technical), style (direct/conversational). Voice-adjustable on the fly. Persisted in `nora_persona.json`. Injected into every system prompt alongside the user card. | Default behavior → personalized behavior. | Medium | P2 |
 
 ---
 
-## Sprint 5 — Self-Improving
+## Sprint 5 — Ecosystem Expansion ✅ DONE (2026-05-17)
+_External integrations, persona calibration, and reach._
+
+| # | Name | What it is | Why it matters | Complexity | Priority |
+|---|------|-----------|----------------|------------|----------|
+| E1 | **MCP Client Integration** ✅ | `nora/mcp_bridge.py` — stdio and HTTP transports. Each configured MCP server's tools are discovered at startup and registered as `mcp_<alias>_<tool_name>` actions. Supports Playwright, Obsidian, Google Drive, or any MCP-compliant server without writing custom plugins. | Ecosystem leverage: every MCP server ever built instantly becomes usable by NORA. Enables Claude Code, Cursor, and other tools' plugins to power NORA capabilities. | Medium | P1 |
+| E2 | **Calendar / Email / GitHub Plugins** ✅ | `plugins/google_calendar.py` (calendar_week, calendar_next_event, calendar_free_time, calendar_tomorrow), `plugins/gmail.py` (gmail_latest, gmail_draft_reply, gmail_search, gmail_important), `plugins/github.py` (github_my_prs, github_pr_review, github_my_issues, github_notifications). Calendar + Gmail via Claude Code MCP auth; GitHub via GITHUB_TOKEN. | Highest daily-utility integrations. Closes the loop on "NORA, what's on my calendar today / brief me on my latest PR / draft a reply to John." | Medium | P1 |
+| E3 | **Authenticated WebSocket API** ✅ | `nora/ui_server.py` extended with `start_ws()` (port 8765). Clients connect via `ws://host:8765`. Bearer-token auth via NORA_API_TOKEN (optional — open on localhost if unset). Messages: `command`, `ptt_start`, `ptt_end`, `ping`. Push events: `state`, `stage`, `notification`, `pong`. `ws_notify()` lets any NORA component push alerts to connected clients. | Mobile reach: use NORA away from the keyboard via a phone browser or companion PWA. Enables proactive notifications to push to your phone. | Medium | P1 |
+| E4 | **Persona Calibration System** ✅ | See Sprint 4 row 26 above. | Default behavior → personalized behavior. | Medium | P2 |
+
+---
+
+## Sprint 6 — Self-Improving
 _The loop that makes NORA more capable monthly without writing code._
 
 | # | Name | What it is | Why it matters | Complexity | Priority |

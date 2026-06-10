@@ -1,0 +1,13 @@
+#!/usr/bin/env bpftrace
+// net_talkers.bt — top network talkers by packet count
+// Output: per-process packet count; killed by runner after duration_sec.
+
+tracepoint:net:net_dev_xmit
+{
+    @xmit[comm, pid] = count();
+}
+
+tracepoint:net:netif_receive_skb
+{
+    @recv[comm, pid] = count();
+}

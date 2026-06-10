@@ -12,6 +12,31 @@ from nora.schemas import IntentResponse
 
 logger = logging.getLogger("nora.intent_parser")
 
+# Module-level singletons — avoid per-call client construction overhead
+_groq_client: "object | None" = None
+_claude_client: "object | None" = None
+
+
+def _get_groq_client(api_key: str, timeout_sec: float) -> "object":
+    global _groq_client
+    if _groq_client is None:
+        import os
+        from openai import OpenAI
+        _groq_client = OpenAI(
+            api_key=api_key or os.environ.get("GROQ_API_KEY", ""),
+            base_url="https://api.groq.com/openai/v1",
+            timeout=timeout_sec,
+        )
+    return _groq_client
+
+
+def _get_claude_client(timeout_sec: float) -> "object":
+    global _claude_client
+    if _claude_client is None:
+        import anthropic
+        _claude_client = anthropic.Anthropic(timeout=timeout_sec)
+    return _claude_client
+
 SYSTEM_PROMPT_TEMPLATE = """You are NORA — a high-performance, local, voice-controlled AI operating system.
 
 You are NOT a chatbot. You are an execution engine. Your purpose:
@@ -24,7 +49,17 @@ CORE EXECUTION RULES
 - ALWAYS return strictly valid JSON. No prose, no markdown fences, no explanation.
 - NEVER hallucinate actions — only use the registered commands below.
 - Prefer the smallest number of steps. Combine actions intelligently.
-- If the command is ambiguous, return a clarification instead of guessing.
+
+EXECUTION BIAS — CRITICAL (follow these exactly):
+- ALWAYS act on the most obvious interpretation. NEVER ask for additional context on clear commands.
+- "play music" / "play something" → ALWAYS emit play_music(track="", artist=""). NEVER ask what to play.
+- "open [app]" → ALWAYS emit open_app(name="[app]"). NEVER ask which version or instance.
+- Single-word commands → execute the obvious default. "screenshot" → take_screenshot(). "time" → get_time().
+- Partial or colloquial phrases → find the closest registered action and execute it.
+- Questions or research requests → use ask_claude() or tell_me_about(). NEVER say "I need more info."
+- ONLY return the Clarification shape for DESTRUCTIVE actions where two distinct targets are equally plausible
+  and choosing the wrong one cannot be undone (e.g. "delete that" with two open files of the same name).
+- For everything else: execute first, let the user correct if needed.
 
 EFFICIENCY
 - Prefer local execution over web-based.
@@ -58,6 +93,7 @@ RESPONSE FORMAT (exactly one of these four shapes):
   Conversation:   {{"intent": "chat", "steps": [], "response": "your spoken reply", "error": null}}
 
 Use the Conversation shape for greetings, small talk, or questions that need a spoken answer but no action.
+Conversation responses MUST be 1-2 sentences maximum — this is spoken aloud, not written text.
 
 Available actions: {actions}
 
@@ -125,6 +161,24 @@ User: "hello how are you"
 User: "are you there"
 {{"intent": "chat", "steps": [], "response": "Always here, sir. What do you need?", "error": null}}
 
+User: "play"
+{{"intent": "play preferred music", "steps": [{{"action": "play_music", "parameters": {{"track": "", "artist": ""}}}}], "requires_confirmation": false}}
+
+User: "screenshot"
+{{"intent": "take screenshot", "steps": [{{"action": "take_screenshot", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "time"
+{{"intent": "get current time", "steps": [{{"action": "get_time", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "chrome"
+{{"intent": "open Chrome", "steps": [{{"action": "open_app", "parameters": {{"name": "chrome"}}}}], "requires_confirmation": false}}
+
+User: "how do black holes form"
+{{"intent": "research question", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do black holes form"}}}}], "requires_confirmation": false}}
+
+User: "what's the weather"
+{{"intent": "check weather", "steps": [{{"action": "web_search", "parameters": {{"query": "weather today"}}}}], "requires_confirmation": false}}
+
 User: "what did I say about the auth bug"
 {{"intent": "recall past notes", "steps": [{{"action": "recall", "parameters": {{"query": "auth bug"}}}}], "requires_confirmation": false}}
 
@@ -134,11 +188,23 @@ User: "recall my notes on deployment"
 CRITICAL: Return ONLY the JSON object. No explanation, no markdown fences, no extra text."""
 
 
-def _build_system_prompt(memory_ctx: dict | None = None) -> str:
-    action_set = set(get_available_actions())
+def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None = None) -> str:
+    # Exclude MCP tool names from the intent parser — they're not voice commands and
+    # their signatures are hundreds of tokens each. Command engine routes to them after intent is parsed.
+    action_set = {a for a in get_available_actions() if not a.startswith("mcp_")}
+    all_sigs = get_action_signatures()
+    # Strip MCP tools entirely — not voice-addressable and cost ~3k tokens each session
+    native_sigs_lines = [
+        line for line in all_sigs.splitlines()
+        if "mcp_" not in line and "MCP Tools" not in line
+    ]
+    # Hard cap: keep under ~2000 chars so total prompt stays well under 5k tokens
+    native_sigs = "\n".join(native_sigs_lines)
+    if len(native_sigs) > 2000:
+        native_sigs = native_sigs[:2000] + "\n... (more actions available)"
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        actions=", ".join(action_set),
-        action_signatures=get_action_signatures(),
+        actions=", ".join(sorted(action_set)),
+        action_signatures=native_sigs,
     )
 
     if not memory_ctx:
@@ -184,6 +250,15 @@ def _build_system_prompt(memory_ctx: dict | None = None) -> str:
     if lines:
         prompt += "\n\nUSER PROFILE (use to personalize — do not echo back):\n" + "\n".join(lines)
 
+    # Inject persona calibration settings (Sprint 5)
+    try:
+        from nora import persona as _persona
+        persona_block = _persona.format_for_prompt()
+        if persona_block:
+            prompt += "\n\n" + persona_block
+    except Exception:
+        pass
+
     # Inject repo context pack (branch, dirty files, recent commits)
     try:
         from nora.repo_context import format_for_prompt as _repo_fmt
@@ -195,14 +270,32 @@ def _build_system_prompt(memory_ctx: dict | None = None) -> str:
 
     session_turns = memory_ctx.get("session_turns", [])
     if session_turns:
-        turn_lines = ["RECENT SESSION (use for follow-up commands like 'do that again', 'fix the error'):"]
+        turn_lines = [
+            "RECENT SESSION — CRITICAL: use this to resolve follow-ups.",
+            "If the user says 'are you sure', 'really?', 'is that right', 'that's wrong', "
+            "'correct that', or references 'they/it/that' without a clear noun — treat it as "
+            "a conversational follow-up to the last turn, NOT a new research request. "
+            "Return the Conversation shape with a direct spoken reply using this context.",
+        ]
         for turn in reversed(session_turns):
             status = "[ok]" if turn.get("success") else "[fail]"
             line = f'  {status} User: "{turn["text"]}" -> {turn["intent"]}'
-            if not turn.get("success") and turn.get("result_summary"):
-                line += f' [ERROR: {turn["result_summary"]}]'
+            if turn.get("result_summary"):
+                line += f' | Result: {turn["result_summary"][:80]}'
             turn_lines.append(line)
         prompt += "\n\n" + "\n".join(turn_lines)
+
+    # Multimodal context fusion — inject screen snippet for deictic commands
+    if screen_ctx:
+        snippet = screen_ctx.get("snippet", "")
+        window_title = screen_ctx.get("window_title", "")
+        if snippet or window_title:
+            screen_lines = ["CURRENT SCREEN CONTEXT (to resolve 'this', 'that', 'here', etc.):"]
+            if window_title:
+                screen_lines.append(f"  Active window: {window_title}")
+            if snippet:
+                screen_lines.append(f"  Screen content: {snippet}")
+            prompt += "\n\n" + "\n".join(screen_lines)
 
     return prompt
 
@@ -253,11 +346,13 @@ def check_ollama_connection() -> bool:
         return False
 
 
-def _parse_via_groq(text: str, cfg: dict, memory_ctx: dict | None = None) -> IntentResponse:
+def _parse_via_groq(
+    text: str, cfg: dict, memory_ctx: dict | None = None, screen_ctx: dict | None = None
+) -> IntentResponse:
     """Call the Groq API (OpenAI-compatible) to parse intent."""
     import os
     import time as _time
-    from openai import OpenAI, APIConnectionError, APITimeoutError
+    from openai import APIConnectionError, APITimeoutError
 
     api_key = os.environ.get("GROQ_API_KEY", "")
     if not api_key:
@@ -267,9 +362,9 @@ def _parse_via_groq(text: str, cfg: dict, memory_ctx: dict | None = None) -> Int
     temperature = float(cfg.get("temperature", 0.1))
     max_tokens = int(cfg.get("max_tokens", 512))
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
-    system_prompt = _build_system_prompt(memory_ctx)
+    system_prompt = _build_system_prompt(memory_ctx, screen_ctx)
 
-    client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1", timeout=timeout_sec)
+    client = _get_groq_client(api_key, timeout_sec)
 
     last_exc: Exception = RuntimeError("no attempts made")
     for net_attempt in range(3):
@@ -310,19 +405,20 @@ def _parse_via_groq(text: str, cfg: dict, memory_ctx: dict | None = None) -> Int
     raise last_exc
 
 
-def _parse_via_claude(text: str, cfg: dict, memory_ctx: dict | None = None) -> IntentResponse:
+def _parse_via_claude(
+    text: str, cfg: dict, memory_ctx: dict | None = None, screen_ctx: dict | None = None
+) -> IntentResponse:
     """Call the Anthropic Claude API to parse intent."""
     import time as _time
-    import anthropic
     from anthropic import APIConnectionError, APITimeoutError
 
     model = cfg.get("model", "claude-haiku-4-5-20251001")
     temperature = float(cfg.get("temperature", 0.1))
     max_tokens = int(cfg.get("max_tokens", 512))
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
-    system_prompt = _build_system_prompt(memory_ctx)
+    system_prompt = _build_system_prompt(memory_ctx, screen_ctx)
 
-    client = anthropic.Anthropic(timeout=timeout_sec)
+    client = _get_claude_client(timeout_sec)
 
     last_exc: Exception = RuntimeError("no attempts made")
     for net_attempt in range(3):
@@ -365,7 +461,9 @@ def _parse_via_claude(text: str, cfg: dict, memory_ctx: dict | None = None) -> I
     raise last_exc
 
 
-def _parse_via_ollama(text: str, cfg: dict, memory_ctx: dict | None = None) -> IntentResponse:
+def _parse_via_ollama(
+    text: str, cfg: dict, memory_ctx: dict | None = None, screen_ctx: dict | None = None
+) -> IntentResponse:
     """Call local Ollama to parse intent."""
     import time as _time
 
@@ -374,7 +472,7 @@ def _parse_via_ollama(text: str, cfg: dict, memory_ctx: dict | None = None) -> I
     temperature = cfg.get("temperature", 0.1)
     max_tokens = cfg.get("max_tokens", 512)
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
-    system_prompt = _build_system_prompt(memory_ctx)
+    system_prompt = _build_system_prompt(memory_ctx, screen_ctx)
 
     payload = {
         "model": model,
@@ -413,12 +511,140 @@ def _parse_via_ollama(text: str, cfg: dict, memory_ctx: dict | None = None) -> I
     raise last_exc
 
 
-def parse_intent(text: str, memory_ctx: dict | None = None) -> IntentResponse:
-    """Route intent parsing to the configured provider (groq, claude, or ollama)."""
+def parse_intent(
+    text: str,
+    memory_ctx: dict | None = None,
+    screen_ctx: dict | None = None,
+) -> IntentResponse:
+    """Route intent parsing to the configured provider (groq, claude, or ollama).
+
+    Layer 1: deterministic fast-path (zero latency, zero fallback risk).
+    Layer 2: LLM provider with execution-biased system prompt.
+    Layer 3: fast-path rescue if the LLM still returned a clarification.
+    """
+    from nora import fast_path
+
+    # Layer 1 — skip LLM entirely for obvious commands
+    fp = fast_path.resolve(text)
+    if fp is not None:
+        logger.info(f"Fast-path resolved '{text}' → {fp.intent}")
+        return fp
+
     cfg = get_config().get("llm", {})
     provider = cfg.get("provider", "ollama").lower()
     if provider == "groq":
-        return _parse_via_groq(text, cfg, memory_ctx)
+        result = _parse_via_groq(text, cfg, memory_ctx, screen_ctx)
+    elif provider == "claude":
+        result = _parse_via_claude(text, cfg, memory_ctx, screen_ctx)
+    else:
+        result = _parse_via_ollama(text, cfg, memory_ctx, screen_ctx)
+
+    # Layer 3 — rescue if LLM returned a clarification or produced no steps
+    if _is_clarification(result):
+        rescue = fast_path.resolve(text)
+        if rescue is not None and rescue.steps:
+            logger.info(f"LLM clarified on '{text}'; fast-path rescued → {rescue.intent}")
+            return rescue
+
+    return result
+
+
+def _is_clarification(intent: IntentResponse) -> bool:
+    """Return True when the LLM is asking for more information instead of acting."""
+    if intent.intent == "clarify":
+        return True
+    if not intent.steps and intent.error:
+        return True
+    if not intent.steps and intent.response:
+        # If the spoken response contains clarification language, treat it as a failure
+        clarify_signals = (
+            "more context", "more information", "more detail", "be more specific",
+            "what do you mean", "could you clarify", "please specify", "which one",
+            "i'm not sure what", "i don't understand", "can you tell me more",
+        )
+        return any(sig in intent.response.lower() for sig in clarify_signals)
+    return False
+
+
+# ── Sprint 4 additions ─────────────────────────────────────────────────────
+
+# Keywords that indicate the user wants an autonomous multi-step goal executed
+_AUTONOMOUS_KEYWORDS = (
+    "autonomously", "automatically", "set up", "setup", "organize", "organise",
+    "clone and run", "bootstrap", "scaffold and", "do everything to",
+    "handle the whole", "take care of", "go ahead and", "run the full",
+    "end to end", "end-to-end",
+)
+
+
+def is_autonomous_task(text: str) -> bool:
+    """Return True if the utterance signals an autonomous multi-step goal."""
+    lower = text.lower()
+    return any(kw in lower for kw in _AUTONOMOUS_KEYWORDS)
+
+
+# Pronouns/deictic words that benefit from screen context
+_DEICTIC_WORDS = (
+    " this ", " that ", " here ", " there ", " it ", " those ", " these ",
+    "the one", "on screen", "on the screen", "what's on", "what is on",
+    "visible", "currently showing",
+    "are you sure", "is that right", "is that correct", "really?", "you sure",
+    "that's wrong", "correct that", "are they",
+)
+
+
+def needs_screen_context(text: str) -> bool:
+    """Return True if the command likely requires knowing what's on screen."""
+    lower = " " + text.lower() + " "
+    return any(w in lower for w in _DEICTIC_WORDS)
+
+
+def _call_llm(system: str, messages: list[dict]) -> str:
+    """Generic LLM call that returns raw text. Used by the ReAct planner."""
+    cfg = get_config().get("llm", {})
+    provider = cfg.get("provider", "ollama").lower()
+    model = cfg.get("model", "llama-3.1-8b-instant")
+    max_tokens = int(cfg.get("max_tokens", 512))
+    temperature = float(cfg.get("temperature", 0.1))
+    timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
+
+    if provider == "groq":
+        import os
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=os.environ.get("GROQ_API_KEY", ""),
+            base_url="https://api.groq.com/openai/v1",
+            timeout=timeout_sec,
+        )
+        resp = client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=[{"role": "system", "content": system}] + messages,
+        )
+        return resp.choices[0].message.content or ""
+
     if provider == "claude":
-        return _parse_via_claude(text, cfg, memory_ctx)
-    return _parse_via_ollama(text, cfg, memory_ctx)
+        import anthropic
+        client = anthropic.Anthropic(timeout=timeout_sec)
+        msg = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+        )
+        return msg.content[0].text
+
+    # Ollama
+    base_url = cfg.get("base_url", "http://localhost:11434")
+    user_content = messages[-1]["content"] if messages else ""
+    payload = {
+        "model": model,
+        "prompt": user_content,
+        "system": system,
+        "stream": False,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }
+    resp = requests.post(f"{base_url}/api/generate", json=payload, timeout=timeout_sec)
+    resp.raise_for_status()
+    return resp.json().get("response", "")

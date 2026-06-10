@@ -1,0 +1,11 @@
+#!/usr/bin/env bpftrace
+// io_hotspot.bt — top disk I/O writers (by bytes)
+// Output: per-process write bytes; killed by runner after duration_sec.
+
+tracepoint:block:block_rq_complete
+/args->rwbs != 0/
+{
+    if (str(args->rwbs, 1) == "W") {
+        @bytes[comm, pid] = sum(args->bytes);
+    }
+}
