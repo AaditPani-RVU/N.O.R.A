@@ -1,7 +1,7 @@
 # NORA — Consolidated Deliverables
-_Joint analysis: Claude (Sonnet 4.6) + Opus 4 + Codex. Debate-synthesized on 2026-05-14._
 
-Each deliverable is marked with the source that originated it: **(O)** = Opus, **(C)** = Codex, **(S)** = synthesis of both.
+
+
 
 ---
 
