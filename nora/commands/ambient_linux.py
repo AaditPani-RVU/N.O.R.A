@@ -134,13 +134,17 @@ async def denoise_mic() -> str:
     if not pw.is_available():
         return "PipeWire is not running."
 
+    if await loop.run_in_executor(None, pw.is_rnnoise_active):
+        return "Denoising is already active. Use 'NORA stop denoising' to turn it off."
+
     ok = await loop.run_in_executor(None, pw.load_rnnoise_filter)
     if ok:
-        return "Denoising filter loaded on default mic. Background noise should now be reduced."
-    return (
-        "Could not load RNNoise filter. "
-        "Ensure wireplumber and libndi-rnnoise0 (or pipewire-filter-chain) are installed."
-    )
+        return (
+            "Noise suppression config written. Reload PipeWire to activate: "
+            "run 'systemctl --user restart pipewire' — audio will cut for about one second. "
+            "After that, select 'NORA Denoised Mic' as your input source."
+        )
+    return "Could not write noise suppression config. Check ~/.config/pipewire/pipewire.conf.d/ permissions."
 
 
 @register(

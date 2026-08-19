@@ -2,21 +2,35 @@
 
 Exposes a compact user card (≤200 tokens) that is auto-injected into the
 system prompt so NORA can make personalised decisions without re-asking.
+
+Preference versioning (CODEX_INTEGRATION.md 2.5): learned preferences
+("Aadit prefers concise responses") are not overwritten silently. Each
+change is proposed with a reason, held for review, and either confirmed
+by the user or auto-applied after a config-configurable window if no
+objection is raised. Every version is kept for introspection/rollback.
+Persisted to nora_user_preferences.json.
 """
 from __future__ import annotations
 
 import json
 import logging
 import subprocess
+import threading
 import time
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from nora.config import get_config
 
 logger = logging.getLogger("nora.user_model")
 
 _ROOT = Path(__file__).resolve().parent.parent
 _BRIEF_PATH = _ROOT / "nora_daily_brief.json"
+_PREFS_PATH = _ROOT / "nora_user_preferences.json"
+_prefs_lock = threading.Lock()
+_prefs: list[dict[str, Any]] | None = None
 
 
 # ── Typed accessors ────────────────────────────────────────────────────────────
@@ -117,6 +131,122 @@ def preferred_terminology() -> list[str]:
         words = ep.get("text", "").lower().split()
         counter.update(w for w in words if len(w) > 3 and w not in _STOP)
     return [w for w, _ in counter.most_common(5)]
+
+
+# ── Preference versioning (2.5) ─────────────────────────────────────────────────
+
+def _load_prefs() -> list[dict[str, Any]]:
+    global _prefs
+    if _prefs is not None:
+        return _prefs
+    try:
+        _prefs = json.loads(_PREFS_PATH.read_text(encoding="utf-8")) if _PREFS_PATH.exists() else []
+    except Exception:
+        _prefs = []
+    return _prefs
+
+
+def _save_prefs() -> None:
+    if _prefs is None:
+        return
+    try:
+        _PREFS_PATH.write_text(json.dumps(_prefs, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        logger.warning("preference save failed: %s", e)
+
+
+def _history(key: str) -> list[dict[str, Any]]:
+    return [p for p in _load_prefs() if p["key"] == key]
+
+
+def get_preference(key: str, default: Any = None) -> Any:
+    """Return the current applied value for a preference, or default."""
+    applied = [p for p in _history(key) if p["applied"]]
+    return applied[-1]["new"] if applied else default
+
+
+def propose_preference(key: str, value: Any, reason: str) -> dict[str, Any]:
+    """Propose a change to a learned preference; does not apply it silently.
+
+    Applied immediately only if auto_apply_hours is 0 (config opt-in for
+    trivial preferences); otherwise held until confirm_preference() or
+    apply_pending() ages it past auto_apply_hours.
+    """
+    previous = get_preference(key)
+    now = time.time()
+    entry = {
+        "key": key,
+        "previous": previous,
+        "new": value,
+        "reason": reason,
+        "ts": now,
+        "ts_human": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "applied": False,
+    }
+    auto_hours = float(get_config().get("user_model", {}).get("preference_auto_apply_hours", 24))
+    with _prefs_lock:
+        _load_prefs()
+        if auto_hours <= 0:
+            entry["applied"] = True
+        _prefs.append(entry)
+        _save_prefs()
+    return entry
+
+
+def confirm_preference(key: str) -> bool:
+    """Apply the most recent pending proposal for a preference."""
+    with _prefs_lock:
+        for entry in reversed(_load_prefs()):
+            if entry["key"] == key and not entry["applied"]:
+                entry["applied"] = True
+                _save_prefs()
+                return True
+    return False
+
+
+def reject_preference(key: str) -> bool:
+    """Discard the most recent pending proposal, keeping the prior value."""
+    with _prefs_lock:
+        prefs = _load_prefs()
+        for i in range(len(prefs) - 1, -1, -1):
+            if prefs[i]["key"] == key and not prefs[i]["applied"]:
+                del prefs[i]
+                _save_prefs()
+                return True
+    return False
+
+
+def apply_pending(now: float | None = None) -> list[str]:
+    """Auto-apply proposals older than preference_auto_apply_hours. Returns applied keys."""
+    now = now or time.time()
+    auto_hours = float(get_config().get("user_model", {}).get("preference_auto_apply_hours", 24))
+    applied: list[str] = []
+    with _prefs_lock:
+        for entry in _load_prefs():
+            if entry["applied"]:
+                continue
+            if now - entry["ts"] >= auto_hours * 3600:
+                entry["applied"] = True
+                applied.append(entry["key"])
+        if applied:
+            _save_prefs()
+    return applied
+
+
+def preference_history(key: str) -> list[dict[str, Any]]:
+    """Full version history for a preference, oldest first."""
+    return list(_history(key))
+
+
+def rollback_preference(key: str) -> str:
+    """Revert an applied preference to its previous value, recorded as a new version."""
+    applied = [p for p in _history(key) if p["applied"]]
+    if len(applied) < 2:
+        return f"No prior version of '{key}' to roll back to."
+    current, prior = applied[-1], applied[-2]
+    propose_preference(key, prior["new"], reason=f"rollback from '{current['new']}'")
+    confirm_preference(key)
+    return f"Rolled '{key}' back from '{current['new']}' to '{prior['new']}'."
 
 
 # ── User card ──────────────────────────────────────────────────────────────────

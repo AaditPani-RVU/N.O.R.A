@@ -25,6 +25,35 @@ def _input():
     return ydotool_input
 
 
+def _atspi():
+    import gi
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+    return Atspi
+
+
+def _pyautogui_type(text: str) -> bool:
+    try:
+        import pyautogui
+        pyautogui.write(text, interval=0.02)
+        return True
+    except Exception as e:
+        logger.error("pyautogui type failed: %s", e)
+        return False
+
+
+def _pyautogui_key(keys: str) -> bool:
+    """Press a key combo like 'ctrl+l' via pyautogui."""
+    try:
+        import pyautogui
+        parts = [k.strip() for k in keys.replace("+", " ").split()]
+        pyautogui.hotkey(*parts)
+        return True
+    except Exception as e:
+        logger.error("pyautogui hotkey failed: %s", e)
+        return False
+
+
 @register(
     "click_element",
     sig="click_element(description: str)",
@@ -40,6 +69,7 @@ async def click_element(description: str) -> StepResult:
     widget = await loop.run_in_executor(None, tree.find_element, description)
     if widget is None:
         return StepResult(
+            action="click_element",
             success=False,
             message=f"Could not find a UI element matching '{description}'.",
         )
@@ -47,22 +77,22 @@ async def click_element(description: str) -> StepResult:
     if tree.get_action_count(widget) > 0:
         ok = await loop.run_in_executor(None, tree.do_action, widget, 0)
         if ok:
-            return StepResult(success=True, message=f"Clicked '{widget.name}' ({widget.role}).")
-        return StepResult(success=False, message=f"AT-SPI action failed for '{widget.name}'.")
+            return StepResult(action="click_element", success=True, message=f"Clicked '{widget.name}' ({widget.role}).")
+        return StepResult(action="click_element", success=False, message=f"AT-SPI action failed for '{widget.name}'.")
 
-    # fallback: try ydotool coordinate click via bounding box
+    # fallback: coordinate click via bounding box
     try:
-        bbox = widget.accessible.get_extents(Atspi.CoordType.SCREEN)
+        bbox = widget.accessible.get_extents(_atspi().CoordType.SCREEN)
         cx = bbox.x + bbox.width // 2
         cy = bbox.y + bbox.height // 2
         inp = _input()
         ok = await loop.run_in_executor(None, inp.click, cx, cy)
         if ok:
-            return StepResult(success=True, message=f"Clicked '{widget.name}' at ({cx},{cy}).")
+            return StepResult(action="click_element", success=True, message=f"Clicked '{widget.name}' at ({cx},{cy}).")
     except Exception as e:
         logger.debug("Bounding box click fallback failed: %s", e)
 
-    return StepResult(success=False, message=f"Could not interact with '{widget.name}'.")
+    return StepResult(action="click_element", success=False, message=f"Could not interact with '{widget.name}'.")
 
 
 @register(
@@ -77,24 +107,15 @@ async def read_focused_field() -> StepResult:
     loop = asyncio.get_event_loop()
     tree = _tree()
 
-    try:
-        import gi
-        gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi
-        focused = await loop.run_in_executor(None, Atspi.get_desktop(0).get_child_at_index, 0)
-    except Exception:
-        pass
-
-    # walk and find the widget with STATE_FOCUSED
     widgets = await loop.run_in_executor(None, tree.get_focused_app_widgets)
     for w in widgets:
         try:
-            if w.accessible.get_state_set().contains(__import__('gi').repository.Atspi.StateType.FOCUSED):
+            if w.accessible.get_state_set().contains(_atspi().StateType.FOCUSED):
                 text = await loop.run_in_executor(None, tree.get_text, w)
-                return StepResult(success=True, message=f"Focused field '{w.name}' contains: {text}")
+                return StepResult(action="read_focused_field", success=True, message=f"Focused field '{w.name}' contains: {text}")
         except Exception:
             continue
-    return StepResult(success=False, message="No focused text field found.")
+    return StepResult(action="read_focused_field", success=False, message="No focused text field found.")
 
 
 @register(
@@ -115,9 +136,9 @@ async def list_buttons_in_window() -> StepResult:
         and w.name
     ]
     if not buttons:
-        return StepResult(success=False, message="No buttons found in the active window.")
+        return StepResult(action="list_buttons_in_window", success=False, message="No buttons found in the active window.")
     names = ", ".join(f"'{b.name}' ({b.role})" for b in buttons[:20])
-    return StepResult(success=True, message=f"Found {len(buttons)} interactive elements: {names}.")
+    return StepResult(action="list_buttons_in_window", success=True, message=f"Found {len(buttons)} interactive elements: {names}.")
 
 
 @register(
@@ -135,22 +156,31 @@ async def fill_field(label: str, text: str) -> StepResult:
     query = f"text entry input field {label}"
     widget = await loop.run_in_executor(None, tree.find_element, query)
     if widget is None:
-        return StepResult(success=False, message=f"Could not find input field '{label}'.")
+        return StepResult(action="fill_field", success=False, message=f"Could not find input field '{label}'.")
 
     ok = await loop.run_in_executor(None, tree.set_text, widget, text)
     if ok:
-        return StepResult(success=True, message=f"Filled '{label}' with '{text}'.")
-    # fallback: click + type
+        return StepResult(action="fill_field", success=True, message=f"Filled '{label}' with '{text}'.")
+
+    # fallback: click the field, select-all, type
     try:
         inp = _input()
-        bbox = widget.accessible.get_extents(__import__('gi').repository.Atspi.CoordType.SCREEN)
-        await loop.run_in_executor(None, inp.click, bbox.x + bbox.width // 2, bbox.y + bbox.height // 2)
+        bbox = widget.accessible.get_extents(_atspi().CoordType.SCREEN)
+        cx, cy = bbox.x + bbox.width // 2, bbox.y + bbox.height // 2
+        clicked = await loop.run_in_executor(None, inp.click, cx, cy)
+        if not clicked:
+            import pyautogui as _pg
+            _pg.click(cx, cy)
         await asyncio.sleep(0.1)
-        await loop.run_in_executor(None, inp.key, "ctrl+a")
-        await loop.run_in_executor(None, inp.type_text, text)
-        return StepResult(success=True, message=f"Filled '{label}' via keyboard input.")
+        typed = await loop.run_in_executor(None, inp.key, "ctrl+a")
+        if not typed:
+            _pyautogui_key("ctrl+a")
+        typed = await loop.run_in_executor(None, inp.type_text, text)
+        if not typed:
+            _pyautogui_type(text)
+        return StepResult(action="fill_field", success=True, message=f"Filled '{label}' via keyboard input.")
     except Exception as e:
-        return StepResult(success=False, message=f"Failed to fill '{label}': {e}")
+        return StepResult(action="fill_field", success=False, message=f"Failed to fill '{label}': {e}")
 
 
 @register(
@@ -167,13 +197,13 @@ async def read_dialog() -> StepResult:
     widgets = await loop.run_in_executor(None, tree.get_focused_app_widgets)
     dialogs = [w for w in widgets if w.role in ("dialog", "alert", "frame", "window")]
     if not dialogs:
-        return StepResult(success=False, message="No dialog found in the active window.")
+        return StepResult(action="read_dialog", success=False, message="No dialog found in the active window.")
     d = dialogs[0]
     children = [w for w in widgets if w.parent_chain and d.name in w.parent_chain]
     summary = f"Dialog '{d.name}': " + "; ".join(
         f"{w.role} '{w.name}'" for w in children[:10] if w.name
     )
-    return StepResult(success=True, message=summary)
+    return StepResult(action="read_dialog", success=True, message=summary)
 
 
 @register(
@@ -188,9 +218,11 @@ async def type_into_focused(text: str) -> StepResult:
     loop = asyncio.get_event_loop()
     inp = _input()
     ok = await loop.run_in_executor(None, inp.type_text, text)
+    if not ok:
+        ok = _pyautogui_type(text)
     if ok:
-        return StepResult(success=True, message=f"Typed: {text}")
-    return StepResult(success=False, message="ydotool type failed — is ydotool installed?")
+        return StepResult(action="type_into_focused", success=True, message=f"Typed: {text}")
+    return StepResult(action="type_into_focused", success=False, message="Typing failed — ydotool and pyautogui both unavailable.")
 
 
 @register(
@@ -205,6 +237,8 @@ async def press_key(keys: str) -> StepResult:
     loop = asyncio.get_event_loop()
     inp = _input()
     ok = await loop.run_in_executor(None, inp.key, keys)
+    if not ok:
+        ok = _pyautogui_key(keys)
     if ok:
-        return StepResult(success=True, message=f"Pressed {keys}.")
-    return StepResult(success=False, message=f"Key press failed for '{keys}'.")
+        return StepResult(action="press_key", success=True, message=f"Pressed {keys}.")
+    return StepResult(action="press_key", success=False, message=f"Key press failed for '{keys}'.")

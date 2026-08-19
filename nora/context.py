@@ -67,18 +67,56 @@ music: MusicState = MusicState()
 def update_music(**kwargs: Any) -> None:
     """Thread-safe update of music state. Also stamps last_* on stop."""
     with _lock:
+        prev_track, prev_artist, prev_source = music.track, music.artist, music.source
         for k, v in kwargs.items():
             if hasattr(music, k):
                 setattr(music, k, v)
-        if music.status == "stopped" and music.track:
-            music.last_track = music.track
-            music.last_artist = music.artist
-            music.last_source = music.source
+        if music.status == "stopped" and prev_track:
+            music.last_track = prev_track
+            music.last_artist = prev_artist
+            music.last_source = prev_source
 
 
 def get_music() -> dict[str, Any]:
     with _lock:
         return music.to_dict()
+
+
+# ── Vision state ─────────────────────────────────────────────────────────────
+
+@dataclass
+class VisionState:
+    present: list[str] = field(default_factory=list)      # recognized names currently visible
+    unknown_count: int = 0                                # unrecognized faces in frame
+    last_seen: dict[str, float] = field(default_factory=dict)
+    camera_active: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "present": list(self.present),
+            "unknown_count": self.unknown_count,
+            "last_seen": dict(self.last_seen),
+            "camera_active": self.camera_active,
+        }
+
+
+vision: VisionState = VisionState()
+
+
+def update_vision(**kwargs: Any) -> None:
+    """Thread-safe update of vision state. Stamps last_seen for anyone present."""
+    with _lock:
+        for k, v in kwargs.items():
+            if hasattr(vision, k):
+                setattr(vision, k, v)
+        now = time.time()
+        for name in vision.present:
+            vision.last_seen[name] = now
+
+
+def get_vision() -> dict[str, Any]:
+    with _lock:
+        return vision.to_dict()
 
 
 # ── Recent commands (for productivity / memory) ──────────────────────────────
@@ -132,6 +170,11 @@ class SessionTurn:
     actions: list[str]
     result_summary: str
     success: bool
+    # What NORA actually said back. Without this the buffer recorded the user's
+    # half of every exchange and none of NORA's, so a follow-up ("why did you
+    # say that?") had nothing to resolve against. Conversational turns were
+    # worse off still — they never reached this buffer at all.
+    reply: str = ""
     ts: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -141,6 +184,7 @@ class SessionTurn:
             "actions": self.actions,
             "result_summary": self.result_summary,
             "success": self.success,
+            "reply": self.reply,
             "ts": self.ts,
         }
 
@@ -149,7 +193,14 @@ _session_turns: list[SessionTurn] = []
 _MAX_SESSION = 10
 
 
-def add_session_turn(text: str, intent: str, actions: list[str], result_summary: str, success: bool) -> None:
+def add_session_turn(
+    text: str,
+    intent: str,
+    actions: list[str],
+    result_summary: str,
+    success: bool,
+    reply: str = "",
+) -> None:
     with _lock:
         _session_turns.insert(0, SessionTurn(
             text=text,
@@ -157,6 +208,7 @@ def add_session_turn(text: str, intent: str, actions: list[str], result_summary:
             actions=actions,
             result_summary=result_summary,
             success=success,
+            reply=reply,
         ))
         del _session_turns[_MAX_SESSION:]
 

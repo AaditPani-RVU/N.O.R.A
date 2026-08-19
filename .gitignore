@@ -25,7 +25,10 @@ test_mic.py
 .claude/
 
 # Root-level loose .txt files (recovery codes, scratch notes, etc.)
+# Negation is required: the bare /*.txt rule silently swallowed requirements.txt,
+# which is why the dependency manifest looked absent from outside the repo.
 /*.txt
+!requirements.txt
 
 # ── Sounds (personal music library) ─────────────────────────────────────────
 sounds/*.mp3
@@ -72,3 +75,9 @@ nora_audit_log.jsonl
 nora_consolidation_state.json
 nora_daily_brief.json
 .agents/
+nora_tool_trust.json
+nora_consent_log.json
+nora_reversible_log.json
+nora_user_preferences.json
+nora_model_router_state.json
+nora_model_router_log.jsonl

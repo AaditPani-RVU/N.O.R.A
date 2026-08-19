@@ -1,0 +1,42 @@
+anthropic>=0.40.0
+# Google Calendar + Gmail direct API
+google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.1.0
+python-dateutil>=2.8.0
+openai>=1.0.0
+faster-whisper>=1.0.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+keyboard>=0.13.5
+pyttsx3>=2.90                     # offline TTS fallback only (speaker.py); edge-tts/Kokoro is the primary path
+pyautogui>=0.9.54
+pywin32>=306; sys_platform == "win32"
+requests>=2.31.0
+pydantic>=2.0
+pyyaml>=6.0
+psutil>=5.9.0
+# Audio playback and clipping
+pydub>=0.25.1
+pygame>=2.5.0
+# Screen capture (cross-platform, replaces pyautogui/pyscreeze)
+mss>=9.0.0
+Pillow>=10.0.0
+# Cognitive Memory System v2
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+# NeuroSym-AI: neuro-symbolic guardrails (input injection + action policy)
+neurosym-ai>=0.2.0
+# Sprint 1 — Wakeword detection (optional; only needed if wakeword.enabled: true)
+# openwakeword>=0.6.0
+
+# ── Vision module (Phase 1: camera + face memory) ──────────────────────────
+# Only imported when vision.enabled: true in config.yaml — the rest of NORA
+# runs without these installed. insightface 1.0.1 ships a pure-Python wheel,
+# so no cmake/dlib toolchain is needed. First run pulls the buffalo_l pack
+# (~300 MB) into ~/.insightface.
+opencv-python>=4.9.0
+insightface>=1.0.1
+onnxruntime>=1.17.0
+# Swap onnxruntime for onnxruntime-gpu and set vision.detector_device: "cuda"
+# to run detection/embedding on the GPU.

@@ -277,14 +277,14 @@ def semantic_search(query: str, n: int = 5, collection: str = "both") -> list[di
         try:
             if collection in ("episodes", "both") and eps and eps.count() > 0:
                 r = eps.query(query_embeddings=[q_embed], n_results=min(n, eps.count()))
-                for doc, meta in zip(r["documents"][0], r["metadatas"][0]):
+                for doc, meta in zip((r.get("documents") or [[]])[0], (r.get("metadatas") or [[]])[0]):
                     results.append({"text": doc, "meta": meta, "source": "episode"})
         except Exception as e:
             logger.warning("Episode search failed: %s", e)
         try:
             if collection in ("knowledge", "both") and kn and kn.count() > 0:
                 r = kn.query(query_embeddings=[q_embed], n_results=min(n, kn.count()))
-                for doc, meta in zip(r["documents"][0], r["metadatas"][0]):
+                for doc, meta in zip((r.get("documents") or [[]])[0], (r.get("metadatas") or [[]])[0]):
                     results.append({"text": doc, "meta": meta, "source": "knowledge"})
         except Exception as e:
             logger.warning("Knowledge search failed: %s", e)
@@ -332,7 +332,7 @@ def get_context_for_prompt(current_text: str = "", n: int = 3) -> dict[str, Any]
 
 # â"€â"€ Behavioral pattern analysis â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-def get_behavioral_patterns() -> list[dict[str, Any]]:
+def get_behavioral_patterns() -> dict[str, Any]:
     """Extract human-readable behavioral patterns from user model."""
     m = _load_user_model()
     patterns = []
@@ -419,7 +419,7 @@ def get_recent_episodes(n: int = 20) -> list[dict[str, Any]]:
                 combined.append({
                     "ts":      meta.get("ts", 0),
                     "intent":  meta.get("intent", ""),
-                    "text":    meta.get("text", doc[:120]),
+                    "text":    meta.get("text") or (doc or "")[:120],
                     "actions": json.loads(meta.get("actions", "[]")),
                     "success": meta.get("success", True),
                     "time_bin": meta.get("time_bin", ""),

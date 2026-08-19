@@ -68,6 +68,7 @@ _OPTIONAL_CATEGORIES = (
     ("observe", "System Observability (Linux):"),
     ("time", "Time-Travel & Sessions (Linux):"),
     ("focus", "Focus & Ambient (Linux):"),
+    ("vision", "Vision & Camera:"),
     ("mcp", "MCP Tools:"),
 )
 
@@ -114,7 +115,7 @@ def discover_commands() -> None:
         try:
             importlib.import_module(full_name)
             logger.debug(f"Loaded command module: {full_name}")
-        except BaseException as e:
+        except Exception as e:
             logger.error(f"Failed to load command module {full_name}: {e}")
 
     # User plugins
@@ -131,7 +132,7 @@ def discover_commands() -> None:
         try:
             importlib.import_module(plugin_file.stem)
             logger.info(f"Loaded plugin: {plugin_file.name}")
-        except BaseException as e:
+        except Exception as e:
             logger.error(f"Failed to load plugin {plugin_file.name}: {e}")
 
 
@@ -172,8 +173,12 @@ async def execute(intent: IntentResponse) -> list[StepResult]:
             else:
                 coro = loop.run_in_executor(None, lambda h=handler, p=params: h(**p))
             output = await asyncio.wait_for(coro, timeout=timeout)
-            msg = output if isinstance(output, str) else "Done."
-            result = StepResult(action=action, success=True, message=msg)
+            if isinstance(output, StepResult):
+                result = output
+                msg = output.message
+            else:
+                msg = output if isinstance(output, str) else "Done."
+                result = StepResult(action=action, success=True, message=msg)
             results.append(result)
             _log_audit(action, params, msg, True, intent)
         except asyncio.TimeoutError:

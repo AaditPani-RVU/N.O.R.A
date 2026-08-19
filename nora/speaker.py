@@ -99,7 +99,22 @@ def speak(text: str, mood: str | None = None) -> None:
     global _stop_requested
     if not text or not text.strip():
         return
+    # Real speech preempts any scheduled ack — otherwise "Mm-hm." collides with
+    # the first syllable of the actual reply.
+    try:
+        from nora import ack as _ack
+        _ack.cancel_ack()
+    except Exception:
+        pass
     logger.info(f"Speaking [{mood or 'info'}]: {text}")
+    # Everything NORA says goes into the transcript. Follow-ups reference
+    # action summaries ("did that work?") as often as chat replies, so this is
+    # captured centrally rather than at each call site.
+    try:
+        from nora import dialogue
+        dialogue.record_nora(text, kind=mood or "info")
+    except Exception:
+        pass
     _stop_requested = False
     _ui_notify(speaking=True, text=text)
     t = threading.Thread(target=_speak_streaming, args=(text, mood), daemon=True)
@@ -110,6 +125,9 @@ def speak(text: str, mood: str | None = None) -> None:
 
 def _gen_chunk(sentence: str, voice: str, rate: str, path: str) -> None:
     """Generate one sentence's audio file. Designed to run in a thread pool."""
+    from nora import tts_local
+    if tts_local.synth_if_enabled(sentence, rate, path):
+        return  # local Kokoro backend produced the chunk (STACK.md)
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(_generate_audio(sentence, voice, rate, path))

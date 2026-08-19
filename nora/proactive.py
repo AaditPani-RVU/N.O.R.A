@@ -70,6 +70,18 @@ def _mark_suggested() -> None:
 
 # â"€â"€ Pattern matching â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
+# Actions that require parameter context to produce a meaningful suggestion.
+# Without the params, "should I click on?" or "should I open app?" is useless.
+_CONTEXT_DEPENDENT_ACTIONS = frozenset({
+    "click_on", "click_element", "fill_field", "type_into_focused", "press_key",
+    "open_app", "delete_file", "who_opened", "rollback_to", "roll_back_to",
+    "wifi_connect", "snapshot_now", "duck_app_when_speaking", "focus_mode",
+    "recall", "ask_claude", "tell_me_about", "web_search", "deep_reasoning",
+    "copy_from_screen", "find_on_screen", "watch_for",
+    "apple_music_play_song", "apple_music_play_artist", "play_music",
+})
+
+
 def _time_bin(dt: datetime) -> str:
     h = dt.hour
     if h < 4:   return "midnight"
@@ -100,9 +112,17 @@ def _evaluate_proactive() -> None:
     # Check time-based patterns
     for p in patterns.get("time_patterns", []):
         when: str = p.get("when", "")
-        if current_dow_name in when and current_time_bin.replace("_", " ") in when:
+        when_parts = when.split(" ", 1)
+        if len(when_parts) != 2:
+            continue
+        when_day, when_tb = when_parts
+        if when_day != current_dow_name or when_tb != current_time_bin.replace("_", " "):
+            continue
+        if True:
             if p.get("count", 0) >= MIN_PATTERN_CONFIDENCE:
                 action = p["frequent_action"]
+                if action in _CONTEXT_DEPENDENT_ACTIONS:
+                    continue
                 phrase = _action_to_phrase(action)
                 suggestion = f"Based on your routine, should I {phrase}?"
                 logger.info("Proactive suggestion triggered: %s (pattern: %s x%d)",
@@ -115,11 +135,12 @@ def _evaluate_proactive() -> None:
     # Check strong workflow suggestions (top bigram with high confidence)
     for wf in patterns.get("workflow_patterns", [])[:3]:
         if wf.get("confidence", 0) >= MIN_PATTERN_CONFIDENCE * 2:
-            trigger = _action_to_phrase(wf["trigger"])
-            follows = _action_to_phrase(wf["follows"])
-            suggestion = f"You often {follows} after {trigger}. Want me to do that?"
-            logger.info("Workflow proactive: %s â†' %s (x%d)",
-                        wf["trigger"], wf["follows"], wf["confidence"])
+            trigger = wf["trigger"]
+            follows = wf["follows"]
+            if follows in _CONTEXT_DEPENDENT_ACTIONS:
+                continue
+            suggestion = f"You often {_action_to_phrase(follows)} after {_action_to_phrase(trigger)}. Want me to do that?"
+            logger.info("Workflow proactive: %s â†' %s (x%d)", trigger, follows, wf["confidence"])
             if _callback:
                 _callback(suggestion)
             _mark_suggested()

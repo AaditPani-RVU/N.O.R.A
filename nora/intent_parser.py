@@ -15,6 +15,8 @@ logger = logging.getLogger("nora.intent_parser")
 # Module-level singletons — avoid per-call client construction overhead
 _groq_client: "object | None" = None
 _claude_client: "object | None" = None
+# Flips false (per process) if the OpenAI-compatible endpoint rejects response_format
+_json_mode_ok = True
 
 
 def _get_groq_client(api_key: str, timeout_sec: float) -> "object":
@@ -22,9 +24,14 @@ def _get_groq_client(api_key: str, timeout_sec: float) -> "object":
     if _groq_client is None:
         import os
         from openai import OpenAI
+        # llm.api_base lets any OpenAI-compatible endpoint stand in for Groq
+        # (OpenRouter, Cerebras, Together free tiers) with zero code changes.
+        cfg = get_config().get("llm", {})
+        base_url = cfg.get("api_base", "https://api.groq.com/openai/v1")
+        key_env = cfg.get("api_key_env", "GROQ_API_KEY")
         _groq_client = OpenAI(
-            api_key=api_key or os.environ.get("GROQ_API_KEY", ""),
-            base_url="https://api.groq.com/openai/v1",
+            api_key=api_key or os.environ.get(key_env, ""),
+            base_url=base_url,
             timeout=timeout_sec,
         )
     return _groq_client
@@ -57,6 +64,7 @@ EXECUTION BIAS — CRITICAL (follow these exactly):
 - Single-word commands → execute the obvious default. "screenshot" → take_screenshot(). "time" → get_time().
 - Partial or colloquial phrases → find the closest registered action and execute it.
 - Questions or research requests → use ask_claude() or tell_me_about(). NEVER say "I need more info."
+- Hard multi-step reasoning, math, or logic problems (NOT everyday factual questions) → deep_reasoning().
 - ONLY return the Clarification shape for DESTRUCTIVE actions where two distinct targets are equally plausible
   and choosing the wrong one cannot be undone (e.g. "delete that" with two open files of the same name).
 - For everything else: execute first, let the user correct if needed.
@@ -93,7 +101,10 @@ RESPONSE FORMAT (exactly one of these four shapes):
   Conversation:   {{"intent": "chat", "steps": [], "response": "your spoken reply", "error": null}}
 
 Use the Conversation shape for greetings, small talk, or questions that need a spoken answer but no action.
-Conversation responses MUST be 1-2 sentences maximum — this is spoken aloud, not written text.
+Conversation responses are spoken aloud, so: no markdown, no lists, no emoji — plain sentences only.
+Length should fit the question. A greeting takes a few words; a real question takes two to four
+sentences. Do not pad, and do not truncate a genuine answer into a fragment. Sound like a person
+talking, not like a status line.
 
 Available actions: {actions}
 
@@ -176,6 +187,9 @@ User: "chrome"
 User: "how do black holes form"
 {{"intent": "research question", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do black holes form"}}}}], "requires_confirmation": false}}
 
+User: "if a train leaves chicago at 60mph and another leaves new york at 80mph, when do they meet"
+{{"intent": "math reasoning", "steps": [{{"action": "deep_reasoning", "parameters": {{"question": "if a train leaves chicago at 60mph and another leaves new york at 80mph, when do they meet"}}}}], "requires_confirmation": false}}
+
 User: "what's the weather"
 {{"intent": "check weather", "steps": [{{"action": "web_search", "parameters": {{"query": "weather today"}}}}], "requires_confirmation": false}}
 
@@ -184,6 +198,75 @@ User: "what did I say about the auth bug"
 
 User: "recall my notes on deployment"
 {{"intent": "search knowledge base", "steps": [{{"action": "recall", "parameters": {{"query": "deployment"}}}}], "requires_confirmation": false}}
+
+User: "click the address bar"
+{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "address bar"}}}}], "requires_confirmation": false}}
+
+User: "click the address bar in firefox"
+{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "address bar in firefox"}}}}], "requires_confirmation": false}}
+
+User: "click the submit button in chrome"
+{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "submit button in chrome"}}}}], "requires_confirmation": false}}
+
+User: "click the save button"
+{{"intent": "click UI element", "steps": [{{"action": "click_on", "parameters": {{"target": "save button"}}}}], "requires_confirmation": false}}
+
+User: "click the submit button"
+{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "submit button"}}}}], "requires_confirmation": false}}
+
+User: "fill the username field with john"
+{{"intent": "fill form field", "steps": [{{"action": "fill_field", "parameters": {{"label": "username", "text": "john"}}}}], "requires_confirmation": false}}
+
+User: "type hello world"
+{{"intent": "type text", "steps": [{{"action": "type_into_focused", "parameters": {{"text": "hello world"}}}}], "requires_confirmation": false}}
+
+User: "press enter"
+{{"intent": "press key", "steps": [{{"action": "press_key", "parameters": {{"keys": "Return"}}}}], "requires_confirmation": false}}
+
+User: "why is my fan loud"
+{{"intent": "cpu trace", "steps": [{{"action": "why_busy", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "why is my computer slow"
+{{"intent": "cpu trace", "steps": [{{"action": "why_busy", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "what's writing to disk"
+{{"intent": "disk IO trace", "steps": [{{"action": "what_writes_disk", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "who's using the most network"
+{{"intent": "network trace", "steps": [{{"action": "top_talkers", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "what process is using the network"
+{{"intent": "network trace", "steps": [{{"action": "top_talkers", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "who opened my ssh key"
+{{"intent": "file access trace", "steps": [{{"action": "who_opened", "parameters": {{"path": "~/.ssh/id_rsa"}}}}], "requires_confirmation": false}}
+
+User: "pause Spotify"
+{{"intent": "media control", "steps": [{{"action": "media_play_pause", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "next track"
+{{"intent": "media next", "steps": [{{"action": "media_next", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "connect to wifi CoffeeShop"
+{{"intent": "wifi connect", "steps": [{{"action": "wifi_connect", "parameters": {{"ssid": "CoffeeShop"}}}}], "requires_confirmation": false}}
+
+User: "snapshot now"
+{{"intent": "create snapshot", "steps": [{{"action": "snapshot_now", "parameters": {{"label": "manual"}}}}], "requires_confirmation": false}}
+
+User: "snapshot before refactor"
+{{"intent": "create snapshot", "steps": [{{"action": "snapshot_now", "parameters": {{"label": "before-refactor"}}}}], "requires_confirmation": false}}
+
+User: "roll back to before-refactor"
+{{"intent": "rollback snapshot", "steps": [{{"action": "rollback_to", "parameters": {{"label_or_time": "before-refactor"}}}}], "requires_confirmation": true}}
+
+User: "duck Spotify when I speak"
+{{"intent": "audio duck", "steps": [{{"action": "duck_app_when_speaking", "parameters": {{"app": "Spotify"}}}}], "requires_confirmation": false}}
+
+User: "enter focus mode for writing"
+{{"intent": "focus mode", "steps": [{{"action": "focus_mode", "parameters": {{"intent": "writing"}}}}], "requires_confirmation": false}}
+
+User: "enable mic denoising"
+{{"intent": "denoise mic", "steps": [{{"action": "denoise_mic", "parameters": {{}}}}], "requires_confirmation": false}}
 
 CRITICAL: Return ONLY the JSON object. No explanation, no markdown fences, no extra text."""
 
@@ -198,10 +281,11 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
         line for line in all_sigs.splitlines()
         if "mcp_" not in line and "MCP Tools" not in line
     ]
-    # Hard cap: keep under ~2000 chars so total prompt stays well under 5k tokens
+    # Hard cap: keep under ~4000 chars. Linux optional categories come last in
+    # get_action_signatures(), so the old 2000-char limit silently dropped all of them.
     native_sigs = "\n".join(native_sigs_lines)
-    if len(native_sigs) > 2000:
-        native_sigs = native_sigs[:2000] + "\n... (more actions available)"
+    if len(native_sigs) > 4000:
+        native_sigs = native_sigs[:4000] + "\n... (more actions available)"
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
         actions=", ".join(sorted(action_set)),
         action_signatures=native_sigs,
@@ -282,8 +366,25 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
             line = f'  {status} User: "{turn["text"]}" -> {turn["intent"]}'
             if turn.get("result_summary"):
                 line += f' | Result: {turn["result_summary"][:80]}'
+            # What NORA said back. Without it the model saw only half of each
+            # exchange and could not resolve "why did you say that".
+            if turn.get("reply"):
+                line += f' | You said: "{turn["reply"][:120]}"'
             turn_lines.append(line)
         prompt += "\n\n" + "\n".join(turn_lines)
+
+    # Verbatim recent dialogue — the structured turn list above summarises
+    # intents, but pronoun resolution needs the actual words.
+    try:
+        from nora import dialogue as _dlg
+        transcript = _dlg.as_transcript(6)
+        if transcript:
+            prompt += (
+                "\n\nVERBATIM RECENT DIALOGUE (resolve pronouns and follow-ups against this):\n"
+                + transcript
+            )
+    except Exception:
+        pass
 
     # Multimodal context fusion — inject screen snippet for deictic commands
     if screen_ctx:
@@ -354,9 +455,9 @@ def _parse_via_groq(
     import time as _time
     from openai import APIConnectionError, APITimeoutError
 
-    api_key = os.environ.get("GROQ_API_KEY", "")
+    api_key = os.environ.get(cfg.get("api_key_env", "GROQ_API_KEY"), "")
     if not api_key:
-        raise EnvironmentError("GROQ_API_KEY environment variable not set.")
+        raise EnvironmentError(f"{cfg.get('api_key_env', 'GROQ_API_KEY')} environment variable not set.")
 
     model = cfg.get("model", "llama-3.1-8b-instant")
     temperature = float(cfg.get("temperature", 0.1))
@@ -366,6 +467,7 @@ def _parse_via_groq(
 
     client = _get_groq_client(api_key, timeout_sec)
 
+    global _json_mode_ok
     last_exc: Exception = RuntimeError("no attempts made")
     for net_attempt in range(3):
         if net_attempt > 0:
@@ -373,6 +475,12 @@ def _parse_via_groq(
         for json_attempt in range(2):
             prompt = text if json_attempt == 0 else f"Return ONLY a valid JSON object for this command: {text}"
             logger.info(f"Sending to Groq (net {net_attempt+1}/3, json {json_attempt+1}/2): '{text}'")
+            # Enforced JSON mode: the endpoint constrains decoding to valid JSON,
+            # eliminating the fence-stripping/regex failure class entirely.
+            # Disabled once per process if the endpoint rejects response_format.
+            extra: dict = {}
+            if bool(cfg.get("json_mode", True)) and _json_mode_ok:
+                extra["response_format"] = {"type": "json_object"}
             try:
                 resp = client.chat.completions.create(
                     model=model,
@@ -382,6 +490,7 @@ def _parse_via_groq(
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": prompt},
                     ],
+                    **extra,
                 )
                 response_text = resp.choices[0].message.content or ""
                 logger.debug(f"Groq raw response: {response_text}")
@@ -399,6 +508,12 @@ def _parse_via_groq(
                 last_exc = e
                 break  # skip json retry, go straight to next network attempt
             except Exception as e:
+                if extra and "response_format" in str(e):
+                    # Endpoint/model doesn't support JSON mode — drop it for
+                    # the rest of the process and retry immediately.
+                    _json_mode_ok = False
+                    logger.warning("JSON mode rejected by endpoint — falling back to plain text")
+                    continue
                 logger.warning(f"Groq unexpected error: {e}")
                 last_exc = e
                 break
@@ -461,6 +576,35 @@ def _parse_via_claude(
     raise last_exc
 
 
+def _intent_json_schema() -> dict:
+    """Compact JSON Schema for IntentResponse, for constrained decoding.
+
+    Hand-written rather than IntentResponse.model_json_schema(): pydantic's
+    anyOf-nullable output over-constrains small local models; this keeps
+    only the fields the pipeline actually reads.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "intent": {"type": "string"},
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string"},
+                        "parameters": {"type": "object"},
+                    },
+                    "required": ["action"],
+                },
+            },
+            "requires_confirmation": {"type": "boolean"},
+            "response": {"type": "string"},
+        },
+        "required": ["intent", "steps"],
+    }
+
+
 def _parse_via_ollama(
     text: str, cfg: dict, memory_ctx: dict | None = None, screen_ctx: dict | None = None
 ) -> IntentResponse:
@@ -479,8 +623,20 @@ def _parse_via_ollama(
         "prompt": text,
         "system": system_prompt,
         "stream": False,
+        # Hybrid-reasoning models (qwen3, ...) spend the token budget on
+        # chain-of-thought before the schema-constrained JSON — with a voice
+        # command's max_tokens budget that leaves an empty/truncated
+        # response. Intent parsing needs speed, not deliberation.
+        "think": False,
         "options": {"temperature": temperature, "num_predict": max_tokens},
     }
+    # Constrained decoding (Ollama "format"): the model can only emit tokens
+    # matching the intent schema — invalid JSON becomes impossible, which is
+    # the single biggest reliability win for small local models.
+    if bool(cfg.get("structured_output", True)):
+        payload["format"] = _intent_json_schema()
+    else:
+        payload["format"] = "json"
 
     last_exc: Exception = RuntimeError("no attempts made")
     for net_attempt in range(3):

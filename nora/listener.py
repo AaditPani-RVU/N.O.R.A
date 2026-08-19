@@ -193,7 +193,7 @@ class Listener:
             return None
 
         logger.info("Wakeword triggered -- acknowledging and recording command")
-        _ack.speak_ack()
+        _ack.speak_ack(force=True)
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._record, False)
@@ -234,14 +234,14 @@ class Listener:
             # it will already be cleared. Play ack and record directly.
             if _ww.wait_for_trigger(timeout=0.05):
                 logger.info("Wakeword confirmed -- acknowledging and recording")
-                _ack.speak_ack()
+                _ack.speak_ack(force=True)
                 loop = asyncio.get_event_loop()
                 return await loop.run_in_executor(None, self._record, False)
 
             # PTT secondary: if key/button held, fire immediately
             loop = asyncio.get_event_loop()
             if await loop.run_in_executor(None, self._check_ptt_now):
-                _ack.speak_ack()
+                _ack.speak_ack(force=True)
                 return await loop.run_in_executor(None, self._record, True)
 
             return None  # neither triggered; caller loops

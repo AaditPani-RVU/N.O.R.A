@@ -167,10 +167,7 @@ class _WakewordDetector:
                             last_trigger = now
                             self._event.set()
                             for _cb in _wake_callbacks:
-                                try:
-                                    _cb()
-                                except Exception:
-                                    pass
+                                threading.Thread(target=_cb, daemon=True).start()
                             break
 
         except Exception as exc:

@@ -16,6 +16,11 @@ config.yaml example::
       - name: playwright
         transport: stdio
         command: ["npx", "@playwright/mcp@latest"]
+      - name: odysseus_memory
+        transport: stdio
+        command: ["/path/to/odysseus/venv/bin/python", "-m", "mcp_servers.memory_server"]
+        cwd: "/path/to/odysseus"          # working dir the child process runs from
+        env: {"ODYSSEUS_DATA_DIR": "/path/to/odysseus-data"}
       - name: my_server
         transport: http
         url: "http://localhost:8080/mcp"
@@ -70,10 +75,11 @@ class _MCPServer:
 class _MCPStdioServer(_MCPServer):
     """JSON-RPC MCP server over child-process stdin/stdout."""
 
-    def __init__(self, name: str, cmd: list[str], env: dict | None = None) -> None:
+    def __init__(self, name: str, cmd: list[str], env: dict | None = None, cwd: str | None = None) -> None:
         super().__init__(name)
         self._cmd = cmd
         self._env = env or {}
+        self._cwd = cwd
         self._proc: subprocess.Popen | None = None
 
     def start(self) -> bool:
@@ -87,6 +93,7 @@ class _MCPStdioServer(_MCPServer):
                 text=True,
                 bufsize=1,
                 env=merged,
+                cwd=self._cwd,
             )
             return self._initialize()
         except FileNotFoundError:
@@ -326,7 +333,9 @@ def load_all() -> None:
             if not cmd:
                 logger.warning("MCP server %s: no 'command' configured — skipping", name)
                 continue
-            srv: _MCPServer = _MCPStdioServer(name=name, cmd=cmd, env=cfg.get("env", {}))
+            srv: _MCPServer = _MCPStdioServer(
+                name=name, cmd=cmd, env=cfg.get("env", {}), cwd=cfg.get("cwd"),
+            )
         elif transport == "http":
             url = cfg.get("url", "")
             if not url:

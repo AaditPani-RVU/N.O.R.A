@@ -99,7 +99,7 @@ def _vision(image_b64: str, prompt: str, max_tokens: int = 400) -> str:
             },
         ],
     )
-    return resp.choices[0].message.content.strip()
+    return (resp.choices[0].message.content or "").strip()
 
 
 def _vision_json(image_b64: str, prompt: str) -> dict:
@@ -206,14 +206,25 @@ def click_on(target: str) -> str:
         if not before_data.get("found"):
             return f"I couldn't find '{target}' on the screen."
 
-        x_frac = float(before_data["x"])
-        y_frac = float(before_data["y"])
+        x_frac = before_data.get("x")
+        y_frac = before_data.get("y")
+        if x_frac is None or y_frac is None:
+            return f"Vision model found '{target}' but returned no coordinates."
+        x_frac = float(x_frac)
+        y_frac = float(y_frac)
         px_x = int(x_frac * screen_w)
         px_y = int(y_frac * screen_h)
         label = before_data.get("label", target)
 
-        # 2. Click
-        pyautogui.click(px_x, px_y)
+        # 2. Click — prefer ydotool/xdotool on Linux (Wayland-safe), fall back to pyautogui (X11)
+        if platform.system() == "Linux":
+            from nora.platform.linux import ydotool_input
+            if not ydotool_input.click(px_x, px_y):
+                import pyautogui as _pg
+                _pg.click(px_x, px_y)
+        else:
+            import pyautogui
+            pyautogui.click(px_x, px_y)
         logger.info("Clicked '%s' at (%d, %d)", label, px_x, px_y)
 
         # 3. Wait for UI to respond
@@ -430,17 +441,28 @@ def get_screen_snippet(max_chars: int = 250) -> tuple[str, str]:
                 ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
                 window_title = buf.value.strip()
             else:
-                for cmd in (
-                    ["xdotool", "getactivewindow", "getwindowname"],
-                    ["xprop", "-id", "$(xprop -root _NET_ACTIVE_WINDOW | awk '{print $5}')", "WM_NAME"],
-                ):
+                try:
+                    out = subprocess.run(
+                        ["xdotool", "getactivewindow", "getwindowname"],
+                        capture_output=True, text=True, timeout=2,
+                    ).stdout.strip()
+                    if out:
+                        window_title = out.splitlines()[0]
+                except Exception:
                     try:
-                        out = subprocess.run(cmd, capture_output=True, text=True, timeout=2).stdout.strip()
-                        if out:
-                            window_title = out.splitlines()[0]
-                            break
+                        wid = subprocess.run(
+                            ["sh", "-c", "xprop -root _NET_ACTIVE_WINDOW | awk '{print $5}'"],
+                            capture_output=True, text=True, timeout=2,
+                        ).stdout.strip()
+                        if wid and wid != "0x0":
+                            out = subprocess.run(
+                                ["xprop", "-id", wid, "WM_NAME"],
+                                capture_output=True, text=True, timeout=2,
+                            ).stdout.strip()
+                            if "=" in out:
+                                window_title = out.split("=", 1)[1].strip().strip('"')
                     except Exception:
-                        continue
+                        pass
         except Exception:
             pass
 

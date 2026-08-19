@@ -390,6 +390,12 @@ def brew_coffee(parameters: dict) -> str:
 | `plugins/gmail.py` | `gmail_search`, `gmail_draft`, `gmail_send` |
 | `plugins/google_calendar.py` | `cal_list`, `cal_create_event`, `cal_respond` |
 
+**Or build an MCP server** (works in NORA, Claude Code, and Claude Desktop at once):
+`python -m mcpforge new myserver` scaffolds a ready-to-run server — decorate plain
+Python functions with `@server.tool()` and the JSON Schema, protocol handshake, and
+transports are handled for you (zero dependencies, `mcpforge/`). Add it under
+`mcp_servers:` in `config.yaml` and every tool becomes voice-callable. See STACK.md.
+
 ---
 
 ## Roadmap

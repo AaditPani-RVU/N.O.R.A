@@ -16,15 +16,153 @@ transcriber:
   compute_type: "float16" # float16 on GPU, int8 on CPU
 
 llm:
-  provider: "groq"            # "groq" | "claude" | "ollama"
-  model: "llama-3.1-8b-instant"        # fast free-tier Groq model
-  # base_url: "http://localhost:11434"  # only needed for provider: ollama
+  # Local by default (NORA_ODYSSEUS_PLAN.md §2.4 — the highest-value privacy
+  # change here: every voice command used to leave the machine as text to
+  # Groq. qwen3:8b + Ollama's schema-constrained decoding keeps intent
+  # parsing on-device with equal reliability). GPU-accelerated via the GTX
+  # 1650 (partial offload — the 8B model doesn't fully fit in 4GB VRAM, but
+  # Ollama splits GPU/CPU automatically). Flip back to "groq" if Ollama
+  # isn't running.
+  provider: "ollama"          # "groq" | "claude" | "ollama"
+  model: "qwen3:8b"
+  base_url: "http://localhost:11434"
+  # Previous cloud default, kept for quick rollback:
+  # provider: "groq"
+  # model: "openai/gpt-oss-20b"          # llama-3.1-8b-instant was decommissioned (404s as of 2026-08)
+  # Any OpenAI-compatible free endpoint (OpenRouter, Cerebras) works via
+  # api_base + api_key_env below.
+  # api_base: "https://openrouter.ai/api/v1"
+  # api_key_env: "OPENROUTER_API_KEY"
+  json_mode: true             # Enforced JSON responses on groq/OpenAI-compatible endpoints
+  structured_output: true     # Ollama: constrain decoding to the intent schema (needs Ollama >= 0.5)
   temperature: 0.1
   max_tokens: 512
 
+llm_router:
+  # Adaptive multi-provider routing (nora/model_router.py, NORA_ODYSSEUS_PLAN.md
+  # Part 2 + §4.7). Each role is an ORDERED candidate chain — first one not in
+  # rate-limit cooldown wins. A 429 sends that candidate to cooldown (parses
+  # Retry-After when the provider sends one, else a 90s default) and the
+  # router falls through to the next candidate instead of failing the caller.
+  # Every attempt is logged to nora_model_router_log.jsonl (provider-per-request
+  # audit trail — see NORA_ODYSSEUS_PLAN.md §3).
+  #
+  # "local" candidates need Ollama running with the model pulled
+  # (`ollama pull qwen3:8b`) — harmless to leave configured before that's
+  # done, the router just logs a connection error and falls through.
+  roles:
+    # Used by nora/commands/deep_reasoning.py — rare, hard, multi-step
+    # questions. NVIDIA NIM first: Nemotron Ultra 253B is the biggest model
+    # NORA has free access to, credits don't refill (§1.4) so it's reserved
+    # for calls that actually need that class of model.
+    reasoning:
+      - name: nvidia_nemotron_super_120b
+        provider: nvidia
+        base_url: "https://integrate.api.nvidia.com/v1"
+        api_key_env: "NVIDIA_API_KEY"
+        model: "nvidia/nemotron-3-super-120b-a12b"
+        # Reasoning-tuned MoE (120B). Emits chain-of-thought in a separate
+        # `reasoning_content` field — router only reads `.content`, so the
+        # spoken/returned text is already just the final answer.
+      - name: groq_gpt_oss_120b
+        provider: groq
+        base_url: "https://api.groq.com/openai/v1"
+        api_key_env: "GROQ_API_KEY"
+        model: "openai/gpt-oss-120b"
+        extra_body:
+          # Without this Groq appends gpt-oss's analysis channel to
+          # `content`, and NORA reads its own scratchpad out loud.
+          reasoning_format: "hidden"
+      - name: local_qwen3_8b
+        provider: ollama
+        base_url: "http://localhost:11434"
+        model: "qwen3:8b"
+
+    # General conversational / research summarization (tell_me_about-class
+    # calls). Groq first — fast and already the free-tier default here —
+    # NVIDIA as a same-quality-class fallback, local last.
+    # Conversation (nora/conversation.py) and research summarization.
+    #
+    # NOTE: every Llama model on the free Groq tier was decommissioned —
+    # llama-3.3-70b-versatile and llama-3.1-8b-instant both 404 on this key
+    # now. The chat role was therefore falling through to a 15s NVIDIA call or
+    # the local 8B on every single turn, which is a large part of why NORA felt
+    # slow and flat to talk to. Verified working and fast as of 2026-08-18:
+    #   openai/gpt-oss-120b   ~1.1s   (Groq)
+    #   openai/gpt-oss-20b    ~0.5s   (Groq)
+    #   nvidia/nemotron-3-super-120b-a12b  ~0.3s
+    # nvidia/llama-3.3-nemotron-super-49b-v1 still resolves but takes ~16s —
+    # far too slow for a spoken turn, so it is no longer in this chain.
+    chat:
+      - name: groq_gpt_oss_120b
+        provider: groq
+        base_url: "https://api.groq.com/openai/v1"
+        api_key_env: "GROQ_API_KEY"
+        model: "openai/gpt-oss-120b"
+        extra_body:
+          # Without this Groq appends gpt-oss's analysis channel to
+          # `content`, and NORA reads its own scratchpad out loud.
+          reasoning_format: "hidden"
+      - name: groq_gpt_oss_20b
+        provider: groq
+        base_url: "https://api.groq.com/openai/v1"
+        api_key_env: "GROQ_API_KEY"
+        model: "openai/gpt-oss-20b"
+        extra_body:
+          # Without this Groq appends gpt-oss's analysis channel to
+          # `content`, and NORA reads its own scratchpad out loud.
+          reasoning_format: "hidden"
+      - name: nvidia_nemotron_120b
+        provider: nvidia
+        base_url: "https://integrate.api.nvidia.com/v1"
+        api_key_env: "NVIDIA_API_KEY"
+        model: "nvidia/nemotron-3-super-120b-a12b"
+      - name: local_qwen3_8b
+        provider: ollama
+        base_url: "http://localhost:11434"
+        model: "qwen3:8b"
+
 speaker:
-  voice: "en-GB-SoniaNeural"   # British female — NORA's voice
+  voice: "en-GB-SoniaNeural"   # British female — NORA's voice (used by edge-tts fallback)
   rate: "+20%"                  # Faster than default. Try "+30%" or "+40%" if you want snappier
+  backend: "kokoro"             # "edge" (cloud) | "kokoro" (fully local, see STACK.md) — removes the Microsoft edge-tts network call
+  kokoro:
+    model_path: "~/models/kokoro-v1.0.onnx"
+    voices_path: "~/models/voices-v1.0.bin"
+    voice: "bf_emma"          # British female, closest to Sonia
+
+conversation:
+  # Dedicated conversational path (nora/conversation.py). Chat turns used to be
+  # squeezed out of the JSON action-planner prompt at temperature 0.1 with a
+  # hard "1-2 sentences maximum" cap, which is why replies sounded clipped and
+  # canned. They now get their own speech-shaped prompt, real multi-turn
+  # history (nora/dialogue.py), and the llm_router "chat" role — i.e. the 70B
+  # model, with local fallback — at a warmer temperature.
+  #
+  # Set enabled:false to send every utterance back through the intent parser.
+  enabled: true
+  temperature: 0.7      # warm enough to vary phrasing between turns
+  history_turns: 12     # user+NORA turns fed back into each chat call
+  max_sentences: 6      # hard ceiling after shaping; per-act guidance is softer
+  timeout_sec: 20
+  # max_tokens: 240     # omit to use the per-dialogue-act budget
+
+ack:
+  # Acknowledgement tokens ("Mm-hm.", "One sec.") — the filler that covers the
+  # gap between you finishing and NORA answering (nora/ack.py).
+  #
+  # These used to synthesize at "+40%" on top of the speaker's "+20%", which
+  # compounded to a clipped, chipmunky delivery, and they fired on *every*
+  # utterance. Both are fixed: acks are now slower than normal speech (that's
+  # how people actually say them) and are deferred — scheduled `delay_sec` out
+  # and cancelled the instant real speech starts. On a fast command you hear
+  # nothing but the answer. Set enabled:false to drop them entirely.
+  enabled: true
+  rate: "-10%"        # relative to TTS baseline — negative on purpose
+  volume: 0.55        # quieter than the main voice
+  delay_sec: 0.55     # only heard when the response is genuinely slow
+  cooldown_sec: 6.0   # minimum gap between two audible acks
+  # phrases: ["Mm-hm.", "Mm.", "Sure.", "Okay.", "Right.", "One sec."]
 
 music:
   # Seconds of audio played when a command is wake-triggered (entrance + first command).
@@ -49,6 +187,22 @@ ambient:
   sample_rate: 16000
   chunk_sec: 5.0
 
+vision:
+  # Camera + face recognition. Opt-in, like ambient — nothing opens the
+  # camera until this is true and the perception loop is started.
+  # Deps: opencv-python, insightface, onnxruntime (buffalo_l pack ~300 MB on first run).
+  enabled: false
+  camera_index: 0
+  fps: 5                    # detection rate; embedding is event-driven, not per-frame
+  face:
+    enabled: true
+    match_threshold: 0.5    # cosine similarity; tune on real captures
+    greet_on_first_sight: true
+    regreet_after_seconds: 1800   # re-greet once absent this long; 0 = once per process
+    offer_enrollment_for_unknown: false
+    persist_unknown_embeddings: false   # keep false — unknown faces must leave no trace
+  detector_device: "cpu"    # "cuda" | "cpu" — falls back to CPU if onnxruntime has no CUDA provider
+
 cognitive_memory:
   # ChromaDB persistent store for semantic + episodic memory.
   # Embedder: all-MiniLM-L6-v2 (~80 MB download on first run).
@@ -62,6 +216,41 @@ proactive:
   idle_threshold_sec: 120          # Seconds of silence before proactive trigger
   suggestion_cooldown_sec: 1800    # Minimum gap between proactive suggestions
   min_pattern_confidence: 5        # Min times a pattern must be seen before suggesting
+
+user_model:
+  # Versioned learned preferences (CODEX_INTEGRATION.md 2.5). A proposed
+  # change is held for review, not applied silently.
+  preference_auto_apply_hours: 24  # Auto-apply a pending preference change after this long; 0 = apply immediately
+
+autonomy:
+  # Autonomy tiering + risk aggregation + trust ledgers (see CODEX_INTEGRATION.md).
+  # This layer can only ADD confirmation prompts on its own. Set
+  # allow_consent_skip: true to let NORA stop asking about action classes you
+  # always approve — never applies to high-risk or destructive actions.
+  enabled: true
+  allow_consent_skip: false
+  unproven_min_runs: 5             # Clean runs before a tool counts as proven
+  session_reversal_limit: 3        # Undos per session before a class must always confirm
+  consent_half_life_days: 30       # Decay: a month-old "yes" counts half a fresh one
+
+confidence:
+  # Verification loop (CODEX_INTEGRATION.md 2.6/5.11) — heuristic confidence
+  # over a parsed intent. Below this, NORA confirms instead of guessing.
+  clarify_below: 0.4
+
+focus:
+  # Attention model — when to speak, not just what to say (PipeWire-based).
+  # On a call: proactive speech is held. Media playing: deferred. Away: queued.
+  # Degrades to "available" on non-Linux or without pw-dump.
+  enabled: true
+  away_after_sec: 600              # Seconds without a command before you count as away
+
+silent_hours:
+  # Learned quiet windows (CODEX_INTEGRATION.md 5.6) — derived from the
+  # activity heatmap, not set by hand. Gates proactive speech alongside focus.
+  enabled: true
+  min_history_bins: 20             # Total logged actions needed before a pattern is trusted
+  quiet_threshold_frac: 0.03       # A time bin at/below this share of all activity counts as quiet
 
 timeouts:
   transcribe_sec: 30               # Max seconds for Whisper transcription before giving up
@@ -77,6 +266,8 @@ security:
     - shutdown
     - close_all_apps
     - lock_screen
+    - forget_face
+    - forget_all_faces
 
 neurosym:
   # NeuroSym-AI guardrail settings.
@@ -94,11 +285,6 @@ plugins:
   dir: "./plugins"                  # Drop .py files here; @register handlers auto-load
 
 # ── Sprint 1: Feel (Perception Layer) ─────────────────────────────────────
-
-ack:
-  # Pre-synthesized acknowledgement tokens for sub-300ms first phoneme response.
-  # Plays immediately when PTT is released, before Whisper or LLM has responded.
-  enabled: true
 
 barge_in:
   # Suppress TTS mid-sentence when the user starts speaking.
@@ -181,7 +367,9 @@ audit_log:
 reversible_actions:
   # Record compensating inverses for state-changing actions.
   # Voice: "undo the last thing you did" / "undo everything you did this morning"
+  # "undo the rename batch" (bundle tag) / "what would undo do?" (preview)
   enabled: true
+  announce_window_sec: 30   # Time-boxed undo window quoted in format_undo_announcement()
 
 # ── Remote Mic (Mac → Windows bridge) ────────────────────────────────────────
 remote_mic:
@@ -224,12 +412,49 @@ mcp_servers:
     transport: stdio
     command: ["uvx", "mcp-server-fetch"]
 
+  - name: arxiv
+    transport: stdio
+    command: ["python", "mcp_servers/arxiv_server.py"]
+    # Built with mcpforge — search_arxiv(query), get_arxiv_paper(arxiv_id).
+    # No API key needed, public arXiv API.
+
   - name: obsidian
     transport: stdio
     command: ["npx", "mcp-obsidian", "C:/path/to/your/vault"]
     # 1. Replace path with your actual Obsidian vault path (use forward slashes)
     # 2. Install "Local REST API" community plugin in Obsidian
     # 3. Add OBSIDIAN_API_KEY from plugin settings to .env
+
+  # --- Odysseus (NORA_ODYSSEUS_PLAN.md, Direction B) ---
+  # Odysseus's own MCP servers, run from a dedicated venv (not Odysseus's Docker
+  # container — nothing there can reach a stdio child process NORA spawns).
+  # Both entries below default ODYSSEUS_DATA_DIR to <odysseus repo>/data, which
+  # is the same path Odysseus's docker-compose.yml mounts by default
+  # (${APP_DATA_DIR:-./data}) — so this reads/writes the same store a Docker
+  # deployment would, no divergent copies. Verified working 2026-08-12: tools
+  # register and round-trip real add/list calls.
+  - name: odysseus_memory
+    transport: stdio
+    command: ["/home/aadit/Projects/odysseus/venv/bin/python", "-m", "mcp_servers.memory_server"]
+    cwd: "/home/aadit/Projects/odysseus"
+    # Registers mcp_odysseus_memory_manage_memory(action, text, memory_id, category).
+    # If your Odysseus memory entries are owner-scoped, uncomment and set:
+    # env:
+    #   ODYSSEUS_MCP_MEMORY_OWNER: "your_owner_id"
+
+  - name: odysseus_rag
+    transport: stdio
+    command: ["/home/aadit/Projects/odysseus/venv/bin/python", "-m", "mcp_servers.rag_server"]
+    cwd: "/home/aadit/Projects/odysseus"
+    # Registers mcp_odysseus_rag_manage_rag(action, directory) —
+    # list / add_directory / remove_directory over Odysseus's RAG index.
+    # Vector search quality depends on Odysseus's embedding deps being
+    # installed in venv/ — falls back gracefully (e.g. "not indexed") if not.
+
+  # odysseus_email intentionally omitted: email_server.py talks to a live
+  # Dovecot IMAP instance that isn't deployed in this environment yet. Add it
+  # once Odysseus's Docker stack (or at least Dovecot) is actually running —
+  # see NORA_ODYSSEUS_PLAN.md §4.2.
 
 websocket_api:
   # Authenticated WebSocket API for mobile PTT, typed commands, and push notifications.

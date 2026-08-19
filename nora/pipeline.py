@@ -6,7 +6,7 @@ import threading
 
 import numpy as np
 
-from nora import ambient, anomaly_watchdog, audit_log, cognitive_memory, command_engine, consolidation, context, intent_parser, memory, neurosym_guard, proactive, reversible, security, session_briefing, speaker, terminal_monitor, text_input, transcriber
+from nora import ambient, anomaly_watchdog, audit_log, autonomy, cognitive_memory, command_engine, confidence, consent_memory, consolidation, context, conversation, dialogue, focus, intent_parser, memory, neurosym_guard, phrasing, post_action_cards, proactive, reversible, risk, security, session_briefing, speaker, terminal_monitor, text_input, tool_trust, transcriber, vision
 from nora import ack as _ack
 from nora import wakeword as _ww
 from nora.config import get_config
@@ -34,10 +34,11 @@ def summarize_results(results: list[StepResult]) -> str:
     messages = []
     for r in results:
         if r.success:
-            messages.append(r.message)
+            if r.message:
+                messages.append(r.message)
         else:
-            messages.append(f"Failed: {r.message}")
-    return ". ".join(messages)
+            messages.append(f"Failed: {r.message or 'unknown error'}")
+    return ". ".join(messages) if messages else "Done."
 
 
 def is_wake_phrase(text: str) -> bool:
@@ -73,21 +74,27 @@ async def run() -> None:
     # Start ambient transcription (no-op if disabled in config)
     ambient.start()
 
+    # Start camera perception (no-op if vision.enabled is false)
+    vision.start()
+
     # Warm up cognitive memory (ChromaDB + embedder) in background
     cognitive_memory.warm_up()
 
     # Start proactive intelligence engine
-    proactive.register_callback(speaker.speak)
+    # Proactive speech is gated by the focus/attention model (CODEX_INTEGRATION.md 5.5)
+    proactive.register_callback(focus.gated(speaker.speak))
     proactive.start()
 
     # Start keyboard text input fallback
     text_input.start()
 
-    # Pre-synthesize ack tokens in background (enables sub-300ms first phoneme)
+    # Pre-synthesize ack tokens in background. Rate is intentionally left to
+    # ack.py's own (slower) default — inheriting the speaker's boosted rate is
+    # what made acks sound clipped and unnatural.
     cfg_spk = get_config().get("speaker", {})
     threading.Thread(
         target=_ack.preload,
-        kwargs={"voice": cfg_spk.get("voice", "en-GB-SoniaNeural"), "rate": "+40%"},
+        kwargs={"voice": cfg_spk.get("voice", "en-GB-SoniaNeural")},
         daemon=True,
         name="nora-ack-preload",
     ).start()
@@ -165,7 +172,8 @@ async def run() -> None:
     timeouts = get_config().get("timeouts", {})
     transcribe_timeout = float(timeouts.get("transcribe_sec", 30))
     llm_timeout = float(timeouts.get("llm_sec", 20))
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
+    from nora import ui_server  # imported here so both text-input and voice paths can use it
 
     # â"€â"€ Command loop â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     while True:
@@ -175,13 +183,13 @@ async def run() -> None:
             # 1. Check for keyboard text input first (non-blocking)
             text = text_input.get_pending()
             rms = 0.0
+            mem_ctx: dict = {}  # ensure always bound before LLM branch
 
             if text:
                 logger.info(f"Text input: {text}")
                 print(f"[NORA] Text from UI: {text}", flush=True)
             else:
                 # 1b. Listen for voice
-                from nora import ui_server
                 ui_server.notify_stage("listening")
                 audio = await listener.listen()
                 if audio is None or len(audio) < 1600:
@@ -203,7 +211,7 @@ async def run() -> None:
                     )
                 except asyncio.TimeoutError:
                     logger.warning("Transcription timed out -- discarding audio")
-                    speaker.speak("Transcription timed out. Please try again.", mood="error")
+                    speaker.speak(phrasing.get("too_slow"), mood="error")
                     ui_server.notify_stage("idle")
                     continue
 
@@ -216,7 +224,7 @@ async def run() -> None:
             if not input_safe:
                 severity = input_violations[0].get("severity", "unknown") if input_violations else "unknown"
                 logger.warning(f"NeuroSym blocked input [{severity}]: {text[:80]}")
-                speaker.speak("That command was blocked by the security layer.", mood="error")
+                speaker.speak(phrasing.get("blocked"), mood="error")
                 cognitive_memory.record_knowledge(text, source="blocked_input")
                 ui_server.notify_stage("idle")
                 continue
@@ -224,6 +232,10 @@ async def run() -> None:
             logger.info(f"Heard: {text}")
             print(f"[NORA] Heard: {text}")
             text_lower = text.lower().strip().rstrip(".,!?")
+
+            # Every heard utterance joins the transcript, command or not — a
+            # follow-up two turns later may well reference a command.
+            dialogue.record_user(text)
 
             # Log every utterance to the knowledge base
             ambient.log_entry(text, source="command")
@@ -238,14 +250,15 @@ async def run() -> None:
                 continue
 
             exit_words = ["exit", "quit", "goodbye", "good bye", "shut down nora", "stop nora", "go to sleep"]
-            if any(word in text_lower for word in exit_words):
-                speaker.speak("Goodbye, sir.")
+            if text_lower in exit_words or any(text_lower.startswith(w + " ") and len(text_lower.split()) <= 4 for w in exit_words):
+                speaker.speak(phrasing.get("goodbye"))
                 logger.info("Exit command received. Shutting down.")
                 ambient.stop()
+                vision.stop()
                 return
 
             if is_wake_phrase(text_lower):
-                speaker.speak("I'm already here, sir.")
+                speaker.speak(phrasing.get("already_awake"), mood="chat")
                 continue
 
             # 3a. Fast-path: deterministic resolution before the LLM is ever touched.
@@ -258,6 +271,10 @@ async def run() -> None:
                 ui_server.notify_stage("speaking")
                 speaker.speak(_fast_intent.response, mood="chat")
                 ui_server.notify_stage("idle")
+                context.add_session_turn(
+                    text=text, intent="chat", actions=[], result_summary="",
+                    success=True, reply=_fast_intent.response,
+                )
                 frustration.record(text_lower, rms=rms, success=True)
                 continue
 
@@ -267,13 +284,59 @@ async def run() -> None:
                 intent = _fast_intent
                 has_blocked, needs_confirm = security.check_steps(intent.steps)
                 if has_blocked:
-                    speaker.speak("That action is blocked by the security policy.")
+                    speaker.speak(phrasing.get("blocked"), mood="error")
                     frustration.record(text_lower, rms=rms, success=False)
                     ui_server.notify_stage("idle")
                     continue
                 if needs_confirm:
                     intent.requires_confirmation = True
             else:
+                # 3a'. Conversational routing — decide "talk" vs "do" before the
+                # action planner is consulted. Chat used to be extracted from the
+                # JSON execution prompt, which is why it sounded like a form
+                # letter; conversational acts now go to a path built for speech.
+                # The classifier resolves ambiguity toward COMMAND, so anything
+                # that might be an instruction still takes the action path.
+                _act = dialogue.classify(text)
+                if conversation.should_handle(_act):
+                    logger.info(f"Conversational act: {_act.value}")
+                    print(f"[NORA] Conversation ({_act.value})")
+                    ui_server.notify_stage("thinking")
+
+                    _chat_ctx = memory.get_context_summary()
+                    _chat_ctx["relevant_context"] = cognitive_memory.get_context_for_prompt(
+                        text, n=2
+                    ).get("relevant_context", [])
+
+                    try:
+                        reply = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None, conversation.respond, text, _chat_ctx, _act
+                            ),
+                            timeout=llm_timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("Conversation reply timed out")
+                        reply = phrasing.get("too_slow")
+                    except Exception as exc:
+                        logger.warning(f"Conversation reply failed: {exc}")
+                        reply = phrasing.get("recovered")
+
+                    ui_server.notify_stage("speaking")
+                    speaker.speak(reply, mood="chat")
+                    ui_server.notify_stage("idle")
+
+                    # Chat turns reach the session buffer too. They never did
+                    # before, which is why NORA could not follow its own thread.
+                    context.add_session_turn(
+                        text=text, intent=f"chat:{_act.value}", actions=[],
+                        result_summary="", success=True, reply=reply,
+                    )
+                    context.record_command(text=text, intent="chat", actions=[])
+                    focus.note_activity()
+                    frustration.record(text_lower, rms=rms, success=True)
+                    continue
+
                 # 3b. No fast-path match — build enriched context and call the LLM
                 mem_ctx = memory.get_context_summary()
                 mem_ctx["recent_commands"] = context.recent_commands()[:3]
@@ -305,14 +368,14 @@ async def run() -> None:
                 except asyncio.TimeoutError:
                     logger.warning("Intent parsing timed out")
                     print("[NORA] Intent parsing timed out")
-                    speaker.speak("That took too long. Please try again.", mood="error")
+                    speaker.speak(phrasing.get("too_slow"), mood="error")
                     frustration.record(text_lower, rms=rms, success=False)
                     ui_server.notify_stage("idle")
                     continue
                 except Exception as e:
                     logger.warning(f"Intent parsing failed: {e}")
                     print(f"[NORA] Intent parsing error: {e}")
-                    speaker.speak("I didn't understand that. Could you repeat?", mood="error")
+                    speaker.speak(phrasing.get("not_understood"), mood="error")
                     frustration.record(text_lower, rms=rms, success=False)
                     ui_server.notify_stage("idle")
                     continue
@@ -324,9 +387,9 @@ async def run() -> None:
                         "more information", "more detail", "please provide",
                     )
                     if any(w in intent.error.lower() for w in _clarify_words):
-                        speaker.speak("I didn't catch that — could you rephrase?", mood="error")
+                        speaker.speak(phrasing.get("not_understood"), mood="error")
                     else:
-                        speaker.speak(f"Something went wrong: {intent.error}", mood="error")
+                        speaker.speak(f"{phrasing.get('error')} {intent.error}", mood="error")
                     frustration.record(text_lower, rms=rms, success=False)
                     ui_server.notify_stage("idle")
                     continue
@@ -335,7 +398,7 @@ async def run() -> None:
                 ui_server.notify_stage("guarding")
                 plan_safe, plan_needs_confirm, plan_violations = neurosym_guard.check_intent(intent)
                 if not plan_safe:
-                    speaker.speak("That action plan was blocked by the security policy.", mood="error")
+                    speaker.speak(phrasing.get("blocked"), mood="error")
                     frustration.record(text_lower, rms=rms, success=False)
                     ui_server.notify_stage("idle")
                     continue
@@ -345,30 +408,52 @@ async def run() -> None:
                 # Config-based block list
                 has_blocked, needs_confirm = security.check_steps(intent.steps)
                 if has_blocked:
-                    speaker.speak("That action is blocked by the security policy.")
+                    speaker.speak(phrasing.get("blocked"), mood="error")
                     frustration.record(text_lower, rms=rms, success=False)
                     ui_server.notify_stage("idle")
                     continue
                 if needs_confirm:
                     intent.requires_confirmation = True
 
-                # Conversational response — no actionable steps
+                # Conversational response — no actionable steps.
+                # The planner deciding there is nothing to execute *is* the
+                # signal that this turn is conversation. Rather than speak the
+                # `response` slot it squeezed out of a JSON schema, hand the
+                # turn to the conversation engine and let it answer properly.
                 if not intent.steps and not intent.error:
-                    _clarify_words = (
-                        "more context", "more information", "more detail",
-                        "be more specific", "what do you mean", "please specify",
-                        "which one", "i'm not sure what", "i don't understand",
-                        "can you tell me more",
-                    )
-                    _raw_reply = intent.response or ""
-                    if any(w in _raw_reply.lower() for w in _clarify_words):
-                        reply = "I didn't quite catch that — could you rephrase?"
+                    _raw_reply = (intent.response or "").strip()
+                    if conversation.should_handle(dialogue.Act.UNKNOWN):
+                        ui_server.notify_stage("thinking")
+                        try:
+                            reply = await asyncio.wait_for(
+                                loop.run_in_executor(
+                                    None, conversation.respond, text, mem_ctx, dialogue.Act.UNKNOWN
+                                ),
+                                timeout=llm_timeout,
+                            )
+                        except Exception as exc:
+                            logger.warning(f"Conversation fallback failed: {exc}")
+                            reply = conversation.for_speech(_raw_reply) or phrasing.get("need_specifics")
                     else:
-                        reply = _raw_reply or "I'm not sure how to handle that."
+                        _clarify_words = (
+                            "more context", "more information", "more detail",
+                            "be more specific", "what do you mean", "please specify",
+                            "which one", "i'm not sure what", "i don't understand",
+                            "can you tell me more",
+                        )
+                        if not _raw_reply or any(w in _raw_reply.lower() for w in _clarify_words):
+                            reply = phrasing.get("need_specifics")
+                        else:
+                            reply = conversation.for_speech(_raw_reply)
+
                     ui_server.notify_stage("speaking")
                     speaker.speak(reply, mood="chat")
                     ui_server.notify_stage("idle")
-                    frustration.record(text_lower, rms=rms, success=bool(_raw_reply))
+                    context.add_session_turn(
+                        text=text, intent="chat", actions=[], result_summary="",
+                        success=True, reply=reply,
+                    )
+                    frustration.record(text_lower, rms=rms, success=bool(reply))
                     continue
 
             # Tag intent with user text for audit log
@@ -387,6 +472,7 @@ async def run() -> None:
                 intent=intent.intent,
                 actions=[s.action for s in intent.steps],
             )
+            focus.note_activity()
 
             # 4a. Autonomous task routing — ReAct planner for complex goals
             if intent_parser.is_autonomous_task(text) and len(intent.steps) == 0:
@@ -411,13 +497,31 @@ async def run() -> None:
             if _has_destructive and not intent.requires_confirmation:
                 intent.requires_confirmation = True
 
+            # 4b'. Codex autonomy layer — risk aggregation + tier classification
+            # (CODEX_INTEGRATION.md 2.1/2.2). Can escalate confirmation on its own;
+            # can drop it only via explicit config opt-in for proven, safe classes.
+            action_risk = risk.assess(intent)
+            tier = autonomy.classify(intent, action_risk)
+            if tier in (autonomy.AutonomyTier.NEEDS_CONSENT, autonomy.AutonomyTier.SUGGEST):
+                intent.requires_confirmation = True
+            elif intent.requires_confirmation and not _has_destructive and autonomy.may_skip_confirmation(intent):
+                intent.requires_confirmation = False
+
+            # 4b''. Verification loop for low-confidence intents (CODEX_INTEGRATION.md
+            # 2.6/5.11) — a plausible-but-wrong guess gets a confirm, not a silent run.
+            intent_confidence = confidence.estimate(intent, text)
+            if intent.steps and confidence.needs_clarification(intent_confidence):
+                intent.requires_confirmation = True
+
             # 4c. Confirmation prompt — kept brief so it doesn't feel like bureaucracy
             if intent.requires_confirmation:
                 step_labels = " → ".join(s.action.replace("_", " ") for s in intent.steps[:6])
                 speaker.speak(f"{step_labels}. Confirm?", mood="confirmation")
                 confirmed = await confirmation_flow(listener)
+                # Consent memory learns from every prompt (CODEX_INTEGRATION.md 5.2)
+                consent_memory.record([s.action for s in intent.steps], confirmed)
                 if not confirmed:
-                    speaker.speak("Cancelled.")
+                    speaker.speak(phrasing.get("cancelled"))
                     ui_server.notify_stage("idle")
                     continue
 
@@ -425,6 +529,13 @@ async def run() -> None:
             ui_server.notify_stage("acting")
             results = await command_engine.execute(intent)
             context.wake_triggered = False
+
+            # Tool trust ledger scores every invocation (CODEX_INTEGRATION.md 2.4)
+            for r in results:
+                tool_trust.record(r.action, r.success)
+
+            # Post-action explanation card — "why did you do that" (CODEX_INTEGRATION.md 5.3)
+            post_action_cards.build(text, intent, results, intent_confidence)
 
             if context.is_cancelled():
                 logger.info("Cancellation observed after execute -- dropping response.")
@@ -486,6 +597,7 @@ async def run() -> None:
             speaker.speak("Shutting down.")
             logger.info("Keyboard interrupt. Exiting.")
             ambient.stop()
+            vision.stop()
             proactive.stop()
             consolidation.stop()
             terminal_monitor.stop()
@@ -493,4 +605,4 @@ async def run() -> None:
             break
         except Exception as e:
             logger.error(f"Pipeline error: {e}", exc_info=True)
-            speaker.speak("Something went wrong. I'm still listening.")
+            speaker.speak(phrasing.get("recovered"), mood="error")

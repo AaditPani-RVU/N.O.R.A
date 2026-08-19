@@ -176,9 +176,8 @@ async def watch_path(path: str) -> str:
                 if "OPEN" in line or path in line:
                     logger.info("path_watch event: %s", line)
                     try:
-                        from nora.pipeline import speak_callback
-                        if speak_callback:
-                            speak_callback(f"File access alert: {line}")
+                        from nora import speaker as _spk
+                        _spk.speak(f"File access alert: {line}")
                     except Exception:
                         pass
             proc.terminate()
@@ -237,9 +236,8 @@ def _drill_down_cb(metric: str, value: float) -> None:
     async def _trace_and_speak() -> None:
         try:
             narration = await _run_and_narrate(script, 5)
-            from nora.pipeline import speak_callback
-            if speak_callback:
-                speak_callback(narration)
+            from nora import speaker as _spk
+            _spk.speak(narration)
         except Exception as e:
             logger.debug("drill-down trace failed: %s", e)
 

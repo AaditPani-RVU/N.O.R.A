@@ -192,6 +192,144 @@ PipeWire graph mutation gives NORA something no proprietary OS allows: live re-r
 
 ---
 
+---
+
+### F6 — systemd / journald Voice Interface
+
+Every Linux machine has systemd. NORA grows a full voice interface to it: start/stop/enable services, query structured logs, explain failures, and analyse boot time — all via natural language. "Why did my server crash last night?" → NORA queries journald with the right filters, pipes the structured output to the LLM, and speaks a plain-English root-cause summary. This is the most universally useful Linux-exclusive feature; nothing equivalent exists on Windows or macOS as an unprivileged API.
+
+**Library:** `systemd.journal` Python bindings (`python3-systemd`, ships in Debian/Fedora) for journald; `dbus-next` reuses F2's invoker for `org.freedesktop.systemd1` service control. `systemd-analyze` via subprocess for boot forensics.
+
+**New files:**
+- `nora/platform/linux/systemd_journal.py` — structured journal reader with cursor-based pagination and field filtering.
+- `nora/platform/linux/systemd_units.py` — unit lifecycle (start/stop/enable/disable/reload) via D-Bus, no sudo required for user units; polkit prompt for system units.
+- `nora/commands/systemd_voice.py`
+
+**Registered actions (new category `system`):**
+- `service_status(name)` — risk low
+- `service_start(name)` / `service_stop(name)` / `service_restart(name)` — risk medium, system units require confirmation
+- `service_enable(name)` / `service_disable(name)` — risk medium
+- `journal_query(unit, since, until, priority)` — risk low; LLM summarises output
+- `explain_last_failure(unit)` — risk low; pulls coredump context if available via `coredumpctl`
+- `boot_analysis()` — risk low; `systemd-analyze blame` parsed and ranked
+- `list_failed_units()` — risk low
+
+**Cognitive hooks:** `record_episode("service_failure", ...)` on every `explain_last_failure` call so proactive engine can surface "nginx failed again — want me to check the logs?" after recurring failures.
+
+**Landmines:**
+- User vs. system bus: user units need `--user`; system units need polkit. Tag every unit with its bus at discovery time.
+- `journal_query` output can be enormous — hard cap at 500 lines before LLM summarisation; use `PRIORITY` field to pre-filter noise.
+- `coredumpctl` needs `systemd-coredump` installed — graceful degrade if absent.
+
+**Install:** `sudo apt install python3-systemd`. Zero new system deps beyond what's already running.
+
+**Demo:** Background `nginx` fails silently. Voice: "Why did nginx fail?" → NORA queries journald for the last nginx failure, finds a port 80 bind error, speaks "nginx couldn't bind to port 80 — something else is already using it. Want me to find what?" Voice: "Check boot time" → "Your slowest boot unit is snapd at 8.4 seconds. The next three are…"
+
+---
+
+### F7 — cgroups v2 Resource Governor
+
+Voice-controlled, real-time resource limiting for any process tree — no sudo, no kernel modules, no reboot. Uses `systemd-run --scope` to place a running process (or a new one) into a transient cgroup with CPU quota, memory high/max, and I/O weight constraints. "NORA, throttle Chrome to 4 cores and 1 GB RAM while I compile" takes effect in under 100ms. On a 12-core Ryzen running heavy builds alongside a browser this is genuinely useful every day.
+
+**Library:** `dbus-next` (reuses F2's invoker) against `org.freedesktop.systemd1` `StartTransientUnit` method. Reading current resource usage from `/sys/fs/cgroup/<slice>/` directly via Python `open()` — no external tools needed.
+
+**New files:**
+- `nora/platform/linux/cgroup_manager.py` — creates/updates/removes transient scopes; reads current cgroup accounting (`cpu.stat`, `memory.current`, `io.stat`).
+- `nora/commands/resource_governor.py`
+
+**Registered actions (new category `resources`):**
+- `limit_app(app, cpu_cores=None, memory_mb=None, io_weight=None)` — risk low
+- `unlimit_app(app)` — risk low
+- `resource_usage(app)` — risk low; reads live cgroup stats
+- `top_resource_hogs(n=5)` — risk low; ranks current cgroup slices by CPU + memory
+- `throttle_build(cpu_cores)` — shortcut that finds the most recent compiler process tree
+
+**How it works (no sudo):** `systemd-run --user --scope --slice=nora.slice -p CPUQuota=400% -p MemoryMax=1G --pid <PID> sleep inf` moves the existing PID into a managed scope. WirePlumber already runs user slices this way. `CPUQuota=400%` = 4 cores on any CPU count. Memory limits use cgroups v2 `memory.high` (soft, no OOM kill) by default; `memory.max` only on explicit user request.
+
+**Cognitive hooks:** `record_episode("resource_limit", context={"app": ..., "cpu": ..., "mem": ...})` so NORA learns your habitual limits and can pre-apply them ("you always throttle Chrome during builds — want me to do that automatically?").
+
+**Landmines:**
+- cgroups v2 unified hierarchy must be mounted at `/sys/fs/cgroup` (default on Debian 11+/Fedora 31+ with systemd 245+); detect and refuse gracefully on v1.
+- `CPUQuota` > number-of-cores is valid (burst) — don't cap it; just warn if the user asks for more cores than exist.
+- `memory.high` is a soft limit (reclaim pressure, no kill); `memory.max` is hard (OOM kill). Default to `high` and require explicit confirmation for `max`.
+- App-to-PID resolution: use `/proc/<pid>/cmdline` + `cgroup` file to find the right process; if multiple instances exist, ask which one.
+
+**Install:** Zero — `systemd-run` and cgroups v2 are present on every modern Debian/Fedora system.
+
+**Demo:** `cargo build` pegs all 12 threads, fan spins up. Voice: "NORA, throttle the build to 6 cores." → `CPUQuota=600%` applied in ~80ms, fan slows. Voice: "How much memory is Chrome using?" → "Chrome's cgroup is at 1.2 GB RSS with a 2 GB soft cap." Voice: "What are the top resource hogs right now?" → ranked list by CPU + memory from live cgroup accounting.
+
+---
+
+### F8 — fanotify Security Watchdog
+
+`fanotify` is a Linux kernel API that lets an unprivileged process intercept and audit every file access in a directory subtree — and optionally *deny* the access before it completes. NORA uses it to watch sensitive paths (`~/.ssh`, `~/.env`, `~/.gnupg`, `~/.config/nora/`) and alert immediately when any process reads or modifies them, with full PID/binary/parent-chain attribution. Goes further than F3's bpftrace (which is read-only observation): fanotify can block the access entirely while NORA asks you.
+
+**Library:** `python-fanotify` (thin ctypes wrapper, no C build needed) or direct `ctypes` syscall to `fanotify_init` + `fanotify_mark`. A dedicated thread reads the event queue; results crossed into asyncio via `asyncio.Queue`.
+
+**New files:**
+- `nora/platform/linux/fanotify_watcher.py` — `FanotifyWatcher` class: `watch(path, events)`, `unwatch(path)`, async event stream. Runs in a daemon thread; no privilege required for `FAN_CLASS_NOTIF` (read-only audit). `FAN_CLASS_CONTENT` (deny-capable) requires `CAP_SYS_ADMIN` — uses the same privileged-helper pattern as F3.
+- `nora/commands/security_watch.py`
+
+**Registered actions (new category `security`):**
+- `watch_sensitive(paths=None)` — risk low; defaults to `~/.ssh`, `~/.gnupg`, `~/.env*`; starts audit-only watcher
+- `unwatch_sensitive()` — risk low
+- `list_watched_paths()` — risk low
+- `explain_last_access(path)` — risk low; LLM narrates the access chain (who → what → why likely)
+- `block_path(path)` — risk high, requires privileged helper; any access attempt triggers a NORA confirmation prompt
+
+**Cognitive hooks:** Every alert fires `record_episode("sensitive_file_access", context={"path": ..., "pid": ..., "binary": ...})`. After 3+ accesses by the same binary NORA proactively asks whether to whitelist or block it.
+
+**Landmines:**
+- `FAN_CLASS_NOTIF` works unprivileged for directories the user owns; system paths need the privileged helper.
+- Recursive watching requires `FAN_MARK_FILESYSTEM` (kernel 4.20+) or per-directory marks — use the per-directory fallback for portability.
+- High-frequency paths (e.g. `~/.config/pulse`) will flood the queue — allow-list by inode, not just path string.
+- Deny mode (`FAN_CLASS_CONTENT`) holds the kernel syscall until NORA responds — must respond within 30s or the kernel auto-allows.
+
+**Install:** `pip install python-fanotify` (or pure ctypes, zero apt deps).
+
+**Demo:** Voice: "NORA, watch my SSH keys." → Thirty seconds later a script touches `~/.ssh/id_rsa`. NORA speaks: "Alert: `/usr/bin/python3` (PID 4821, parent: bash) just read your SSH private key. Want me to block it?" Voice: "Yes, block it." → fanotify deny mode activated; the next access is blocked at the kernel and NORA announces it.
+
+---
+
+### F9 — AMD pstate / Thermal Power Governor
+
+Your Ryzen 5 5600H supports `amd_pstate_epp` — Linux's energy-performance preference hints that bypass the BIOS and write directly to MSR registers. This is a Linux-exclusive feature: Windows exposes a coarse "power plan" abstraction; Linux lets you set per-core EPP values, CPU frequency scaling governors, and (on supported boards) package TDP limits via `amd_energy` or `zenpower`. NORA turns this into a voice-controlled power profile that actually changes hardware behaviour, not just software scheduling.
+
+**Library:** Direct `/sys/devices/system/cpu/cpu*/cpufreq/` writes via Python `open()` — no external tools. `subprocess` against `cpupower` for frequency range overrides. Thermal readings from `/sys/class/hwmon/hwmon*/temp*` and `/sys/class/powercap/` (RAPL) for real-time watt readings.
+
+**New files:**
+- `nora/platform/linux/power_governor.py` — EPP writer, governor switcher, RAPL reader, hwmon temperature poller.
+- `nora/commands/power_voice.py`
+
+**Registered actions (new category `power`):**
+- `set_power_profile(profile)` — profiles: `performance`, `balanced`, `battery`, `quiet`; risk low
+- `get_power_stats()` — risk low; current governor, EPP, package watts (RAPL), CPU temp, fan RPM
+- `set_cpu_governor(governor)` — risk low; `performance | powersave | schedutil`
+- `set_tdp(watts)` — risk medium; writes RAPL constraint via `/sys/class/powercap/`; requires write permission (polkit rule, one-time)
+- `thermal_watch(threshold_c=85)` — risk low; alerts when any core exceeds threshold
+
+**Profile definitions (sensible defaults for Ryzen 5600H):**
+
+| Profile | Governor | EPP | RAPL |
+|---|---|---|---|
+| `performance` | performance | performance | uncapped |
+| `balanced` | schedutil | balance_performance | 35W |
+| `battery` | powersave | power | 15W |
+| `quiet` | powersave | power | 10W (fan silent) |
+
+**Cognitive hooks:** `predict_next_action` already tracks time-of-day + app context; proactive engine offers "switch to battery profile?" when lid angle sensor or AC disconnect event fires (via udev rule).
+
+**Landmines:**
+- `amd_pstate_epp` requires kernel 6.3+ and `amd_pstate=active` kernel cmdline; detect via `/sys/devices/system/cpu/amd_pstate/status` and fall back to `acpi-cpufreq` governor-only control.
+- RAPL writes require `/sys/class/powercap/intel-rapl*/constraint_*/power_limit_uw` — on AMD this is `amd_energy` or `zenpower` DKMS module; detect and degrade gracefully to governor-only if absent.
+- Fan control varies wildly by board (ASUS, Lenovo, HP each have different WMI interfaces or EC registers) — expose thermal *read* universally; fan *write* only if `nbfc-linux` or a known WMI path is detected.
+
+**Install:** `sudo apt install linux-cpupower`; RAPL write permission via one polkit rule in `nora-linux-setup`.
+
+**Demo:** Plugged in, building Rust project, fans loud. Voice: "NORA, switch to quiet mode." → EPP set to `power`, RAPL capped at 10W, governor set to `powersave`. Fans drop within 5 seconds. Voice: "What's my package power draw?" → "Currently 9.8 watts. CPU is at 42°C." Unplug charger. NORA proactively: "You unplugged — want me to switch to battery profile?"
+
+---
+
 ## Cross-Cutting Plumbing
 
 **New directory layout:**
@@ -199,6 +337,7 @@ PipeWire graph mutation gives NORA something no proprietary OS allows: live re-r
 nora/platform/linux/   # OS shims (atspi, dbus, snapshots, pipewire, compositor)
 nora/observability/    # eBPF helper + scripts
 nora/commands/         # 5 new modules (atspi_actions, dbus_remote, why_engine, time_travel, ambient_linux)
+                       # + F6–F9: systemd_voice, resource_governor, security_watch, power_voice
 ```
 
 **Three small additive hooks in existing files** (not rewrites — observer-pattern extension points, ≤10 LOC each, no behavior change without a subscriber):
@@ -228,6 +367,10 @@ End-to-end demo plan (also serves as acceptance test):
 3. **F3.** Run `stress-ng --cpu 4` in a background tab. Voice: "why is my fan loud?" Expect: bpftrace runs, LLM names `stress-ng` in the explanation, < 7s end-to-end.
 4. **F4.** Voice: "snapshot now labeled refactor-start." Modify three files. Voice: "roll back to refactor-start." Expect: btrfs subvolume swap, files reverted, editor reload notice. Then voice: "pause this session." Reboot. Voice: "resume." Expect: CRIU restore brings back terminals.
 5. **F5.** Spotify playing. Say "Hey NORA" → measure ducking latency (< 200ms). Voice: "focus mode for writing." Expect: Sway/Hyprland retile + notifications muted via D-Bus.
+6. **F6.** Kill nginx with a bad config. Voice: "why did nginx fail?" Expect: journald query, LLM names the bind error, < 5s. Voice: "check boot time." Expect: ranked slowest units from `systemd-analyze blame`.
+7. **F7.** Run `cargo build` (pegs all cores). Voice: "throttle the build to 6 cores." Expect: `CPUQuota=600%` applied via transient cgroup, CPU usage drops within one scheduler tick. Voice: "what are the top resource hogs?" Expect: ranked cgroup list.
+8. **F8.** Voice: "watch my SSH keys." Touch `~/.ssh/id_rsa` from a separate terminal. Expect: NORA speaks an alert within 1 second naming the PID and binary, no polling delay.
+9. **F9.** On battery. Voice: "switch to quiet mode." Expect: EPP set to `power`, RAPL capped, fan RPM drops within 5 seconds. Voice: "what's my package power draw?" Expect: live watt reading from RAPL.
 
 **Regression tests** for the three hooked files:
 - Run NORA with no F3/F4/F5 modules installed → existing watchdog/reversible/wakeword behavior unchanged.

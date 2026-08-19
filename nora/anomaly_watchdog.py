@@ -159,7 +159,8 @@ def _watchdog_loop(poll_sec: float) -> None:
                     logger.warning(msg)
                     if speak:
                         speak(msg)
-            disk_io_prev = disk_io_now
+            if disk_io_now is not None:
+                disk_io_prev = disk_io_now
             prev_time = now_time
 
         except Exception as e:

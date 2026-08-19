@@ -107,7 +107,11 @@ def find_element(description: str, threshold: int = 55) -> Widget | None:
     match = process.extractOne(description, candidates, scorer=fuzz.WRatio)
     if match is None or match[1] < threshold:
         return None
-    return widgets[candidates.index(match[0])]
+    # match[2] is the index returned by rapidfuzz — avoids wrong widget when two share identical search_text
+    try:
+        return widgets[match[2]]
+    except (IndexError, TypeError):
+        return widgets[candidates.index(match[0])]
 
 
 def get_action_count(widget: Widget) -> int:
@@ -129,22 +133,24 @@ def do_action(widget: Widget, action_index: int = 0) -> bool:
 def get_text(widget: Widget) -> str:
     """Return the full text content of a text widget."""
     try:
-        iface = widget.accessible.get_document_iface() or widget.accessible
-        text_iface = Atspi.Text(widget.accessible)
-        return text_iface.get_text(0, -1)
+        text_iface = widget.accessible.get_text_iface()
+        if text_iface is not None:
+            return text_iface.get_text(0, -1) or ""
     except Exception:
-        try:
-            return widget.accessible.get_text(0, -1)
-        except Exception:
-            return widget.name
+        pass
+    try:
+        return widget.accessible.get_text(0, -1) or ""
+    except Exception:
+        return widget.name
 
 
 def set_text(widget: Widget, text: str) -> bool:
     """Replace the content of an editable text widget."""
     try:
-        edit = Atspi.EditableText(widget.accessible)
-        edit.set_text_contents(text)
-        return True
+        edit_iface = widget.accessible.get_editable_text_iface()
+        if edit_iface is None:
+            return False
+        return bool(edit_iface.set_text_contents(text))
     except Exception as e:
         logger.error("AT-SPI set_text failed: %s", e)
         return False

@@ -253,6 +253,26 @@ _Annotated with status: ✅ exists | 🔨 in roadmap | 🆕 new from DELIVERABLE
 
 ---
 
+## Autonomy & Trust (Codex Integration)
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| `autonomy status` / `how autonomous are you` | Report autonomy tiering state + session demotions | 🆕 Codex |
+| `focus status` / `am I busy right now` | Report attention state (available / call / media / away) | 🆕 Codex |
+| `trust report` / `which tools do you trust` | Per-tool reliability scores from the trust ledger | 🆕 Codex |
+| `reflection report` / `what did you get wrong this week` | Failure diary: failures, reversals, proposed changes | 🆕 Codex |
+| `undo the rename batch` (bundle tag) | Reverse every reversible action recorded under a bundle tag | 🆕 Codex |
+| `what would undo do` / `preview undo` | Describe the next undo's effect without executing it | 🆕 Codex |
+| `what's my tone preference` / `preference status for tone` | Current + any pending value for a learned preference | 🆕 Codex |
+| `confirm preference` / `reject preference` | Apply or discard a pending learned-preference change | 🆕 Codex |
+| `roll back that preference` | Revert a learned preference to its previous version | 🆕 Codex |
+| `endpoint trust report` / `which D-Bus services do you trust` | Trust scores for services reached via the generic `dbus_call` action | 🆕 Codex |
+| `why did you do that` / `explain your last action` | Post-action card: what NORA thought, did, skipped, and how to undo it | 🆕 Codex |
+| `silent hours status` / `is this a quiet time for me` | Whether now falls in a learned quiet window | 🆕 Codex |
+| `health check` / `run a health check` | Sweep all subsystems (mic, STT, TTS, LLM, memory, Linux integrations) and name anything degraded | 🆕 Stack |
+
+---
+
 ## Persona & Preferences
 
 | Voice Command | Action | Status |

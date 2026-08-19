@@ -39,6 +39,18 @@ def _chat(response: str) -> IntentResponse:
     return IntentResponse(intent="chat", steps=[], response=response)
 
 
+def _chat_varied(category: str, fallback: str) -> IntentResponse:
+    """Chat reply drawn from a phrasing pool.
+
+    The fast path exists for latency, and that's worth keeping for greetings —
+    but a fixed string means the hundredth "hey" gets a byte-identical answer
+    to the first, which is the most audible tell that nothing is home. Pools
+    keep the speed and lose the loop.
+    """
+    from nora import phrasing
+    return _chat(phrasing.get(category, fallback))
+
+
 # ── Text normalisation ─────────────────────────────────────────────────────────
 
 # Whisper often adds leading filler words; strip them before matching.
@@ -242,24 +254,24 @@ def _build_rules() -> None:
     # ─── Conversational ───────────────────────────────────────────────────
     _rule(
         r"(?:hey|hi|hello)(?:\s+(?:nora|there))?(?:\s+how\s+are\s+you)?[.!?]*",
-        lambda m: _chat("Hello, sir. Ready for your commands."),
+        lambda m: _chat_varied("greeting", "Hello, sir."),
     )
     _rule(
         r"how\s+are\s+you(?:\s+doing)?[.?!]*",
-        lambda m: _chat("Doing well, sir. What do you need?"),
+        lambda m: _chat_varied("how_are_you", "Doing well, sir. What do you need?"),
     )
     _rule(
         r"(?:are\s+you\s+(?:there|awake|online|listening|ready)|you\s+there\??)[.?]*",
-        lambda m: _chat("Always here, sir."),
+        lambda m: _chat_varied("presence", "Always here, sir."),
     )
     _rule(
         r"(?:thanks?\s*(?:you|a\s+lot|so\s+much)?|thank\s+you(?:\s+(?:very|so)\s+much)?"
         r"|cheers|appreciate\s+(?:it|that))[.!]*",
-        lambda m: _chat("Of course, sir."),
+        lambda m: _chat_varied("thanks_reply", "Of course, sir."),
     )
     _rule(
         r"(?:never\s+mind(?:\s+that)?|forget\s+(?:it|that)|cancel\s+that|ignore\s+that)[.!]*",
-        lambda m: _chat("Understood."),
+        lambda m: _chat_varied("acknowledged", "Understood."),
     )
 
     _BUILT = True

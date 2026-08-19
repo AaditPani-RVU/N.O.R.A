@@ -76,7 +76,8 @@ async def call(
     """Invoke a D-Bus method. Returns (success, reply_body)."""
     try:
         dbus = await _get_bus(bus)
-        proxy = await dbus.get_proxy_object(service, object, await dbus.introspect(service, object))
+        introspection = await dbus.introspect(service, object)
+        proxy = dbus.get_proxy_object(service, object, introspection)
         iface = proxy.get_interface(interface)
         fn = getattr(iface, f"call_{_to_snake(method)}", None)
         if fn is None:
@@ -106,7 +107,8 @@ async def _raw_call(
             signature=in_sig,
         )
         reply = await bus.call(msg)
-        if reply.message_type.value == 2:  # ERROR
+        from dbus_next.constants import MessageType as _MT
+        if reply.message_type == _MT.ERROR:
             return False, str(reply.body)
         return True, reply.body
     except Exception as e:
@@ -131,14 +133,9 @@ def call_sync(
 ) -> tuple[bool, Any]:
     """Synchronous wrapper — runs in the calling thread's event loop."""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're already inside an asyncio loop — caller must await call() directly
-            raise RuntimeError("Use await dbus_invoker.call() inside an async context")
-        return loop.run_until_complete(
-            call(service, bus, object, interface, method, args, in_sig)
-        )
+        asyncio.get_running_loop()
+        raise RuntimeError("Use await dbus_invoker.call() inside an async context")
     except RuntimeError as e:
-        if "no running event loop" in str(e).lower():
-            return asyncio.run(call(service, bus, object, interface, method, args, in_sig))
-        raise
+        if "async context" in str(e):
+            raise
+    return asyncio.run(call(service, bus, object, interface, method, args, in_sig))

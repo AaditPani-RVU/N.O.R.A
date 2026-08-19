@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from nora import endpoint_trust
 from nora.command_engine import register
 
 logger = logging.getLogger("nora.commands.dbus_remote")
@@ -327,6 +328,7 @@ async def dbus_call(
         method=method,
         args=args or [],
     )
+    endpoint_trust.record(service, ok)  # per-service trust graph (CODEX_INTEGRATION.md 5.7)
     if ok:
         reply_str = str(reply)[:300] if reply else "(no return value)"
         return f"D-Bus call {service}.{method} succeeded: {reply_str}"

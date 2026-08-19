@@ -96,10 +96,13 @@ def run_consolidation() -> dict[str, Any] | None:
         for t in task_ledger.get_recent_tasks(n=50):
             if t.get("updated_at", 0) < cutoff:
                 continue
-            if t["status"] == task_ledger.STATUS_CLOSED:
-                completed_tasks.append(t["title"])
-            elif t["status"] == task_ledger.STATUS_ABANDONED:
-                abandoned_tasks.append(t["title"])
+            try:
+                if t.get("status") == task_ledger.STATUS_CLOSED:
+                    completed_tasks.append(t.get("title", ""))
+                elif t.get("status") == task_ledger.STATUS_ABANDONED:
+                    abandoned_tasks.append(t.get("title", ""))
+            except Exception:
+                continue
     except Exception as e:
         logger.warning("Consolidation: task scan failed: %s", e)
 
@@ -146,6 +149,13 @@ def run_consolidation() -> dict[str, Any] | None:
     except Exception as e:
         logger.warning("Consolidation: ChromaDB store failed: %s", e)
 
+    # Age out pending preference proposals the user never objected to (2.5)
+    try:
+        from nora.user_model import apply_pending
+        apply_pending()
+    except Exception as e:
+        logger.warning("Consolidation: preference auto-apply failed: %s", e)
+
     _save_state({"last_run_date": now.strftime("%Y-%m-%d"), "last_run_ts": time.time()})
     logger.info(
         "Nightly consolidation complete — %d commands, %d errors",
@@ -155,8 +165,12 @@ def run_consolidation() -> dict[str, Any] | None:
 
 
 def _run_and_reschedule() -> None:
-    run_consolidation()
-    _schedule_next()
+    try:
+        run_consolidation()
+    except Exception as e:
+        logger.exception("run_consolidation raised: %s", e)
+    finally:
+        _schedule_next()
 
 
 def _schedule_next(hour: int = 23, minute: int = 0) -> None:
@@ -178,14 +192,18 @@ def _schedule_next(hour: int = 23, minute: int = 0) -> None:
 def start() -> None:
     """Start the nightly consolidation scheduler. Call once from pipeline.run()."""
     global _running
+    try:
+        from nora.config import get_config
+        cfg = get_config().get("consolidation", {})
+        hour = int(cfg.get("run_hour", 23))
+        minute = int(cfg.get("run_minute", 0))
+    except Exception as e:
+        logger.error("Consolidation: config load failed, scheduler not started: %s", e)
+        return
     with _lock:
         if _running:
             return
         _running = True
-    from nora.config import get_config
-    cfg = get_config().get("consolidation", {})
-    hour = int(cfg.get("run_hour", 23))
-    minute = int(cfg.get("run_minute", 0))
     _schedule_next(hour, minute)
     logger.info("Consolidation scheduler started (target %02d:%02d)", hour, minute)
 
