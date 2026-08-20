@@ -100,7 +100,19 @@ def check_intent(intent: IntentResponse) -> tuple[bool, bool, list[dict]]:
         for v in result.violations
     )
 
-    if not result.ok:
-        logger.warning("Action plan blocked by NeuroSym: %s", result.violations)
+    # Gate on hard_denied, not ok. In neurosym, `ok` is simply "zero violations",
+    # so returning it hard-blocked every plan that merely *needed confirmation* --
+    # including every create_file, which is in DESTRUCTIVE_ACTIONS. deny_above
+    # ("critical") is expressed through hard_denied, which is what the comment on
+    # the Guard above has always meant.
+    is_safe = not getattr(result, "hard_denied", not result.ok)
 
-    return result.ok, needs_confirm, list(result.violations)
+    if not is_safe:
+        logger.warning("Action plan blocked by NeuroSym: %s", result.violations)
+    elif result.violations:
+        logger.info(
+            "NeuroSym violations routed to confirmation: %s",
+            [v.get("rule_id") for v in result.violations],
+        )
+
+    return is_safe, needs_confirm, list(result.violations)

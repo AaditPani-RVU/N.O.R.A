@@ -6,16 +6,25 @@ import shutil
 from pathlib import Path
 
 from nora.command_engine import register
+from nora import claude_logs
 
 logger = logging.getLogger("nora.commands.file_operations")
 
 
 @register("create_file", sig="create_file(path: str, content: str)", category="file")
 def create_file(path: str, content: str = "") -> str:
-    """Create a file with optional content."""
-    p = Path(path)
+    """Create a file with optional content.
+
+    The path goes through claude_logs.resolve so a relative destination lands
+    somewhere predictable -- documents in <repo>/claude_logs, anything else under
+    the repo root. A bare `logs/x.md` used to be written relative to whatever
+    directory NORA was launched from, which is how a log became unfindable. The
+    absolute path is returned so what NORA reports back is what exists.
+    """
+    p = claude_logs.resolve(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
+    logger.info("Created file: %s", p)
     return f"Created file: {p}"
 
 
@@ -38,8 +47,8 @@ def delete_file(path: str) -> str:
 @register("move_file", sig="move_file(source: str, destination: str)", risk="medium", category="file")
 def move_file(source: str, destination: str) -> str:
     """Move or rename a file/directory."""
-    src = Path(source)
-    dst = Path(destination)
+    src = claude_logs.resolve(source)
+    dst = claude_logs.resolve(destination)
     if not src.exists():
         return f"Source does not exist: {src}"
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +59,7 @@ def move_file(source: str, destination: str) -> str:
 @register("list_files", sig="list_files(path: str)", category="file")
 def list_files(path: str = ".") -> str:
     """List files and directories at the given path."""
-    p = Path(path)
+    p = Path(path) if path in (".", "") else claude_logs.resolve(path)
     if not p.exists():
         return f"Path does not exist: {p}"
     if not p.is_dir():
