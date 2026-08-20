@@ -24,3 +24,4 @@ class StepResult(BaseModel):
     action: str
     success: bool
     message: str = ""
+    withheld: bool = False   # deliberately not run (e.g. guest mode) — not a failure

@@ -10,7 +10,14 @@ convention already used for learned D-Bus shortcuts.
 
     {"people": {"aadit": {"embeddings": [[512 floats], ...],
                           "enrolled_at": 1699999999.0,
-                          "trusted": true}}}
+                          "trusted": true,
+                          "greeting": "Welcome back.",
+                          "persona": {"tone": "casual"}}}}
+
+Phase 2 adds the profile fields alongside the embeddings: `greeting` (what
+NORA says when this person arrives) and `persona` (style hints handed to
+the prompt while they are the only one in frame). `trusted` marks the
+owner — see is_trusted() for why that flag may only ever restrict.
 
 Privacy: nothing reaches this file except through enroll(), which is only
 ever called by an explicit `learn_face(name)`. Unrecognized faces are
@@ -257,15 +264,133 @@ def display_name(key: str) -> str:
     return person.get("display_name") or key.title()
 
 
-def is_trusted(key: str) -> bool:
-    """Whether a person is the enrolled owner.
+# ── Profiles and ownership (Phase 2) ─────────────────────────────────────────
 
-    Phase 2 uses this to *restrict* behavior for guests. It must never be
-    used to grant anything — a face is defeated by a photograph.
+PERSONA_KEYS = ("verbosity", "tone", "style")     # mirrors nora.persona.VALID
+
+
+def owner() -> str | None:
+    """The enrolled owner's key, or None if nobody is designated.
+
+    `vision.face.owner` in config.yaml wins over the stored flag: a name in
+    a file only the user edits is a stronger statement of intent than one
+    set by voice, and it survives a face-memory wipe.
     """
+    configured = str(_face_cfg().get("owner", "") or "").strip()
+    if configured:
+        return _norm(configured)
     with _lock:
-        person = _read()["people"].get(_norm(key)) or {}
-    return bool(person.get("trusted"))
+        people = _read()["people"]
+    for key, person in sorted(people.items()):
+        if person.get("trusted"):
+            return key
+    return None
+
+
+def is_trusted(key: str) -> bool:
+    """Whether this person is the enrolled owner.
+
+    Guest mode uses this to *restrict* behavior when someone else is in
+    frame. It must never be read the other way round: a visible face is
+    defeated by a printed photograph, so `is_trusted() is True` may not
+    unlock anything, skip a confirmation, or raise a risk ceiling. See the
+    asymmetry note in nora/security.py.
+    """
+    key = _norm(key)
+    if not key:
+        return False
+    return key == owner()
+
+
+def set_owner(name: str) -> str:
+    """Designate one enrolled person as the owner. Returns their key.
+
+    Exclusive: any previously trusted record is demoted in the same write,
+    so `owner()` always has exactly one answer.
+    """
+    key = _norm(name)
+    if not key:
+        raise ValueError("A name is required to set the owner.")
+    with _lock:
+        data = _read()
+        if key not in data["people"]:
+            raise KeyError(name)
+        for other, person in data["people"].items():
+            person["trusted"] = (other == key)
+        data["people"][key]["updated_at"] = time.time()
+        _write(data)
+    return key
+
+
+def get_profile(key: str) -> dict[str, Any] | None:
+    """Profile fields for one person, or None if they aren't enrolled."""
+    key = _norm(key)
+    with _lock:
+        person = _read()["people"].get(key)
+    if person is None:
+        return None
+    return {
+        "key": key,
+        "name": person.get("display_name") or key.title(),
+        "greeting": person.get("greeting") or "",
+        "persona": dict(person.get("persona") or {}),
+        "trusted": is_trusted(key),
+        "enrolled_at": person.get("enrolled_at", 0.0),
+    }
+
+
+def set_profile(
+    name: str,
+    *,
+    greeting: str | None = None,
+    persona: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Update a person's greeting or persona hints. Raises KeyError if unknown.
+
+    Deliberately cannot set `trusted` — ownership goes through set_owner()
+    so the exclusivity rule has one enforcement point.
+    """
+    key = _norm(name)
+    with _lock:
+        data = _read()
+        person = data["people"].get(key)
+        if person is None:
+            raise KeyError(name)
+        if greeting is not None:
+            text = greeting.strip()
+            if text:
+                person["greeting"] = text
+            else:
+                person.pop("greeting", None)
+        if persona is not None:
+            merged = dict(person.get("persona") or {})
+            for dim, value in persona.items():
+                if dim not in PERSONA_KEYS:
+                    continue
+                if value:
+                    merged[dim] = str(value).strip().lower()
+                else:
+                    merged.pop(dim, None)
+            if merged:
+                person["persona"] = merged
+            else:
+                person.pop("persona", None)
+        person["updated_at"] = time.time()
+        _write(data)
+    return get_profile(key) or {}
+
+
+def greeting_for(key: str) -> str:
+    """What NORA says when this person arrives."""
+    profile = get_profile(key)
+    if profile and profile["greeting"]:
+        return profile["greeting"]
+    return f"Hey {display_name(key)}."
+
+
+def persona_for(key: str) -> dict[str, str]:
+    profile = get_profile(key)
+    return profile["persona"] if profile else {}
 
 
 def list_people() -> list[dict[str, Any]]:
@@ -277,7 +402,9 @@ def list_people() -> list[dict[str, Any]]:
             "key": key,
             "samples": len(person.get("embeddings", [])),
             "enrolled_at": person.get("enrolled_at", 0.0),
-            "trusted": bool(person.get("trusted")),
+            "trusted": is_trusted(key),
+            "greeting": person.get("greeting") or "",
+            "persona": dict(person.get("persona") or {}),
         }
         for key, person in sorted(people.items())
     ]

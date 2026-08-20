@@ -61,7 +61,7 @@ def get_action_meta(action_name: str) -> CommandMeta | None:
 
 
 # Category ordering for prompt generation
-_MAIN_CATEGORIES = ("app", "file", "web", "system", "tts", "ptt", "music", "apple_music", "memory", "tasks", "notification", "workflow", "")
+_MAIN_CATEGORIES = ("app", "file", "web", "system", "tts", "ptt", "music", "memory", "tasks", "notification", "workflow", "")
 _SCREEN_CATEGORY = "screen"
 _OPTIONAL_CATEGORIES = (
     ("dev", "Developer Tools:"),
@@ -138,7 +138,7 @@ def discover_commands() -> None:
 
 async def execute(intent: IntentResponse) -> list[StepResult]:
     """Execute all steps in an IntentResponse. Returns results per step."""
-    from nora.security import is_blocked
+    from nora.security import guest_blocks, guest_decline_message, is_blocked
     from nora import context
 
     results: list[StepResult] = []
@@ -157,6 +157,17 @@ async def execute(intent: IntentResponse) -> list[StepResult]:
             msg = f"Action '{action}' is blocked by security policy."
             logger.warning(msg)
             results.append(StepResult(action=action, success=False, message=msg))
+            break
+
+        # Guest mode: a non-owner is in front of the camera, so anything that
+        # would read private content into the room declines instead. Restricts
+        # only — recognition never grants. See nora/security.py.
+        if guest_blocks(action):
+            msg = guest_decline_message(action)
+            logger.info("Guest mode withheld '%s'", action)
+            results.append(
+                StepResult(action=action, success=False, message=msg, withheld=True)
+            )
             break
 
         handler = _registry.get(action)

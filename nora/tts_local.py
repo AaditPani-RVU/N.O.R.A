@@ -38,6 +38,10 @@ _engine = None          # kokoro_onnx.Kokoro, lazily constructed
 _failed = False         # once true, never retry this process (log once, stay quiet)
 
 
+# Guards engine.create() — see the note in synth_if_enabled.
+_synth_lock = threading.Lock()
+
+
 def _kokoro_cfg() -> dict:
     return get_config().get("speaker", {}).get("kokoro", {})
 
@@ -88,7 +92,16 @@ def synth_if_enabled(text: str, rate: str, out_path: str) -> bool:
         return False
     try:
         voice = _kokoro_cfg().get("voice", "bf_emma")
-        samples, sample_rate = engine.create(text, voice=voice, speed=_rate_to_speed(rate))
+        # Kokoro's espeak phonemizer keeps global state and is NOT thread-safe.
+        # speaker._speak_streaming synthesises sentence N+1 while N plays, so two
+        # create() calls overlap and one comes back with "number of lines in
+        # input and output must be equal". That sentence alone fell back to
+        # edge-tts, which is why the voice changed mid-answer. Serialising costs
+        # nothing: the pipeline still runs ahead of playback, one sentence at a
+        # time. Measured: identical text is 100% reliable sequentially and fails
+        # intermittently at 3 workers.
+        with _synth_lock:
+            samples, sample_rate = engine.create(text, voice=voice, speed=_rate_to_speed(rate))
         pcm = (samples.clip(-1.0, 1.0) * 32767).astype("int16")
         with wave.open(out_path, "wb") as wav:
             wav.setnchannels(1)

@@ -24,11 +24,16 @@ class _Relay(unittest.TestCase):
         self.addCleanup(p.stop)
         self.pushed = []
 
-    def _ui(self, clients=True):
-        ui = mock.Mock()
-        ui.has_ws_clients.return_value = clients
-        ui.ws_push.side_effect = self.pushed.append
-        return mock.patch.dict("sys.modules", {"nora.ui_server": ui})
+    def _ui(self, clients=True, push=None):
+        # Patch the module itself, not sys.modules: `from nora import ui_server`
+        # resolves through the already-imported package attribute, so a
+        # sys.modules entry is ignored once any other test has imported it.
+        from nora import ui_server
+        return mock.patch.multiple(
+            ui_server,
+            has_ws_clients=mock.Mock(return_value=clients),
+            ws_push=mock.Mock(side_effect=push or self.pushed.append),
+        )
 
     def _mp3(self, size=64):
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
@@ -75,16 +80,47 @@ class TestPushChunk(_Relay):
         self.assertEqual(self.pushed, [])
 
     def test_broken_ui_server_does_not_raise(self):
-        ui = mock.Mock()
-        ui.has_ws_clients.return_value = True
-        ui.ws_push.side_effect = RuntimeError("socket exploded")
-        with mock.patch.dict("sys.modules", {"nora.ui_server": ui}):
+        def _explode(_msg):
+            raise RuntimeError("socket exploded")
+        with self._ui(push=_explode):
             audio_relay.push_chunk(self._mp3())   # must not raise
 
     def test_disabled_relay_sends_nothing(self):
         with mock.patch.object(audio_relay, "_enabled", False), self._ui():
             audio_relay.push_chunk(self._mp3())
         self.assertEqual(self.pushed, [])
+
+
+class TestMimeSniffing(unittest.TestCase):
+    """speaker.py names every chunk .mp3 whatever the backend wrote into it."""
+
+    def test_kokoro_wav_is_not_labelled_mpeg(self):
+        wav = b"RIFF" + b"\x24\x28\x01\x00" + b"WAVEfmt "
+        self.assertEqual(audio_relay.sniff_mime(wav), "audio/wav")
+
+    def test_real_mp3_frames(self):
+        self.assertEqual(audio_relay.sniff_mime(b"\xff\xfb\x90\x00"), "audio/mpeg")
+        self.assertEqual(audio_relay.sniff_mime(b"ID3\x04\x00"), "audio/mpeg")
+
+    def test_ogg_and_flac(self):
+        self.assertEqual(audio_relay.sniff_mime(b"OggS\x00\x02"), "audio/ogg")
+        self.assertEqual(audio_relay.sniff_mime(b"fLaC\x00\x00"), "audio/flac")
+
+    def test_pushed_chunk_carries_the_sniffed_mime(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp.write(b"RIFF" + b"\x24\x28\x01\x00" + b"WAVEfmt " + b"\x00" * 32)
+        tmp.close()
+        self.addCleanup(lambda: Path(tmp.name).unlink(missing_ok=True))
+
+        pushed = []
+        from nora import ui_server
+        with mock.patch.object(audio_relay, "_enabled", True), \
+             mock.patch.multiple(ui_server,
+                                 has_ws_clients=mock.Mock(return_value=True),
+                                 ws_push=mock.Mock(side_effect=pushed.append)):
+            audio_relay.push_chunk(tmp.name, "kokoro sentence")
+
+        self.assertEqual(pushed[0]["mime"], "audio/wav")
 
 
 class TestPushStop(_Relay):
@@ -104,15 +140,16 @@ class TestSpeakerIntegration(unittest.TestCase):
 
     def test_relay_failure_never_reaches_the_caller(self):
         """A dead browser must not be able to break local playback."""
-        from nora import speaker
-        with mock.patch.object(speaker.audio_relay, "push_stop",
-                               side_effect=RuntimeError("boom")):
-            with self.assertRaises(RuntimeError):
-                speaker.audio_relay.push_stop()
-        # ...but the real relay swallows it, which is what speaker.stop relies on.
+        from nora import speaker, ui_server
+
+        def _explode(_msg):
+            raise RuntimeError("socket exploded")
+
         with mock.patch.object(audio_relay, "_enabled", True), \
-             mock.patch.dict("sys.modules", {"nora.ui_server": None}):
-            audio_relay.push_stop()
+             mock.patch.multiple(ui_server,
+                                 has_ws_clients=mock.Mock(return_value=True),
+                                 ws_push=mock.Mock(side_effect=_explode)):
+            speaker.stop()   # must return normally despite the relay throwing
 
 
 if __name__ == "__main__":

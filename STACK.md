@@ -9,7 +9,8 @@ cloud free tier generous enough for single-user daily use. Verified July 2026.
 | Wakeword | **openWakeWord** (optional) | Apache-2.0, pre-trained models, CPU-only, no per-key licensing (Porcupine's free tier is keyed and limited) | Porcupine free tier |
 | VAD | **faster-whisper built-in** (Silero) | Silero VAD ships inside faster-whisper's `vad_filter=True` — already on | standalone silero-vad |
 | STT | **faster-whisper** (`distil-small.en`) | CTranslate2 runtime is ~4× faster than openai-whisper at the same accuracy; distil models halve latency again. MIT | whisper.cpp |
-| Intent LLM (cloud) | **Groq free tier** (`llama-3.1-8b-instant`) | Most permissive free tier of any provider (14.4k req/day) at ~10× GPU-API speed; supports enforced JSON mode | Google AI Studio free tier |
+| Intent LLM (cloud) | **Groq free tier** (`openai/gpt-oss-120b`) | Most permissive free tier of any provider at ~10× GPU-API speed; supports enforced JSON mode. Groq retired the llama-3.x models — `nora.preflight.check_models` now verifies every configured model still exists | Google AI Studio free tier |
+| Web research | **Groq `groq/compound-mini`** | Agentic model with a server-side search tool: it runs its own queries and answers from what it read, so "what's happening right now" is answerable at all. Falls back to Brave/DDG snippets summarised by the router's `research` role | Tavily / Perplexity API |
 | Intent LLM (local) | **Ollama + qwen3:8b** | Best small-model tool-calling/JSON accuracy in 2026 tests; `format=`-schema constrained decoding makes invalid JSON impossible | llama3-groq-8b-tool-use |
 | Any other free endpoint | `llm.api_base` + `llm.api_key_env` | OpenRouter/Cerebras/Together free tiers are OpenAI-compatible — swap via two config keys, zero code | — |
 | TTS (default) | **edge-tts** | Microsoft neural voices, unmetered, no key. Cloud-dependent is the only caveat | — |

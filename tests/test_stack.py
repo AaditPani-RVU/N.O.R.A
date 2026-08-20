@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest import mock
 
 from nora import health, tts_local
 
@@ -32,9 +33,18 @@ class TestHealth(unittest.TestCase):
 
 class TestTTSLocal(unittest.TestCase):
     def test_disabled_backend_is_a_fast_noop(self):
-        # default config backend is edge — the hook must decline instantly
-        self.assertFalse(tts_local.enabled())
-        self.assertFalse(tts_local.synth_if_enabled("hello", "+20%", "/dev/null"))
+        # With the edge backend selected the hook must decline instantly.
+        # Patched rather than read from config.yaml: this asserts the hook's
+        # behaviour, not whichever backend the running machine happens to use.
+        with mock.patch.object(tts_local, "get_config",
+                               return_value={"speaker": {"backend": "edge"}}):
+            self.assertFalse(tts_local.enabled())
+            self.assertFalse(tts_local.synth_if_enabled("hello", "+20%", "/dev/null"))
+
+    def test_enabled_follows_the_configured_backend(self):
+        with mock.patch.object(tts_local, "get_config",
+                               return_value={"speaker": {"backend": "kokoro"}}):
+            self.assertTrue(tts_local.enabled())
 
     def test_rate_to_speed_mapping(self):
         self.assertEqual(tts_local._rate_to_speed("+20%"), 1.2)
@@ -58,9 +68,22 @@ class TestIntentSchemaHardening(unittest.TestCase):
             "requires_confirmation": False,
         })
 
-    def test_json_mode_flag_defaults_on(self):
+    def test_json_mode_defaults_on_and_is_tracked_per_endpoint(self):
+        # Was a single process-wide flag. Once intent parsing began failing
+        # over between Groq and NVIDIA, one fallback model refusing
+        # response_format would have disabled JSON mode for the primary
+        # provider too — a healthy path degraded by a broken one.
         from nora import intent_parser
-        self.assertTrue(intent_parser._json_mode_ok)
+        self.assertEqual(intent_parser._json_mode_unsupported, set())
+
+        groq = ("https://api.groq.com/openai/v1", "openai/gpt-oss-120b")
+        nvidia = ("https://integrate.api.nvidia.com/v1", "meta/llama-3.1-8b-instruct")
+        intent_parser._json_mode_unsupported.add(nvidia)
+        try:
+            self.assertIn(nvidia, intent_parser._json_mode_unsupported)
+            self.assertNotIn(groq, intent_parser._json_mode_unsupported)
+        finally:
+            intent_parser._json_mode_unsupported.discard(nvidia)
 
 
 if __name__ == "__main__":

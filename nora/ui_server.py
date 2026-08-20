@@ -5,7 +5,7 @@ from __future__ import annotations
 HTTP endpoints
 --------------
 GET  /           → index.html
-GET  /state      → {speaking, text, status, ptt_mode}
+GET  /state      → {speaking, text, status, ptt_mode, user_text, user_seq, reply_seq}
 GET  /metrics    → system vitals
 GET  /music      → {track, artist, source, status}
 POST /ptt        → push-to-talk button control
@@ -29,6 +29,7 @@ Client → NORA messages:
 NORA → Client push:
   {"type": "state",        "data": {...}}         on every state change
   {"type": "stage",        "stage": "listening"}  pipeline stage update
+  {"type": "user",         "text": "open chrome"}  utterance NORA just heard
   {"type": "notification", "message": "..."}      proactive alerts
   {"type": "pong"}                                reply to ping
 """
@@ -56,7 +57,18 @@ except ImportError:
 
 logger = logging.getLogger("nora.ui_server")
 
-_state: dict = {"speaking": False, "text": "", "status": "STANDBY", "stage": "idle"}
+# ``user_seq``/``reply_seq`` are monotonic counters, not decoration: the UI
+# transcript needs to tell "NORA repeated herself" from "nothing new arrived",
+# and comparing text alone cannot. HTTP pollers diff the counters too.
+_state: dict = {
+    "speaking": False,
+    "text": "",
+    "status": "STANDBY",
+    "stage": "idle",
+    "user_text": "",
+    "user_seq": 0,
+    "reply_seq": 0,
+}
 _lock = threading.Lock()
 
 # Push-to-talk state -- set by the UI button or WebSocket client, read by listener.py
@@ -85,6 +97,7 @@ def notify(speaking: bool, text: str = "", status: str = "", stage: str = "") ->
         _state["speaking"] = speaking
         if text:
             _state["text"] = text
+            _state["reply_seq"] = int(_state.get("reply_seq", 0)) + 1
         if status:
             _state["status"] = status
         if stage:
@@ -98,6 +111,21 @@ def notify_stage(stage: str) -> None:
     with _lock:
         _state["stage"] = stage
     ws_push({"type": "stage", "stage": stage})
+
+
+def notify_user(text: str) -> None:
+    """Mirror an utterance NORA just heard (or was typed) to the dashboard.
+
+    Called before the input guard runs, so a blocked command still shows up in
+    the transcript next to the refusal instead of vanishing silently.
+    """
+    text = (text or "").strip()
+    if not text:
+        return
+    with _lock:
+        _state["user_text"] = text
+        seq = _state["user_seq"] = int(_state.get("user_seq", 0)) + 1
+    ws_push({"type": "user", "text": text, "seq": seq})
 
 
 def notify_ptt_mode(enabled: bool) -> None:
@@ -162,8 +190,19 @@ async def _ws_connection_handler(websocket: Any, token: str) -> None:
     # ── Auth ──────────────────────────────────────────────────────────────
     if token:
         # 1. Try query-string token: ws://host:port?token=xxx
+        # websockets >= 14 moved the request line to `.request.path`; the old
+        # `.path` attribute is gone. Reading only the old one silently yielded
+        # "" here, so every query-string auth fell through to the 5 s
+        # first-message wait and then failed as Unauthorized.
+        raw_path = ""
+        for getter in (lambda: websocket.request.path, lambda: websocket.path):
+            try:
+                raw_path = getter() or ""
+                if raw_path:
+                    break
+            except Exception:
+                continue
         try:
-            raw_path = websocket.path  # type: ignore[attr-defined]
             params = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(raw_path).query))
             provided = params.get("token", "")
         except Exception:
@@ -271,19 +310,99 @@ def start_ws(port: int = 8765, token: str = "") -> str | None:
 # HTTP handler
 # ---------------------------------------------------------------------------
 
+def _position_sec(player: str) -> float:
+    """Playback position in seconds, or 0.0 when the player won't say."""
+    try:
+        from nora.platform.linux import mpris
+        pos = mpris.get_prop("Position", player=player)   # MPRIS reports microseconds
+        return float(pos) / 1_000_000 if pos is not None else 0.0
+    except Exception:
+        return 0.0
+
+
+def _system_audio_state() -> dict:
+    """Default-sink volume and mute flag for the dashboard slider.
+
+    Reported alongside the track so the slider shows what the machine is
+    actually doing, including changes made outside NORA.
+    """
+    try:
+        from nora.platform.linux import volume as _vol
+        state = _vol.get_state()
+        if state is not None:
+            return {"volume": state[0], "muted": state[1]}
+    except Exception:
+        logger.debug("system volume read failed", exc_info=True)
+    return {}
+
+
+def _live_music_state() -> dict:
+    """Track state plus the system audio state the dashboard slider needs."""
+    state = _player_music_state()
+    state.update(_system_audio_state())
+    return state
+
+
+def _player_music_state() -> dict:
+    """Music state for the UI, read from Spotify rather than from memory.
+
+    context.music only moves when NORA itself issues a command, so it goes
+    stale the moment you skip a track in Spotify's own window. Spotify is the
+    source of truth now and MPRIS is cheap to poll, so read it directly and
+    keep context in step. Falls back to the cached state if the bus is
+    unreachable — a stale widget beats a broken endpoint.
+    """
+    try:
+        from nora.platform.linux import mpris
+        if mpris.is_running("spotify"):
+            snap = mpris.now_playing("spotify")
+            if snap.get("title"):
+                status = (snap.get("status") or "").lower()
+                context.update_music(
+                    track=snap["title"], artist=snap.get("artist", ""),
+                    source="spotify", status=status,
+                )
+                return {
+                    "track": snap["title"],
+                    "artist": snap.get("artist", ""),
+                    "source": "spotify",
+                    "status": status,
+                    "album": snap.get("album", ""),
+                    "art_url": snap.get("art_url", ""),
+                    "length_sec": snap.get("length_sec", 0.0),
+                    "position_sec": _position_sec("spotify"),
+                }
+    except Exception as exc:
+        logger.debug("Live music read failed (%s); using cached state", exc)
+    return context.get_music()
+
+
 class _Handler(BaseHTTPRequestHandler):
+    @property
+    def route(self) -> str:
+        """Path with the query string stripped.
+
+        `self.path` is the raw request target, query string included, so routing
+        on it directly means `/?token=abc` matches no branch and 404s. That is
+        exactly the URL a remote client uses to pass NORA_API_TOKEN, so the
+        dashboard was unreachable from anywhere that needed to authenticate.
+        """
+        import urllib.parse
+        return urllib.parse.urlparse(self.path).path or "/"
+
     def do_GET(self) -> None:
-        if self.path == "/state":
+        route = self.route
+        if route == "/state":
             self._serve_state()
-        elif self.path == "/metrics":
+        elif route == "/metrics":
             self._serve_metrics()
-        elif self.path == "/music":
+        elif route == "/music":
             self._serve_music()
-        elif self.path == "/history":
+        elif route == "/history":
             self._serve_history()
-        elif self.path == "/analytics":
+        elif route == "/analytics":
             self._serve_analytics()
-        elif self.path in ("/", "/index.html"):
+        elif route in ("/", "/index.html"):
             self._serve_file(_STATIC_DIR / "index.html", "text/html; charset=utf-8")
         else:
             self.send_response(404)
@@ -298,7 +417,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
-        if self.path == "/ptt":
+        route = self.route
+        if route == "/ptt":
             length = int(self.headers.get("Content-Length", 0))
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
@@ -309,7 +429,7 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 _ptt_event.clear()
             self._json_ok(b"{}")
-        elif self.path == "/music_ctl":
+        elif route == "/music_ctl":
             length = int(self.headers.get("Content-Length", 0))
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
@@ -317,7 +437,16 @@ class _Handler(BaseHTTPRequestHandler):
                 body = {}
             self._dispatch_music(body)
             self._json_ok(b"{}")
-        elif self.path == "/type_command":
+        elif route == "/interrupt":
+            # Same stop_all() the "stop" voice phrase reaches, so the dashboard
+            # button and the spoken interrupt cannot drift apart.
+            try:
+                from nora.commands.interrupt import stop_all
+                stop_all()
+            except Exception:
+                logger.exception("ui: /interrupt failed")
+            self._json_ok(b"{}")
+        elif route == "/type_command":
             length = int(self.headers.get("Content-Length", 0))
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
@@ -349,23 +478,33 @@ class _Handler(BaseHTTPRequestHandler):
 
         def _run() -> None:
             try:
-                from nora.commands import music as music_cmd
+                from nora.commands import spotify as sp
                 if act == "play":
-                    music_cmd.resume_music()
+                    sp.resume_music()
                 elif act == "pause":
-                    music_cmd.pause_music()
+                    sp.pause_music()
+                elif act == "toggle":
+                    sp.toggle_music()
                 elif act == "stop":
-                    music_cmd.stop_music()
+                    sp.stop_music()
                 elif act == "next":
-                    from nora.commands.apple_music import apple_music_next_track
-                    apple_music_next_track()
+                    sp.next_track()
                 elif act == "prev":
-                    from nora.commands.apple_music import apple_music_previous_track
-                    apple_music_previous_track()
+                    sp.previous_track()
                 elif act == "volume":
+                    # Drives the *system* sink, not Spotify's own volume. MPRIS
+                    # volume is a fraction of the system level, so a slider
+                    # wired to it can never get louder than whatever the desktop
+                    # mixer already allows -- pinning at 100% of, say, 60% and
+                    # looking broken, which is exactly how it behaved.
                     from nora.commands.system_control import set_volume
-                    level = int(body.get("level", 50))
-                    set_volume(level)
+                    set_volume(int(body.get("level", 50)))
+                elif act == "mute":
+                    from nora.commands.system_control import mute_audio
+                    mute_audio(bool(body.get("muted", True)))
+                elif act == "spotify_volume":
+                    # Still reachable for anyone who wants app-level balance.
+                    sp.spotify_set_volume(int(body.get("level", 50)))
             except Exception as exc:
                 logger.warning("music_ctl %s failed: %s", act, exc)
 
@@ -385,7 +524,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_music(self) -> None:
-        body = json.dumps(context.get_music()).encode()
+        body = json.dumps(_live_music_state()).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")

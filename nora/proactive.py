@@ -58,6 +58,14 @@ def _is_idle() -> bool:
 
 
 def _can_suggest() -> bool:
+    # Suggestions narrate the user's habits out loud, so they wait while
+    # someone who isn't the owner is in front of the camera (vision Phase 2).
+    try:
+        from nora import security
+        if security.guest_mode_active():
+            return False
+    except Exception:
+        pass
     with _lock:
         return (time.time() - _last_suggestion_ts) >= SUGGESTION_COOLDOWN_SEC
 
@@ -78,7 +86,8 @@ _CONTEXT_DEPENDENT_ACTIONS = frozenset({
     "wifi_connect", "snapshot_now", "duck_app_when_speaking", "focus_mode",
     "recall", "ask_claude", "tell_me_about", "web_search", "deep_reasoning",
     "copy_from_screen", "find_on_screen", "watch_for",
-    "apple_music_play_song", "apple_music_play_artist", "play_music",
+    "spotify_play_song", "spotify_play_artist", "spotify_play_album",
+    "spotify_play_playlist", "play_music",
 })
 
 

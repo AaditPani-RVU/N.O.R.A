@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import os
 import platform
 import subprocess
@@ -27,12 +28,55 @@ from io import BytesIO
 from typing import Any
 
 from nora.command_engine import register
+from nora.config import get_config
 import nora.speaker as speaker
 
 logger = logging.getLogger("nora.commands.screen_intelligence")
 
-_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+# llama-4-scout was decommissioned — it 404s on the Groq API as of 2026-08-19,
+# which silently killed read_screen, find_on_screen and click_on. qwen3.6-27b
+# is the only vision model left on Groq. Read from config so the next
+# deprecation is a config edit rather than a code change.
+_DEFAULT_VISION_MODEL = "qwen/qwen3.6-27b"
 _GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# qwen3.6 is a reasoning model: it emits a <think> block before its answer and
+# that block consumes the token budget. Two consequences, both measured:
+#   - the reply must be stripped of <think> before it is spoken or JSON-parsed
+#   - max_tokens has to clear the reasoning or `content` comes back empty
+#     (200 tokens -> "", 600 -> a full answer in ~5s)
+# reasoning_format:"hidden" looks like the fix and is not — the reasoning is
+# still generated, so it costs 21-29s instead of 5s for the same answer.
+_THINK_RE = re.compile(r"<think>.*?</think>", re.S | re.I)
+_ORPHAN_THINK_RE = re.compile(r"^.*?</think>", re.S | re.I)
+# A <think> with no closing tag: the reply was cut off mid-reasoning, so
+# everything from the tag onward is scratchpad. Without this the whole
+# scratchpad ("The user wants me to identify what is currently on the
+# screen...") gets read aloud as if it were the answer.
+_UNCLOSED_THINK_RE = re.compile(r"<think>.*\Z", re.S | re.I)
+
+# Never ask for fewer than this. The reasoning block is generated before any
+# content, so a budget that doesn't clear it returns an empty string —
+# measured on qwen3.6-27b: 200 tokens -> "", 600 -> a full answer in ~5s.
+_MIN_VISION_TOKENS = 700
+
+
+class VisionTruncated(RuntimeError):
+    """The model spent its whole token budget reasoning and never answered."""
+
+
+def _vision_model() -> str:
+    return get_config().get("screen_intelligence", {}).get(
+        "vision_model", _DEFAULT_VISION_MODEL)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Remove the model's <think> block, closed, orphaned, or unterminated."""
+    text = _THINK_RE.sub(" ", text)
+    if "</think>" in text.lower():
+        text = _ORPHAN_THINK_RE.sub(" ", text)
+    text = _UNCLOSED_THINK_RE.sub(" ", text)
+    return text.strip()
 
 # ── Shared Groq client (lazy-init, OpenAI-compatible) ─────────────────────
 
@@ -79,32 +123,61 @@ _SYSTEM = (
 )
 
 
-def _vision(image_b64: str, prompt: str, max_tokens: int = 400) -> str:
-    """Send a screenshot to Groq vision, return spoken text."""
-    client = _get_client()
-    resp = client.chat.completions.create(
-        model=_VISION_MODEL,
-        max_tokens=max_tokens,
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            },
-        ],
-    )
-    return (resp.choices[0].message.content or "").strip()
+def _vision(image_b64: str, prompt: str, max_tokens: int = _MIN_VISION_TOKENS) -> str:
+    """Send a screenshot to Groq vision, return spoken text.
+
+    A dense screen makes the model reason longer, so a budget that was ample
+    yesterday can be spent entirely on the <think> block today. That comes back
+    as a truncated reply with no answer in it; retry once with double the
+    budget, then give up rather than speaking the scratchpad.
+    """
+    budget = max(int(max_tokens), _MIN_VISION_TOKENS)
+
+    for attempt in (1, 2):
+        client = _get_client()
+        resp = client.chat.completions.create(
+            model=_vision_model(),
+            max_tokens=budget,
+            messages=[
+                {"role": "system", "content": _SYSTEM},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                },
+            ],
+        )
+        choice = resp.choices[0]
+        answer = _strip_reasoning(choice.message.content or "")
+        if answer:
+            return answer
+
+        truncated = choice.finish_reason == "length"
+        logger.warning(
+            "Vision returned no answer at %d tokens (finish_reason=%s)",
+            budget, choice.finish_reason)
+        if attempt == 2 or not truncated:
+            break
+        budget *= 2
+
+    raise VisionTruncated(
+        f"vision model produced only reasoning within {budget} tokens")
 
 
 def _vision_json(image_b64: str, prompt: str) -> dict:
     """Send a screenshot, parse the response as JSON. Returns {} on failure."""
-    raw = _vision(image_b64, prompt, max_tokens=200)
+    # 200 was enough for the old non-reasoning model and returns an empty
+    # string from this one — the reasoning eats the whole budget.
+    try:
+        raw = _vision(image_b64, prompt, max_tokens=700)
+    except VisionTruncated as e:
+        logger.warning("Vision JSON unavailable: %s", e)
+        return {}
     try:
         # Strip any accidental markdown fences
         cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

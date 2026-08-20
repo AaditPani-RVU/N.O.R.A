@@ -261,6 +261,16 @@ _LOOKUP_SIGNALS = (
     r"\bwhat'?s\s+(?:happening|going\s+on)\s+in\s+the\s+world\b",
     r"\bwho\s+won\b", r"\bwhat'?s\s+the\s+score\b", r"\bfinal\s+score\b",
     r"\b(?:stock|share)\s+price\b", r"\btrading\s+at\b", r"\bexchange\s+rate\b",
+    # What is on the screen right now. Same reasoning as the weather: the model
+    # has no way to know and will confidently make something up rather than
+    # say so — observed answering "what's on my screen" with "your screen is
+    # just the desktop". These have to reach read_screen.
+    # intent_parser._SCREEN_RE covers the same ground one stage later, for
+    # deciding whether to pre-attach a screenshot once we are already on the
+    # action path; this gate is what gets the utterance there at all.
+    r"\b(?:my|the|your|this)\s+screen\b", r"\bon\s+screen\b",
+    r"\bsee\s+on\b", r"\bwhat\s+am\s+i\s+looking\s+at\b",
+    r"\b(?:showing|displayed)\b", r"\bthis\s+(?:window|page|tab)\b",
     # This machine's current state
     r"\bbattery\b", r"\bdisk\s+space\b", r"\b(?:cpu|gpu)\s+temp(?:erature)?\b",
     r"\b(?:cpu|ram|memory)\s+usage\b", r"\bhow\s+much\s+(?:ram|memory|disk)\b",

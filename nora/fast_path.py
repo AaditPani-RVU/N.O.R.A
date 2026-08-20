@@ -104,7 +104,7 @@ def _build_rules() -> None:
     )
     _rule(
         r"(?:pause\s+(?:the\s+)?(?:music|song|track)|pause\s+music|pause)",
-        lambda m: _intent("pause music", "apple_music_pause", {}),
+        lambda m: _intent("pause music", "pause_music", {}),
     )
     _rule(
         r"(?:stop\s+(?:the\s+)?(?:music|song|track|playing)|stop\s+music)",
@@ -117,15 +117,79 @@ def _build_rules() -> None:
     )
     _rule(
         r"(?:next\s+(?:song|track|one)?|skip(?:\s+(?:this|(?:the\s+)?(?:song|track)))?)",
-        lambda m: _intent("skip track", "apple_music_next_track", {}),
+        lambda m: _intent("skip track", "next_track", {}),
     )
     _rule(
         r"(?:(?:go\s+)?(?:back|previous)\s*(?:song|track)?|prev(?:ious)?\s*(?:song|track)?"
         r"|last\s+(?:song|track)|go\s+back)",
-        lambda m: _intent("previous track", "apple_music_previous_track", {}),
+        lambda m: _intent("previous track", "previous_track", {}),
+    )
+    # "what's playing" / "what song is this"
+    _rule(
+        r"(?:what(?:\'s|\s+is)?\s+(?:this\s+)?(?:song|track|playing|music)"
+        r"(?:\s+(?:is\s+)?(?:this|playing|called))?"
+        r"|who(?:\'s|\s+is)\s+(?:this|singing)"
+        r"|now\s+playing|current\s+(?:song|track))",
+        lambda m: _intent("now playing", "now_playing", {}),
+    )
+
+    # ─── Music: shuffle / repeat ──────────────────────────────────────────
+    _rule(
+        r"(?:turn\s+)?shuffle\s*(?:on|off)?|(?:turn\s+)?(?:on|off)\s+shuffle",
+        lambda m: _intent(
+            "set shuffle", "spotify_shuffle",
+            {"enabled": "off" not in m.group(0).lower()},
+        ),
+    )
+    _rule(
+        r"(?:set\s+)?repeat\s+(off|none|track|song|one|this|all|playlist|album)",
+        lambda m: _intent("set repeat", "spotify_repeat", {"mode": m.group(1).lower()}),
+    )
+    _rule(
+        r"(?:turn\s+)?repeat\s*(on|off)",
+        lambda m: _intent(
+            "set repeat", "spotify_repeat",
+            {"mode": "all" if m.group(1).lower() == "on" else "off"},
+        ),
     )
 
     # ─── Music: parameterised (most-specific first) ───────────────────────
+    # "play the album X (by Y)"
+    _rule(
+        r"play\s+(?:the\s+)?album\s+(.+?)(?:\s+by\s+(.+))?",
+        lambda m: _intent(
+            f"play album {m.group(1).strip()}",
+            "spotify_play_album",
+            {"album": m.group(1).strip(), "artist": (m.group(2) or "").strip()},
+        ),
+    )
+    # "play the X playlist" / "play playlist X"
+    _rule(
+        r"play\s+(?:the\s+)?playlist\s+(.+)|play\s+(?:the\s+)?(.+?)\s+playlist",
+        lambda m: _intent(
+            "play playlist",
+            "spotify_play_playlist",
+            {"name": (m.group(1) or m.group(2) or "").strip()},
+        ),
+    )
+    # "play something/anything by Y" — artist radio, not a specific song
+    _rule(
+        r"play\s+(?:something|anything|some|more)\s+by\s+(.+)",
+        lambda m: _intent(
+            f"play music by {m.group(1).strip()}",
+            "spotify_play_artist",
+            {"artist": m.group(1).strip()},
+        ),
+    )
+    # "play some <artist>" — e.g. "play some slowdive"
+    _rule(
+        r"play\s+(?:some|more)\s+(.{2,60})",
+        lambda m: _intent(
+            f"play {m.group(1).strip()}",
+            "spotify_play_artist",
+            {"artist": m.group(1).strip()},
+        ),
+    )
     # "play X by Y"
     _rule(
         r"play\s+(.+?)\s+by\s+(.+)",
@@ -135,21 +199,12 @@ def _build_rules() -> None:
             {"track": m.group(1).strip(), "artist": m.group(2).strip()},
         ),
     )
-    # "play something/anything by Y"
-    _rule(
-        r"play\s+(?:something|anything|some)\s+by\s+(.+)",
-        lambda m: _intent(
-            f"play music by {m.group(1).strip()}",
-            "apple_music_play_artist",
-            {"artist": m.group(1).strip()},
-        ),
-    )
     # generic "play X" — song name (2–80 chars, not already matched above)
     _rule(
         r"play\s+(.{2,80})",
         lambda m: _intent(
             f"play {m.group(1).strip()}",
-            "apple_music_play_song",
+            "spotify_play_song",
             {"song": m.group(1).strip()},
         ),
     )
@@ -161,18 +216,24 @@ def _build_rules() -> None:
             f"set volume to {m.group(1)}", "set_volume", {"level": int(m.group(1))}
         ),
     )
+    # Relative, not absolute: "turn it up" jumping to a fixed 80% quietly turned
+    # the volume *down* whenever it was already above that.
     _rule(
         r"(?:volume\s+up|turn\s+(?:(?:the\s+)?volume\s+)?up|louder|increase\s+(?:the\s+)?volume)",
-        lambda m: _intent("volume up", "set_volume", {"level": 80}),
+        lambda m: _intent("volume up", "adjust_volume", {"delta": 10}),
     )
     _rule(
         r"(?:volume\s+down|turn\s+(?:(?:the\s+)?volume\s+)?down|quieter"
         r"|lower\s+(?:the\s+)?volume|decrease\s+(?:the\s+)?volume)",
-        lambda m: _intent("volume down", "set_volume", {"level": 30}),
+        lambda m: _intent("volume down", "adjust_volume", {"delta": -10}),
+    )
+    _rule(
+        r"(?:unmute(?:\s+(?:the\s+)?(?:sound|audio|volume|music))?)",
+        lambda m: _intent("unmute", "mute_audio", {"muted": False}),
     )
     _rule(
         r"(?:mute(?:\s+(?:the\s+)?(?:sound|audio|volume|music))?|silence(?:\s+everything)?)",
-        lambda m: _intent("mute", "set_volume", {"level": 0}),
+        lambda m: _intent("mute", "mute_audio", {"muted": True}),
     )
 
     # ─── System info ──────────────────────────────────────────────────────

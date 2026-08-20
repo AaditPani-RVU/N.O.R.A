@@ -27,13 +27,56 @@ WAKE_PHRASES = [
 STOP_PHRASES = ("stop", "cancel", "cancel that", "pause everything", "shut up", "quiet")
 
 
+def _warm_lazy_singletons() -> None:
+    """Load the models that would otherwise load during the first spoken turn.
+
+    Three subsystems build their heavy objects on first use: ChromaDB's
+    embedding model (measured at 12.4s cold against 22ms warm), the Whisper
+    model, and Kokoro's ONNX session. Left alone, the whole bill lands on the
+    user's opening sentence, which is the worst possible turn to spend twelve
+    seconds on.
+
+    Running preflight beforehand does not help here — it is a separate
+    process, so it warms the OS page cache but not this one's memory. Hence
+    doing it again, in-process, on a daemon thread so startup is not blocked.
+    """
+    import time as _t
+
+    def _warm(label: str, fn) -> None:
+        started = _t.monotonic()
+        try:
+            fn()
+            logger.info("warm-up: %s ready in %.0fms", label, (_t.monotonic() - started) * 1000)
+        except Exception as e:
+            logger.warning("warm-up: %s failed (%s) — first use will pay the load", label, e)
+
+    _warm("cognitive memory", lambda: cognitive_memory.get_context_for_prompt("warm up", n=1))
+    _warm("whisper", lambda: transcriber.transcribe(np.zeros(16000, dtype=np.float32)))
+
+    def _warm_tts() -> None:
+        import tempfile
+        from pathlib import Path as _P
+        from nora import tts_local
+        cfg = get_config().get("speaker", {})
+        if not tts_local.enabled():
+            return
+        tts_local.synth_if_enabled(
+            "Ready.", cfg.get("rate", "+20%"),
+            str(_P(tempfile.gettempdir()) / "nora_warmup.wav"),
+        )
+
+    _warm("kokoro", _warm_tts)
+
+
 def summarize_results(results: list[StepResult]) -> str:
     """Create a spoken summary of execution results."""
     if not results:
         return "No actions were taken."
     messages = []
     for r in results:
-        if r.success:
+        if r.success or r.withheld:
+            # A withheld step didn't fail — NORA chose not to run it (guest
+            # mode). Speaking "Failed:" over a deliberate refusal misreports it.
             if r.message:
                 messages.append(r.message)
         else:
@@ -110,6 +153,10 @@ async def run() -> None:
 
     # Start anomaly watchdog (Sprint 4 #24 — background metrics alerts)
     anomaly_watchdog.start(speak_callback=speaker.speak)
+
+    # Pull the lazy model loads off the first spoken turn and onto startup.
+    threading.Thread(target=_warm_lazy_singletons, daemon=True,
+                     name="nora-warmup").start()
 
     # Start remote mic server (accepts audio from e.g. a MacBook)
     _remote_cfg = get_config().get("remote_mic", {})
@@ -217,6 +264,11 @@ async def run() -> None:
 
             if not text or len(text.strip()) < 2:
                 continue
+
+            # Mirror the utterance to the dashboard transcript *before* the guard
+            # runs -- a blocked input should still show what was said, next to the
+            # refusal, rather than disappearing.
+            ui_server.notify_user(text)
 
             # NeuroSym: block adversarial voice commands before they reach the LLM
             ui_server.notify_stage("guarding")
@@ -532,7 +584,8 @@ async def run() -> None:
 
             # Tool trust ledger scores every invocation (CODEX_INTEGRATION.md 2.4)
             for r in results:
-                tool_trust.record(r.action, r.success)
+                if not r.withheld:      # a policy refusal isn't the tool's fault
+                    tool_trust.record(r.action, r.success)
 
             # Post-action explanation card — "why did you do that" (CODEX_INTEGRATION.md 5.3)
             post_action_cards.build(text, intent, results, intent_confidence)

@@ -137,6 +137,14 @@ llm_router:
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
         model: "nvidia/nemotron-3-nano-30b-a3b"
+        extra_body:
+          # Nemotron is a hybrid-reasoning model. It normally returns its
+          # scratchpad in a separate `reasoning_content` field, but when the
+          # thinking runs long it overflows into `content` too — and NORA reads
+          # it aloud ("We need to recall what we previously told the user...").
+          # This is the NVIDIA equivalent of Groq's reasoning_format:"hidden".
+          chat_template_kwargs:
+            thinking: false
 
     live_search:
       # Live web search (nora/commands/web_search.py). groq/compound-mini is an
@@ -191,6 +199,14 @@ llm_router:
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
         model: "nvidia/nemotron-3-nano-30b-a3b"
+        extra_body:
+          # Nemotron is a hybrid-reasoning model. It normally returns its
+          # scratchpad in a separate `reasoning_content` field, but when the
+          # thinking runs long it overflows into `content` too — and NORA reads
+          # it aloud ("We need to recall what we previously told the user...").
+          # This is the NVIDIA equivalent of Groq's reasoning_format:"hidden".
+          chat_template_kwargs:
+            thinking: false
 
     reasoning:
       # Latency matters less here — this role is for deliberate thinking, not
@@ -256,9 +272,39 @@ ack:
   # phrases: ["Mm-hm.", "Mm.", "Sure.", "Okay.", "Right.", "One sec."]
 
 music:
-  # Seconds of audio played when a command is wake-triggered (entrance + first command).
-  # Set to 0 to disable the cap and always play the full track.
+  # Length of the wake-word entrance clip played from sounds/ on startup.
+  # Set to 0 to play that clip in full.
+  #
+  # This caps ONLY the entrance flourish. Songs you ask for by name always play
+  # in full — a request is not a preview.
   wake_playback_limit_seconds: 40
+
+spotify:
+  # Spotify is NORA's only music backend on Linux.
+  #
+  # Playback, transport, volume, shuffle and repeat all run over MPRIS D-Bus
+  # against the local desktop client — those need no credentials at all.
+  #
+  # Credentials are only needed to turn a *name* into a track ("play blinding
+  # lights"). That uses the client-credentials grant: no user login, no browser
+  # redirect, and no Spotify Premium, because the local client does the playing.
+  #
+  # Create an app at https://developer.spotify.com/dashboard (no redirect URI
+  # required), then put the pair in .env:
+  #     SPOTIFY_CLIENT_ID=...
+  #     SPOTIFY_CLIENT_SECRET=...
+  # Env vars win over anything set here. Without them, name lookups fall back
+  # to opening Spotify's search page for the query.
+  client_id: ""
+  client_secret: ""
+
+  # ISO country code used to relink search results to a playable version.
+  market: "US"
+
+  # Launch the desktop client automatically when a music command arrives and
+  # Spotify isn't already on the session bus.
+  autostart: true
+  launch_command: "spotify"
 
 commands:
   require_confirmation_for:

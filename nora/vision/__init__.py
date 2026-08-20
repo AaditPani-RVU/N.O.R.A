@@ -6,6 +6,7 @@ Public surface mirrors `nora.ambient`: `start()` / `stop()`, no-ops when
     camera      — single owner of /dev/videoN, reference-counted
     faces       — persistent face memory at ~/.nora/faces.json
     perception  — background loop: who is present, greet on arrival
+    presence    — what that means: owner vs guest, and the prompt block
 """
 from __future__ import annotations
 

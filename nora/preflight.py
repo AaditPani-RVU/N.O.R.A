@@ -428,9 +428,108 @@ def check_llm(role: str = "chat", timeout_sec: float = 12.0) -> Result:
         return Result("llm", PASS, f"{winner} (local) in {winner_ms:.0f} ms", detail,
                       "Running local — network problems on the day cannot touch this.")
 
+    providers = {c.get("provider") for c in candidates if c.get("name") in
+                 {line.split()[0] for line in detail if " ok " in line}}
+    if len(providers) < 2:
+        return Result("llm", WARN, f"{winner} in {winner_ms:.0f} ms", detail,
+                      "Only one provider is answering, so this chain has no real "
+                      "fallback — a single outage takes the whole demo down.")
+
     return Result("llm", PASS, f"{winner} in {winner_ms:.0f} ms", detail,
-                  "This is a cloud model. If the venue's network is untrusted, "
-                  "confirm the local Ollama candidate also passed above.")
+                  "Cloud-only chain, but more than one provider is answering, so "
+                  "a single outage will not take the demo down. It still needs "
+                  "the network — tether rather than trust venue wifi.")
+
+
+# ── 5. Model catalogue ───────────────────────────────────────────────────────
+
+def check_models(timeout_sec: float = 8.0) -> Result:
+    """Check every configured model name still exists on its provider.
+
+    Providers retire models without warning — `llama-3.3-70b-versatile`
+    vanished from Groq and the first anyone heard of it was NORA saying "I
+    couldn't summarise the results right now" out loud, mid-conversation. One
+    catalogue call per provider catches the whole class of failure before the
+    demo does. Roles that check_llm never probes (live_search, research,
+    vision) are exactly where a dead model hides longest.
+    """
+    import os
+    import requests
+
+    from nora.config import get_config
+
+    cfg = get_config()
+    # model name -> where it is configured, so the failure names the fix
+    wanted: dict[tuple[str, str, str], list[str]] = {}
+
+    def want(base_url: str, key_env: str, model: str, where: str) -> None:
+        if model:
+            wanted.setdefault((base_url, key_env, model), []).append(where)
+
+    llm = cfg.get("llm", {})
+    if llm.get("provider") == "groq":
+        want(llm.get("api_base") or "https://api.groq.com/openai/v1",
+             llm.get("api_key_env", "GROQ_API_KEY"), llm.get("model", ""), "llm.model")
+
+    for role, candidates in (cfg.get("llm_router", {}).get("roles", {}) or {}).items():
+        for c in candidates or []:
+            want(c.get("base_url", ""), c.get("api_key_env", ""), c.get("model", ""),
+                 f"llm_router.{role}")
+
+    want("https://api.groq.com/openai/v1", "GROQ_API_KEY",
+         cfg.get("screen_intelligence", {}).get("vision_model", ""), "screen_intelligence")
+    want("https://api.groq.com/openai/v1", "GROQ_API_KEY",
+         cfg.get("transcriber", {}).get("remote_model", ""), "transcriber")
+
+    # One catalogue fetch per (host, key) — not one per model.
+    catalogues: dict[tuple[str, str], set[str] | None] = {}
+    for base_url, key_env, _model in wanted:
+        host = (base_url, key_env)
+        if host in catalogues:
+            continue
+        key = os.environ.get(key_env, "") if key_env else ""
+        if key_env and not key:
+            catalogues[host] = None
+            continue
+        try:
+            resp = requests.get(f"{base_url.rstrip('/')}/models",
+                                headers={"Authorization": f"Bearer {key}"},
+                                timeout=timeout_sec)
+            resp.raise_for_status()
+            catalogues[host] = {m["id"] for m in resp.json().get("data", [])}
+        except Exception as e:
+            logger.debug("preflight: model list failed for %s (%s)", base_url, e)
+            catalogues[host] = None
+
+    detail: list[str] = []
+    missing: list[str] = []
+    unchecked = 0
+    for (base_url, key_env, model), where in sorted(wanted.items(), key=lambda kv: kv[0][2]):
+        known = catalogues.get((base_url, key_env))
+        used_by = ", ".join(sorted(set(where)))
+        if known is None:
+            unchecked += 1
+            continue
+        if model in known:
+            detail.append(f"{model:34} ok        {used_by}")
+        else:
+            detail.append(f"{model:34} RETIRED   {used_by}")
+            missing.append(f"{model} ({used_by})")
+
+    if missing:
+        return Result(
+            "models", FAIL, f"{len(missing)} configured model(s) no longer exist", detail,
+            "Pick a replacement from the provider's catalogue and update "
+            "config.yaml. Every call routed to these fails with a 404 that "
+            "NORA reports as a vague apology.",
+        )
+    if not detail:
+        return Result("models", WARN, "no provider catalogue could be read", detail,
+                      "Check the API keys in .env — model names went unverified.")
+    if unchecked:
+        return Result("models", WARN, f"{len(detail)} model(s) exist, {unchecked} unverified",
+                      detail, "Some providers had no key or did not answer.")
+    return Result("models", PASS, f"all {len(detail)} configured models exist", detail)
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────
@@ -460,6 +559,10 @@ def run(seconds: float = 4.0, play: bool = True, skip_audio: bool = False) -> li
     llm = check_llm()
     _print(llm)
     results.append(llm)
+
+    models = check_models()
+    _print(models)
+    results.append(models)
 
     return results
 

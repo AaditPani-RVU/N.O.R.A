@@ -26,9 +26,9 @@ def stop_all() -> str:
     except Exception as e:
         logger.warning("speaker.stop failed: %s", e)
 
-    # 2. Stop all music (local + iTunes/Apple Music COM)
+    # 2. Stop all music (Spotify via MPRIS + any local entrance clip)
     try:
-        from nora.commands.music import stop_music
+        from nora.commands.spotify import stop_music
         stop_music()
     except Exception as e:
         logger.warning("stop_music failed: %s", e)

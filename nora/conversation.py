@@ -211,6 +211,15 @@ def _persona_block() -> str:
         return ""
 
 
+def _presence_block() -> str:
+    """Who the camera can see, plus the guest-mode instruction. "" when idle."""
+    try:
+        from nora.vision.presence import format_for_prompt
+        return format_for_prompt()
+    except Exception:
+        return ""
+
+
 def _user_block() -> str:
     try:
         from nora.user_model import format_user_card_for_prompt
@@ -230,6 +239,10 @@ def build_system_prompt(act: Act = Act.UNKNOWN, memory_ctx: dict | None = None) 
     persona_block = _persona_block()
     if persona_block:
         parts.append(persona_block)
+
+    presence_block = _presence_block()
+    if presence_block:
+        parts.append(presence_block)
 
     parts.append("LENGTH\n" + _LENGTH_GUIDE.get(act, _LENGTH_GUIDE[Act.UNKNOWN]))
 
@@ -253,7 +266,48 @@ _BOLD_ITALIC_RE = re.compile(r"(\*{1,3}|_{2,3})(.+?)\1")
 _HEADER_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.M)
 _BULLET_RE = re.compile(r"^\s*(?:[-*•+]|\d{1,2}[.)])\s+", re.M)
 _LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
-_URL_RE = re.compile(r"https?://\S+")
+# Matches a full URL *and* a bare domain ("www.goodreturns.in/petrol-price.html",
+# "en.wikipedia.org/wiki/X"). The bare form is the one that hurt: it has no
+# scheme, so a https-only pattern left it intact and the TTS read the whole
+# path out character by character.
+#
+# TLDs are split by how safe they are to match with nothing else around them.
+# Several are ordinary English words, and models routinely drop the space after
+# a full stop — "I finished.In the meantime" looks exactly like a domain, and
+# matching it swallowed the "In". So the ambiguous ones only count as a domain
+# when something else marks them as one: a scheme, a "www.", a path, or a
+# subdomain (bbc.co.uk) — or, failing all of those, being written in lowercase,
+# since a dropped space after a full stop leaves the next word capitalised
+# ("finished.In") while a real domain does not. The list as a whole keeps
+# decimals ("3.14") and dotted identifiers ("nora.commands.web_search") from
+# matching at all.
+_HARD_TLDS = r"com|org|net|edu|gov|mil|io|xyz|biz"
+_SOFT_TLDS = r"ai|co|uk|in|de|fr|jp|cn|ru|br|au|ca|tv|me|app|dev|news|info|int"
+_URL_RE = re.compile(
+    rf"""(?:https?://|www\.)\S+
+       | \b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:{_HARD_TLDS})\b(?:/\S*)?
+       | \b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+\.(?:{_SOFT_TLDS})\b(?:/\S*)?
+       | \b[a-z0-9][a-z0-9-]*\.(?:{_SOFT_TLDS})/\S*
+       | (?-i:\b[a-z0-9][a-z0-9-]*\.(?:{_SOFT_TLDS})\b)""",
+    re.I | re.X,
+)
+# Second-level domains that are never the site's name — bbc.co.uk is "bbc".
+_SLDS = {"co", "com", "org", "net", "ac", "gov", "edu"}
+
+
+def _site_name(match: re.Match) -> str:
+    """Reduce a URL to the site it points at, so speech says the source, not the path."""
+    host = match.group(0)
+    host = re.sub(r"^https?://", "", host, flags=re.I).split("/")[0]
+    labels = [l for l in host.lower().split(".") if l and l != "www"]
+    if not labels:
+        return "that link"
+    # Drop the TLD, and a second-level domain with it (bbc.co.uk -> bbc).
+    if len(labels) > 1:
+        labels = labels[:-1]
+    if len(labels) > 1 and labels[-1] in _SLDS:
+        labels = labels[:-1]
+    return labels[-1] if labels else "that link"
 _EMOJI_RE = re.compile(
     "[" "\U0001F300-\U0001FAFF" "\U00002600-\U000027BF" "\U0001F1E6-\U0001F1FF"
     "\U00002190-\U000021FF" "\U00002B00-\U00002BFF" "️" "]+"
@@ -300,7 +354,7 @@ def for_speech(text: str, max_sentences: int = 0) -> str:
     text = _CODE_FENCE_RE.sub(lambda m: " " + m.group(1).strip() + " ", text)
     text = _INLINE_CODE_RE.sub(r"\1", text)
     text = _LINK_RE.sub(r"\1", text)
-    text = _URL_RE.sub("that link", text)
+    text = _URL_RE.sub(_site_name, text)
     text = _HEADER_RE.sub("", text)
     text = _BULLET_RE.sub("", text)
     text = _BOLD_ITALIC_RE.sub(r"\2", text)
@@ -362,21 +416,58 @@ def for_speech(text: str, max_sentences: int = 0) -> str:
 # answering. Configuring the provider to hide its reasoning channel is the real
 # fix (see llm_router extra_body in config.yaml); this is the net underneath,
 # because a local or newly-added model can leak the same way.
-_ANALYSIS_RE = re.compile(
-    r"^\s*(?:"
-    r"we (?:need|should|must|have) to\b"
-    r"|we (?:responded|answered|said|replied)\b"
-    r"|the (?:user|guidelines?|instructions?|system prompt|prompt) (?:asked|says?|said|wants?|is|are)\b"
-    r"|user (?:asked|said|wants?)\b"
+# Unambiguous scratchpad openers. Nothing NORA would legitimately say to a
+# user starts this way — it is the model talking to itself about the task.
+_ANALYSIS_STRONG_RE = re.compile(
+    r"^\s*(?:so |but |now |actually |then |okay,? |alright,? )*(?:"
+    r"the (?:user|guidelines?|instructions?|system prompt|prompt) (?:asked|says?|said|wants?|is|are)\b"
+    r"|user (?:asked|said|wants?|says?)\b"
+    r"|the assistant (?:said|replied|answered|told)\b"
     r"|(?:so )?the answer (?:should|must|needs to) be\b"
     r"|let'?s (?:think|consider|analyze|analyse)\b"
-    r"|(?:i|we) (?:should|need to) (?:keep|answer|respond|reply|make sure)\b"
     r"|according to the (?:guidelines?|instructions?|persona)\b"
     r"|per the (?:guidelines?|instructions?)\b"
+    # Nemotron narrates the system prompt's rules back as bare imperatives
+    # ("Must not restate question.") and refers to the transcript in the third
+    # person ("The prior context: ...", "In prior conversation, we told them").
+    r"|must not\b"
+    r"|(?:the )?prior (?:context|answer|conversation|turn|reply)\b"
+    r"|in (?:the )?prior conversation\b"
+    r"|(?:not|nothing) (?:fully )?(?:defined|given|in (?:the )?transcript)\b"
+    r"|(?:likely|maybe|perhaps) we\b"
+    r"|there'?s (?:a )?mention of\b"
+    r"|that'?s it\.?\s*$"
     r"|that'?s fine\.?\s*$"
     r")",
     re.I,
 )
+
+# Openers that are scratchpad *in context* but also ordinary speech. "We need
+# to get you set up with an API key" is a real answer; "We need to recall what
+# we told the user" is a leak. What separates them is who the user is to the
+# sentence — a leak talks *about* them in the third person, a real reply talks
+# *to* them. So these only convict alongside _THIRD_PERSON_USER_RE.
+_ANALYSIS_WEAK_RE = re.compile(
+    r"^\s*(?:so |but |now |actually |then |okay,? |alright,? )*(?:"
+    r"we (?:need|should|must|have|can|could|might|will) to?\b"
+    r"|we (?:responded|answered|said|replied|told|gave)\b"
+    r"|they (?:asked|then asked)\b"
+    r"|(?:i|we) (?:should|need to) (?:keep|answer|respond|reply|make sure)\b"
+    r")",
+    re.I,
+)
+
+_THIRD_PERSON_USER_RE = re.compile(
+    r"\b(?:the user|the assistant|told them|tell them|they asked|they said"
+    r"|user asked|user said|the transcript|previously told)\b",
+    re.I,
+)
+
+
+def _is_analysis_sentence(sentence: str, third_person: bool) -> bool:
+    if _ANALYSIS_STRONG_RE.match(sentence):
+        return True
+    return third_person and bool(_ANALYSIS_WEAK_RE.match(sentence))
 
 
 def _strip_analysis(text: str) -> str:
@@ -384,10 +475,44 @@ def _strip_analysis(text: str) -> str:
     sentences = re.split(r"(?<=[.!?])\s+", text)
     if len(sentences) < 2:
         return text
-    kept = [s for s in sentences if not _ANALYSIS_RE.match(s)]
+    third_person = bool(_THIRD_PERSON_USER_RE.search(text))
+    kept = [s for s in sentences if not _is_analysis_sentence(s, third_person)]
     # If the filter would eat everything, the match was spurious — keep the
     # original rather than answering with silence.
     return " ".join(kept) if kept else text
+
+
+# A leaked scratchpad rarely announces itself on every sentence. Once a reply
+# opens in analysis, the sentences that follow are usually more analysis
+# phrased as ordinary prose ("The prior answer was ...", "So now user asks
+# ..."), which no single-sentence pattern catches. So judge the reply as a
+# whole: an opening that is analysis, or enough matching sentences to make the
+# reply mostly scratchpad, means the generation failed and is not speakable.
+_QUOTED_QUESTION_RE = re.compile(r'["\u201c][^"\u201d]{10,}\?["\u201d]')
+
+
+def looks_like_analysis(text: str) -> bool:
+    """True if `text` reads as a model thinking rather than answering.
+
+    Used as the model_router validator for the chat role, so a leaked
+    scratchpad falls through to the next candidate instead of being spoken.
+    """
+    if not text or not text.strip():
+        return False
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    if not sentences:
+        return False
+    third_person = bool(_THIRD_PERSON_USER_RE.search(text))
+    matches = sum(1 for s in sentences if _is_analysis_sentence(s, third_person))
+    if matches == 0:
+        return False
+    if _is_analysis_sentence(sentences[0], third_person):
+        return True
+    if matches >= 2:
+        return True
+    # Quoting the user's own question back mid-reply is something only the
+    # scratchpad does — but on its own it is too weak to convict.
+    return bool(_QUOTED_QUESTION_RE.search(text))
 
 
 def _collapse_repetition(text: str) -> str:
@@ -459,6 +584,7 @@ def _generate(system: str, messages: list[dict], act: Act) -> str:
             max_tokens=max_tokens,
             temperature=temperature,
             timeout_sec=timeout_sec,
+            validate=lambda t: not looks_like_analysis(t),
         )
         logger.info("conversation: replied via %s", candidate)
         return text
@@ -478,9 +604,10 @@ def _generate(system: str, messages: list[dict], act: Act) -> str:
 def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None) -> str:
     """Produce a spoken reply for a conversational utterance.
 
-    Records both sides of the exchange into ``nora.dialogue`` so the next turn
-    can see this one.  Always returns something speakable — a model outage
-    degrades to a varied apology, never to silence.
+    Records the user's turn into ``nora.dialogue``; NORA's side is recorded by
+    ``speaker.speak`` once it has actually been spoken.  Always returns
+    something speakable — a model outage degrades to a varied apology, never
+    to silence.
     """
     started = time.monotonic()
     act = act or dialogue.classify(text)
@@ -496,7 +623,6 @@ def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None) -
     instant = _instant_reply(text, act)
     if instant is not None:
         logger.info("conversation: instant reply for act=%s", act.value)
-        dialogue.record_nora(instant, kind="chat")
         return instant
 
     system = build_system_prompt(act, memory_ctx)
@@ -511,7 +637,12 @@ def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None) -
         reply = phrasing.get("chat_unavailable", "I'm having trouble reaching my models right now.")
         logger.warning("conversation: empty reply, using fallback")
 
-    dialogue.record_nora(reply, kind="chat")
+    # Deliberately NOT recorded here. speaker.speak() is the single choke point
+    # for everything NORA says, chat and action summaries alike. Recording in
+    # both places appended the reply twice, and as_messages() merges
+    # consecutive same-role turns — so the model was shown a transcript in
+    # which it repeated itself verbatim, while being instructed not to repeat
+    # itself. Both callers in pipeline.py speak what they get back.
     logger.info("conversation: act=%s %.0fms — %s", act.value,
                 (time.monotonic() - started) * 1000, reply[:80])
     return reply

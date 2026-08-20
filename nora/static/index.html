@@ -320,22 +320,6 @@
     #jstatus.thinking { color:#c084fc;text-shadow:0 0 12px rgba(168,85,247,0.5); }
     #jstatus.listening{ color:#60d4ff;text-shadow:0 0 12px rgba(var(--rgb),0.6); }
 
-    /* ── Speech ── */
-    #speech-wrap { position:relative;display:flex;align-items:center;justify-content:center; }
-    #speech-wrap::before {
-      content:'';position:absolute;inset:-8px;border-radius:4px;
-      background:radial-gradient(ellipse at center,rgba(var(--rgb),0.07) 0%,transparent 70%);
-      opacity:0;transition:opacity var(--t-slow) var(--ease);pointer-events:none;
-    }
-    #speech-wrap.active::before { opacity:1; }
-    #speech {
-      max-width:380px;text-align:center;
-      font-size:11px;letter-spacing:1.5px;line-height:1.7;color:var(--txt);
-      min-height:40px;opacity:0;transition:opacity var(--t-mid) var(--ease);
-      text-shadow:0 0 12px rgba(var(--rgb),0.35);
-    }
-    #speech::after { content:'▋';opacity:0;animation:cursor-blink 0.8s step-end infinite;font-size:9px;vertical-align:middle;margin-left:2px;color:var(--c); }
-    #speech.typing::after { opacity:1; }
     @keyframes cursor-blink { 0%,100%{opacity:1} 50%{opacity:0} }
 
     /* ── Stage bar ── */
@@ -374,16 +358,6 @@
     #ptt-mode-pill.on .dot  { background:#00ff88;box-shadow:0 0 5px #00ff88; }
     #ptt-mode-pill.off .dot { background:#ffaa00;box-shadow:0 0 5px #ffaa00; }
 
-    #input-mode-btn {
-      margin-top:8px;width:158px;height:30px;border:1px solid var(--cd);background:rgba(var(--rgb),0.03);
-      color:var(--dim);font-family:var(--mono);font-size:8px;letter-spacing:3px;cursor:pointer;text-transform:uppercase;
-      transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease);
-    }
-    #input-mode-btn:hover { background:rgba(var(--rgb),0.08);color:var(--c);border-color:rgba(var(--rgb),0.4); }
-    #input-mode-btn.text-active { border-color:var(--c);color:var(--c);background:rgba(var(--rgb),0.07); }
-
-    #text-input-wrap { display:none;flex-direction:column;align-items:center;gap:6px;margin-top:4px;width:280px; }
-    #text-input-wrap.visible { display:flex; }
     #text-cmd {
       width:100%;padding:8px 10px;background:rgba(var(--rgb),0.04);border:1px solid var(--cd);
       color:var(--c);font-family:var(--mono);font-size:10px;letter-spacing:1px;
@@ -505,10 +479,7 @@
       #jstatus { font-size:9px;letter-spacing:5px; }
       #stage-bar { flex-wrap:wrap;justify-content:center;gap:3px; }
       .stg-sep { display:none; }
-      #speech { max-width:90vw;font-size:10px; }
       #ptt { width:min(80vw,300px);height:52px;font-size:11px;letter-spacing:3px; }
-      #input-mode-btn { width:min(80vw,300px);height:36px;font-size:9px; }
-      #text-input-wrap { width:min(80vw,300px); }
       #text-cmd { font-size:13px;padding:10px 12px; }
       #text-send { height:40px;font-size:11px; }
       #panels-toggle { display:flex;align-items:center;justify-content:center;width:min(80vw,300px); }
@@ -726,7 +697,7 @@
       70%  { box-shadow: 0 0 0 15px rgba(var(--rgb),0),   0 0 34px rgba(var(--rgb),0.55); }
       100% { box-shadow: 0 0 0 0 rgba(var(--rgb),0),      0 0 26px rgba(var(--rgb),0.40); }
     }
-    #input-mode-btn, #panels-toggle, #text-cmd, #text-send, .cam-btn, .mus-btn { border-radius: 2px; }
+    #panels-toggle, #text-cmd, #text-send, .cam-btn, .mus-btn { border-radius: 2px; }
 
     /* ══ ACTIVITY ══ */
     .act-item { border-radius: 0 2px 2px 0; }
@@ -802,6 +773,592 @@
     body[data-orb="listening"] { --rgb: 42,205,255;  --lrgb: 154,222,255; }
     body[data-orb="thinking"]  { --rgb: 176,124,252; --lrgb: 214,192,255; }
     body[data-orb="speaking"]  { --rgb: 0,238,196;   --lrgb: 150,246,226; }
+
+    /* ══════════════════════════════════════════════════════════
+       v3 — CONVERSATION-FIRST LAYOUT, THEMES, COMMAND BAR
+
+       The centre column used to be an orb floating in ~700px of empty space
+       with a single reply line that faded after seven seconds. It is now a
+       three-zone stack — orb / transcript / command bar — so the dead space
+       carries the one thing an assistant dashboard actually needs: the
+       conversation.
+       ══════════════════════════════════════════════════════════ */
+
+    /* ── Accent presets ──
+       The idle accent is indirected through --rgb-idle so a preset can retint
+       the entire HUD, while thinking/speaking keep their fixed semantic hues
+       (violet = reasoning, green = speaking) — those carry meaning, not taste. */
+    :root { --rgb-idle: 0,212,255; --lrgb-idle: 142,216,255; }
+    body,
+    body[data-orb="listening"] { --rgb: var(--rgb-idle); --lrgb: var(--lrgb-idle); }
+
+    /* ── Atmosphere toggles (settings panel) ── */
+    html[data-grid="off"]      body::before      { display: none; }
+    html[data-scanlines="off"] body::after       { display: none; }
+    html[data-aurora="off"]    #aurora           { display: none; }
+    html[data-particles="off"] #ambient-canvas   { display: none; }
+    html[data-spotlight="off"] #spotlight        { display: none; }
+
+    /* ── Grid rebalance ──
+       265px fixed side panels against a 1fr centre meant the centre grew
+       unboundedly on wide screens. Both sides now have room to breathe and
+       the centre's content is width-capped instead. */
+    #main {
+      grid-template-columns: minmax(232px, 296px) minmax(0, 1fr) minmax(258px, 330px);
+      gap: 12px; padding: 12px;
+    }
+    #center {
+      justify-content: flex-start;
+      gap: 9px; width: 100%; min-height: 0; padding-top: 2px;
+    }
+    .center-col { width: min(100%, 780px); flex-shrink: 0; }
+
+    /* Orb scales to the viewport height; the negative margin collapses the
+       layout box that `scale` alone would leave behind at full 340px. */
+    .orb-wrap {
+      flex: 0 0 auto;
+      transform: scale(var(--orb-scale, 1));
+      margin: calc((var(--orb-scale, 1) - 1) * 170px) 0;
+    }
+    .jlabel::after { width: 132px; margin-top: 7px; }
+    .jname { font-size: 26px; letter-spacing: 11px; padding-left: 11px; }
+    #jstatus { font-size: 9px; letter-spacing: 5px; }
+
+    /* ── Legibility pass ──
+       7–8px HUD type looked the part but several labels were unreadable. */
+    .widget-title { font-size: 10.5px; letter-spacing: 3.6px; }
+    .badge, .pill { font-size: 8.5px; }
+    .slabel, .sbox .sl, .wcell .wl, .load-lbl, .uptime-sub { font-size: 8px; letter-spacing: 1.8px; }
+    .sval, .sbox .sv { font-variant-numeric: tabular-nums; }
+    .act-item { font-size: 9.5px; }
+
+    /* ════ TRANSCRIPT ════ */
+    #convo {
+      flex: 1 1 auto; min-height: 120px;
+      display: flex; flex-direction: column; position: relative; overflow: hidden;
+      border: 1px solid var(--cd); border-radius: 3px;
+      background: linear-gradient(158deg, rgba(2,22,44,0.62) 0%, rgba(0,10,24,0.86) 62%, rgba(0,7,18,0.92) 100%);
+      backdrop-filter: blur(12px);
+      box-shadow: inset 0 1px 0 rgba(var(--rgb),0.09), 0 22px 54px -36px rgba(var(--rgb),0.9);
+      transition: border-color var(--t-slow) var(--ease), box-shadow var(--t-slow) var(--ease);
+    }
+    body:not([data-orb="idle"]) #convo {
+      border-color: rgba(var(--rgb),0.30);
+      box-shadow: inset 0 1px 0 rgba(var(--rgb),0.16), 0 22px 54px -34px rgba(var(--rgb),0.95);
+    }
+    #convo-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px; border-bottom: 1px solid var(--cd);
+      background: linear-gradient(180deg, rgba(var(--rgb),0.07), rgba(var(--rgb),0.015));
+      flex-shrink: 0;
+    }
+    #convo-head .widget-title { font-size: 9.5px; letter-spacing: 3.4px; }
+    .convo-meta { display: flex; align-items: center; gap: 7px; }
+    .convo-stat {
+      font-size: 8px; letter-spacing: 1.6px; color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .convo-stat b { color: var(--c); font-weight: 400; }
+    .convo-act {
+      font-family: var(--mono); font-size: 8px; letter-spacing: 2px;
+      color: var(--dim); background: rgba(var(--rgb),0.04);
+      border: 1px solid var(--cd); border-radius: 2px;
+      padding: 3px 7px; cursor: pointer;
+      transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+    }
+    .convo-act:hover { color: var(--c); border-color: rgba(var(--rgb),0.45); background: rgba(var(--rgb),0.10); }
+
+    #convo-scroll {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      padding: 14px 2px 10px;
+      /* Top fade so rows dissolve under the header rather than clipping. */
+      -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 20px);
+      mask-image: linear-gradient(180deg, transparent 0, #000 20px);
+    }
+    #convo-list { display: flex; flex-direction: column; }
+
+    .turn {
+      display: flex; align-items: flex-start; gap: 9px;
+      padding: 0 14px; margin-bottom: 13px;
+      animation: turn-in 420ms var(--ease-out) both;
+    }
+    @keyframes turn-in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+    .turn.you { flex-direction: row-reverse; }
+    .turn-body { max-width: 80%; min-width: 0; }
+    .turn-meta {
+      display: flex; align-items: center; gap: 7px; margin-bottom: 4px;
+      font-size: 7.5px; letter-spacing: 2.2px; color: var(--dim);
+    }
+    .turn.you .turn-meta { flex-direction: row-reverse; }
+    .turn-lat {
+      color: var(--c); border: 1px solid var(--cd); border-radius: 999px;
+      padding: 0 5px; font-variant-numeric: tabular-nums;
+    }
+    .turn-text {
+      font-size: 12px; line-height: 1.72; letter-spacing: 0.5px;
+      padding: 9px 12px; border-radius: 3px; white-space: pre-wrap; word-break: break-word;
+      user-select: text;
+    }
+    .turn.nora .turn-text {
+      color: var(--txt);
+      background: linear-gradient(180deg, rgba(var(--rgb),0.10), rgba(var(--rgb),0.028));
+      border: 1px solid rgba(var(--rgb),0.20); border-left: 2px solid var(--c);
+      text-shadow: 0 0 14px rgba(var(--rgb),0.22);
+    }
+    .turn.you .turn-text {
+      color: rgba(var(--lrgb),0.80);
+      background: rgba(255,255,255,0.022);
+      border: 1px solid rgba(var(--lrgb),0.13); border-right: 2px solid rgba(var(--lrgb),0.45);
+    }
+    .turn-text.typing::after {
+      content: '▋'; color: var(--c); margin-left: 2px; font-size: 10px;
+      animation: cursor-blink 0.8s step-end infinite;
+    }
+    .turn-avatar {
+      flex-shrink: 0; width: 15px; height: 15px; margin-top: 15px;
+      border: 1px solid var(--c); transform: rotate(45deg);
+      background: rgba(var(--rgb),0.16); box-shadow: 0 0 9px rgba(var(--rgb),0.4);
+    }
+    .turn.you .turn-avatar {
+      border-radius: 50%; transform: none;
+      border-color: rgba(var(--lrgb),0.4); background: rgba(var(--lrgb),0.10); box-shadow: none;
+    }
+
+    #convo-empty {
+      position: absolute; inset: 42px 0 0; pointer-events: none;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+      font-size: 9px; letter-spacing: 4px; color: var(--dim);
+    }
+    #convo-empty[hidden] { display: none; }
+    #convo-empty .hint { font-size: 8px; letter-spacing: 2px; opacity: 0.62; }
+    #convo-empty .caret { color: var(--c); animation: cursor-blink 0.9s step-end infinite; }
+
+    #convo-jump {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      padding: 4px 11px; border: 1px solid rgba(var(--rgb),0.5); border-radius: 999px;
+      background: rgba(0,12,26,0.94); color: var(--c);
+      font-family: var(--mono); font-size: 8px; letter-spacing: 2px; cursor: pointer; z-index: 6;
+      box-shadow: 0 0 18px -4px rgba(var(--rgb),0.8);
+    }
+    #convo-jump[hidden] { display: none; }
+
+    /* ════ QUICK COMMAND CHIPS ════ */
+    #chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+    #chips::-webkit-scrollbar { display: none; }
+    .chip {
+      flex: 0 0 auto; padding: 5px 11px; border-radius: 999px;
+      border: 1px solid var(--cd); background: rgba(var(--rgb),0.03); color: var(--dim);
+      font-family: var(--mono); font-size: 8px; letter-spacing: 1.8px; text-transform: uppercase;
+      cursor: pointer; white-space: nowrap;
+      transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+                  background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-spring);
+    }
+    .chip:hover { color: var(--c); border-color: rgba(var(--rgb),0.45); background: rgba(var(--rgb),0.10); transform: translateY(-1px); }
+    .chip:active { transform: translateY(0) scale(0.97); }
+
+    /* ════ COMMAND BAR ════ */
+    #cmdbar { display: flex; align-items: stretch; gap: 8px; }
+    #ptt {
+      width: 176px; height: 44px; flex: 0 0 auto; margin: 0;
+      font-size: 9px; letter-spacing: 3px;
+    }
+    #cmd-field {
+      flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0;
+      padding: 0 5px 0 12px; border: 1px solid var(--cd); border-radius: 2px;
+      background: rgba(var(--rgb),0.04);
+      transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+    }
+    #cmd-field:focus-within {
+      border-color: rgba(var(--rgb),0.60);
+      box-shadow: 0 0 26px -8px rgba(var(--rgb),0.9), inset 0 0 18px -10px rgba(var(--rgb),0.8);
+    }
+    #text-cmd {
+      flex: 1 1 auto; min-width: 0; width: auto; height: 42px;
+      border: none; background: transparent; padding: 0; font-size: 12px; letter-spacing: 0.8px;
+    }
+    #text-cmd:focus { border: none; }
+    #text-send {
+      width: 42px; height: 32px; flex: 0 0 auto; font-size: 12px; letter-spacing: 0;
+    }
+    #stop-btn {
+      flex: 0 0 auto; width: 74px; border-radius: 2px; cursor: pointer;
+      border: 1px solid rgba(255,68,96,0.55); background: rgba(255,68,96,0.10); color: #ff8095;
+      font-family: var(--mono); font-size: 8px; letter-spacing: 2.5px;
+      transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+    }
+    #stop-btn:hover { background: rgba(255,68,96,0.22); color: #ffc2cc; }
+    #stop-btn[hidden] { display: none; }
+
+    #cmd-foot { display: flex; align-items: center; justify-content: center; gap: 13px; flex-wrap: wrap; }
+    #cmd-hints { display: flex; gap: 12px; font-size: 7.5px; letter-spacing: 1.8px; color: var(--dim); opacity: 0.8; }
+    #cmd-hints span { display: flex; align-items: center; gap: 4px; }
+    kbd {
+      font-family: var(--mono); font-size: 7.5px; color: var(--c);
+      border: 1px solid var(--cd); border-radius: 2px; padding: 1px 4px; line-height: 1.4;
+      background: rgba(var(--rgb),0.05);
+    }
+    #ptt-mode-pill { margin-top: 0; border-radius: 999px; }
+
+    /* ════ CAMERA — collapse when off ════
+       An inactive camera used to hold ~700px of black rectangle, pushing the
+       activity log off-screen. Off it is a strip; live it takes the room. */
+    #camera-card { flex: 0 0 auto; }
+    #camera-card.live { flex: 1 1 auto; min-height: 0; }
+    #camera-card:not(.live) .cam-box { flex: 0 0 74px; height: 74px; }
+    #camera-card:not(.live) .cam-off { flex-direction: row; gap: 9px; }
+    #camera-card:not(.live) .cam-icon-wrap { width: 28px; height: 28px; }
+    #camera-card.live .cam-box { flex: 1 1 auto; }
+    #activity-card { min-height: 168px; }
+
+    /* ════ HEADER ADDITIONS ════ */
+    #hdr-latency { font-variant-numeric: tabular-nums; }
+    #hdr-latency b { color: var(--c); font-weight: 400; }
+    #gear {
+      display: flex; align-items: center; justify-content: center;
+      width: 26px; height: 22px; border-radius: 2px; cursor: pointer;
+      border: 1px solid var(--cd); background: rgba(var(--rgb),0.03); color: var(--dim);
+      font-family: var(--mono); font-size: 12px; line-height: 1;
+      transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), transform var(--t-slow) var(--ease);
+    }
+    #gear:hover { color: var(--c); border-color: rgba(var(--rgb),0.45); transform: rotate(60deg); }
+    #gear.open { color: var(--c); border-color: rgba(var(--rgb),0.6); }
+
+    /* ════ SETTINGS PANEL ════ */
+    #settings {
+      position: fixed; top: 58px; right: 14px; z-index: 500; width: 262px;
+      border: 1px solid rgba(var(--rgb),0.28); border-radius: 3px;
+      background: linear-gradient(158deg, rgba(2,22,44,0.94) 0%, rgba(0,9,22,0.97) 100%);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 26px 60px -28px rgba(0,0,0,0.95), inset 0 1px 0 rgba(var(--rgb),0.14);
+      padding: 12px 13px 13px;
+      transform-origin: top right;
+      transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
+    }
+    #settings[hidden] { display: none; }
+    #settings.closing, #settings.opening { opacity: 0; transform: scale(0.95) translateY(-6px); }
+    .set-title { font-family: var(--disp); font-size: 10px; letter-spacing: 4px; color: var(--c); text-transform: uppercase; margin-bottom: 10px; }
+    .set-sub { font-size: 7.5px; letter-spacing: 2.4px; color: var(--dim); margin: 12px 0 6px; }
+    .set-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; font-size: 9px; letter-spacing: 1.6px; color: var(--txt); }
+    .swatches { display: flex; gap: 7px; }
+    .sw {
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer; padding: 0;
+      border: 1px solid rgba(255,255,255,0.16);
+      transition: transform var(--t-fast) var(--ease-spring), box-shadow var(--t-fast) var(--ease);
+    }
+    .sw:hover { transform: scale(1.14); }
+    .sw.on { box-shadow: 0 0 0 2px #00070e, 0 0 0 3.5px currentColor, 0 0 16px currentColor; }
+    .tgl { width: 34px; height: 17px; border-radius: 999px; border: 1px solid var(--cd); background: rgba(var(--rgb),0.05); position: relative; cursor: pointer; flex-shrink: 0; padding: 0; }
+    .tgl i { position: absolute; top: 1.5px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--dim); transition: left var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease); }
+    .tgl.on { border-color: rgba(var(--rgb),0.5); background: rgba(var(--rgb),0.16); }
+    .tgl.on i { left: 18px; background: var(--c); box-shadow: 0 0 8px var(--c); }
+
+    .orb-core.s-idle, .orb-core.s-listening {
+      background: radial-gradient(circle, #fff 0%, rgba(var(--lrgb),0.95) 45%, rgba(var(--rgb),0) 100%);
+    }
+    @keyframes pulse-idle {
+      0%,100% { transform: scale(1);    box-shadow: 0 0 18px rgb(var(--rgb)), 0 0 38px rgba(var(--rgb),0.55); }
+      50%     { transform: scale(1.18); box-shadow: 0 0 30px rgb(var(--rgb)), 0 0 65px rgba(var(--rgb),0.6), 0 0 100px rgba(var(--rgb),0.28); }
+    }
+    @keyframes pulse-listen {
+      0%,100% { transform: scale(1.0);  box-shadow: 0 0 22px rgb(var(--rgb)), 0 0 50px rgba(var(--rgb),0.6); }
+      50%     { transform: scale(1.25); box-shadow: 0 0 40px rgb(var(--rgb)), 0 0 80px rgba(var(--rgb),0.7), 0 0 120px rgba(var(--rgb),0.4); }
+    }
+
+    /* Corner brackets, so the transcript reads as part of the same HUD as
+       the widgets rather than a plain box dropped into the middle. */
+    #convo::before, #convo::after { content: ''; position: absolute; width: 14px; height: 14px; pointer-events: none; z-index: 4; }
+    #convo::before { top: 0; left: 0; border-top: 1.5px solid var(--c); border-left: 1.5px solid var(--c); }
+    #convo::after { bottom: 0; right: 0; border-bottom: 1.5px solid rgba(var(--rgb),0.42); border-right: 1.5px solid rgba(var(--rgb),0.42); }
+
+    /* Fade the chip row's edge only while it actually overflows — a hard clip
+       reads as a rendering bug, a permanent fade dims a row that fits. */
+    #chips.overflowing {
+      -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 56px), transparent);
+      mask-image: linear-gradient(90deg, #000 calc(100% - 56px), transparent);
+    }
+
+    /* ════ MUSIC ════ */
+    .mus-times {
+      display: flex; justify-content: space-between; margin: -6px 0 9px;
+      font-size: 7.5px; letter-spacing: 1.5px; color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .mus-mute {
+      flex: 0 0 auto; width: 36px; padding: 4px 0; border-radius: 2px; cursor: pointer;
+      border: 1px solid var(--cd); background: rgba(var(--rgb),0.04); color: var(--dim);
+      font-family: var(--mono); font-size: 7.5px; letter-spacing: 1.6px;
+      transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+                  background var(--t-fast) var(--ease);
+    }
+    .mus-mute:hover { color: var(--c); border-color: rgba(var(--rgb),0.42); }
+    .mus-mute.on { color: #ff8095; border-color: rgba(255,68,96,0.55); background: rgba(255,68,96,0.10); }
+    .mus-vol-note { margin-top: 5px; text-align: right; font-size: 7px; letter-spacing: 2px; color: var(--dim); opacity: 0.6; }
+
+    /* ════ RESPONSE TIME ════ */
+    #latency-card { flex: 1 1 auto; min-height: 158px; display: flex; flex-direction: column; }
+    .lat-chart {
+      flex: 1 1 auto; min-height: 58px; position: relative;
+      display: flex; align-items: flex-end; gap: 3px; padding-top: 6px;
+      border-bottom: 1px solid var(--cd);
+    }
+    .lat-bar {
+      flex: 1 1 0; min-width: 2px; transform-origin: bottom; border-radius: 1px 1px 0 0;
+      background: linear-gradient(180deg, rgb(var(--rgb)), rgba(var(--rgb),0.16));
+      box-shadow: 0 0 8px rgba(var(--rgb),0.35);
+      animation: lat-grow 460ms var(--ease-out) both;
+    }
+    .lat-bar.slow { background: linear-gradient(180deg, #ffaa00, rgba(255,170,0,0.14)); box-shadow: 0 0 8px rgba(255,170,0,0.4); }
+    .lat-bar.crit { background: linear-gradient(180deg, #ff4460, rgba(255,68,96,0.14)); box-shadow: 0 0 8px rgba(255,68,96,0.4); }
+    @keyframes lat-grow { from { transform: scaleY(0.04); opacity: 0.3; } to { transform: scaleY(1); opacity: 1; } }
+    .lat-empty {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 8px; letter-spacing: 2.4px; color: var(--dim);
+    }
+    .lat-empty[hidden] { display: none; }
+    .panel-left .widget:nth-child(3) { animation-delay: 240ms; }
+
+    /* ════ RESPONSIVE (v3) ════ */
+    @media (max-width: 900px) {
+      #main { grid-template-columns: minmax(0,1fr); }
+    }
+    @media (max-width: 768px) {
+      html, body { overflow: hidden; }
+      #app { grid-template-rows: 44px minmax(0,1fr); }
+      #main { overflow: hidden; padding: 8px; gap: 8px; }
+      #center { height: 100%; gap: 7px; }
+      .orb-wrap { transform: scale(var(--orb-scale,1)); margin: calc((var(--orb-scale,1) - 1) * 170px) 0; }
+      .center-col { width: 100%; }
+      #stage-bar { display: none; }
+      #convo { min-height: 90px; }
+      .turn-text { font-size: 12.5px; }
+      .turn-body { max-width: 86%; }
+      #cmdbar { flex-wrap: wrap; }
+      #ptt { width: 100%; height: 48px; order: 2; }
+      #cmd-field { order: 1; width: 100%; flex-basis: 100%; }
+      #cmd-hints { display: none; }
+      #panels-toggle { display: flex; align-items: center; justify-content: center; width: 100%; margin-top: 0; }
+      .panel.mobile-visible { display: flex; position: fixed; inset: 44px 0 0; z-index: 200; padding: 10px; background: rgba(0,6,14,0.97); overflow-y: auto; }
+      #settings { left: 10px; right: 10px; width: auto; }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════
+       REFINEMENT PASS
+       Last in the sheet on purpose: every rule here is a deliberate
+       override of something defined above, so equal-specificity wins are
+       the mechanism rather than an accident. Nothing here changes layout
+       structure — only how much space things are allowed to take, and how
+       the surfaces read.
+       ══════════════════════════════════════════════════════════════════ */
+
+    /* ── Vertical rhythm ──
+       #latency-card carried `flex: 1 1 auto`, so on a tall screen it
+       absorbed every spare pixel in the left column: a 500px-tall card
+       holding a 60px chart, its three stat boxes stranded at the bottom
+       edge. Capping it lets the column end where its content ends, and
+       the empty space collects harmlessly below the last card. */
+    #latency-card { flex: 0 1 auto; max-height: 300px; }
+    .panel { justify-content: flex-start; padding-bottom: 6px; }
+    .lat-chart { min-height: 76px; }
+
+    /* ── Surface ──
+       A flat fill reads as a hole cut in the background. A sheen at the
+       top edge and a floor shadow are what make it read as a panel
+       sitting *on* the background. */
+    .widget, #convo {
+      background:
+        radial-gradient(130% 70% at 50% -25%, rgba(var(--rgb),0.055), transparent 62%),
+        linear-gradient(158deg, rgba(2,22,44,0.72) 0%, rgba(0,10,24,0.90) 62%, rgba(0,7,18,0.95) 100%);
+    }
+    .widget {
+      border-radius: 3px;
+      box-shadow: inset 0 1px 0 rgba(var(--rgb),0.10),
+                  0 14px 34px -30px rgba(0,0,0,0.95);
+    }
+    .widget:hover {
+      transform: translateY(-2px);
+      border-color: rgba(var(--rgb),0.38);
+      box-shadow: inset 0 1px 0 rgba(var(--rgb),0.18),
+                  0 18px 44px -26px rgba(var(--rgb),0.85),
+                  0 0 30px rgba(var(--rgb),0.06);
+    }
+
+    /* A hairline under every card title. The head and the body were
+       distinguished only by whitespace, which left each card reading as
+       one undifferentiated block of small text. */
+    .widget-head { margin-bottom: 10px; position: relative; }
+    .widget-head::after {
+      content: ''; position: absolute; left: -14px; right: -14px; bottom: -6px;
+      height: 1px; pointer-events: none;
+      background: linear-gradient(90deg,
+        transparent, rgba(var(--rgb),0.17) 14%,
+        rgba(var(--rgb),0.17) 86%, transparent);
+    }
+    .widget-title { color: rgba(var(--rgb),0.95); text-shadow: 0 0 14px rgba(var(--rgb),0.30); }
+
+    /* ── Stat bars ──
+       A 3px trough with no graduation gives a percentage no frame of
+       reference. Ticks at the quarters turn it into a gauge. */
+    .sbar-wrap {
+      height: 5px; border-radius: 3px; overflow: hidden;
+      background: rgba(var(--rgb),0.09);
+      box-shadow: inset 0 0 0 1px rgba(var(--rgb),0.07);
+    }
+    .sbar-wrap::before {
+      content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+      background: repeating-linear-gradient(90deg,
+        transparent 0, transparent calc(25% - 1px),
+        rgba(0,7,18,0.85) calc(25% - 1px), rgba(0,7,18,0.85) 25%);
+    }
+    .sbar { border-radius: 3px; background: linear-gradient(90deg, #00408f, var(--c)); }
+    .sbar::after { top: -1px; height: 7px; }
+    .srow { margin-bottom: 10px; }
+
+    /* ── Stat boxes ── */
+    .sbox, .wcell {
+      border-radius: 3px;
+      transition: border-color var(--t-fast) var(--ease),
+                  background var(--t-fast) var(--ease),
+                  transform var(--t-fast) var(--ease-out);
+    }
+    .sbox:hover, .wcell:hover {
+      border-color: rgba(var(--rgb),0.34);
+      background: linear-gradient(180deg, rgba(var(--rgb),0.12), rgba(var(--rgb),0.03));
+      transform: translateY(-1px);
+    }
+    .sbox .sv { font-size: 13px; letter-spacing: 0.5px; text-shadow: 0 0 12px rgba(var(--rgb),0.28); }
+    .seg { border-radius: 1px; }
+
+    /* ── Depth behind the orb ──
+       The centre column sat on the same flat ground as everything else,
+       so the orb had nothing to be lit against. */
+    #center::before {
+      content: ''; position: absolute; z-index: -1; pointer-events: none;
+      top: -6%; left: 50%; transform: translateX(-50%);
+      width: 780px; height: 620px;
+      background: radial-gradient(50% 50% at 50% 50%,
+        rgba(var(--rgb),0.055), rgba(var(--rgb),0.014) 45%, transparent 72%);
+    }
+    #center { position: relative; }
+
+    /* ── Transcript ── */
+    #convo { border-radius: 4px; }
+    #convo-head { padding: 9px 13px; }
+
+    /* The standby state was two lines of 9px text adrift in a very large
+       empty rectangle — the emptiest-looking part of the whole dashboard,
+       and the part the eye lands on first. Give it a frame and a pulse so
+       an idle assistant reads as waiting rather than as broken. */
+    #convo-empty { inset: 42px 0 0; }
+    .ce-frame {
+      display: flex; flex-direction: column; align-items: center; gap: 15px;
+      padding: 38px 64px; position: relative;
+      min-width: min(420px, 72%);
+      background: radial-gradient(58% 58% at 50% 50%, rgba(var(--rgb),0.045), transparent 72%);
+    }
+    /* Brackets on all four corners. Two corners on a wide box read as
+       stray marks; four read as a reticle. */
+    .ce-frame::before, .ce-frame::after {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background:
+        linear-gradient(rgba(var(--rgb),0.42) 0 0) 0 0 / 1px 18px no-repeat,
+        linear-gradient(rgba(var(--rgb),0.42) 0 0) 0 0 / 18px 1px no-repeat,
+        linear-gradient(rgba(var(--rgb),0.42) 0 0) 100% 0 / 1px 18px no-repeat,
+        linear-gradient(rgba(var(--rgb),0.42) 0 0) 100% 0 / 18px 1px no-repeat;
+    }
+    .ce-frame::after { transform: scaleY(-1); }
+    .ce-lead { font-size: 10px; letter-spacing: 5px; color: rgba(var(--lrgb),0.72); }
+    #convo-empty .hint { letter-spacing: 2.4px; }
+
+    /* Seven bars on staggered sine-ish delays. Deliberately slow — a fast
+       equaliser next to an idle orb looks like NORA is already listening. */
+    .ce-eq { display: flex; align-items: flex-end; gap: 5px; height: 34px; }
+    .ce-eq i {
+      width: 4px; height: 100%; border-radius: 2px;
+      background: linear-gradient(180deg, var(--c), rgba(var(--rgb),0.18));
+      transform-origin: bottom; transform: scaleY(0.18);
+      animation: ce-pulse 2.4s var(--ease) infinite;
+      opacity: 0.75;
+    }
+    .ce-eq i:nth-child(1) { animation-delay: 0ms;   }
+    .ce-eq i:nth-child(2) { animation-delay: 140ms; }
+    .ce-eq i:nth-child(3) { animation-delay: 280ms; }
+    .ce-eq i:nth-child(4) { animation-delay: 420ms; }
+    .ce-eq i:nth-child(5) { animation-delay: 280ms; }
+    .ce-eq i:nth-child(6) { animation-delay: 140ms; }
+    .ce-eq i:nth-child(7) { animation-delay: 0ms;   }
+    @keyframes ce-pulse {
+      0%, 100% { transform: scaleY(0.18); }
+      50%      { transform: scaleY(0.85); }
+    }
+
+    /* ── Empty states elsewhere ──
+       "NO EXCHANGES YET" / "NO RECENT ACTIVITY" in flat dim text read as
+       a failure to load. Bracketing them makes them read as a state. */
+    .lat-empty, .act-empty {
+      color: rgba(var(--lrgb),0.42);
+      font-size: 8px; letter-spacing: 2.6px;
+    }
+    .lat-empty::before, .act-empty::before { content: '[ '; opacity: 0.5; }
+    .lat-empty::after,  .act-empty::after  { content: ' ]'; opacity: 0.5; }
+
+    /* ── Chips ── */
+    .chip {
+      transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+                  background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
+    }
+    .chip:hover {
+      color: var(--c); border-color: rgba(var(--rgb),0.45);
+      background: rgba(var(--rgb),0.10); transform: translateY(-1px);
+    }
+
+    /* ── Header ── */
+    #header { border-bottom-color: rgba(var(--rgb),0.20); }
+    .pill { border-radius: 3px; }
+    .hdr-right { gap: 8px; }
+
+    /* ── Scrollbars ──
+       A visible track on a dark HUD looks like a seam. */
+    .panel::-webkit-scrollbar, #convo-scroll::-webkit-scrollbar { width: 5px; }
+    .panel::-webkit-scrollbar-thumb, #convo-scroll::-webkit-scrollbar-thumb {
+      background: rgba(var(--rgb),0.20); border-radius: 3px;
+    }
+    .panel:hover::-webkit-scrollbar-thumb, #convo-scroll:hover::-webkit-scrollbar-thumb {
+      background: rgba(var(--rgb),0.38);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .ce-eq i { animation: none; transform: scaleY(0.5); }
+    }
+
+    /* ── Transcript turns ──
+       The meta line (speaker · time · latency) was 7.5px at 55% opacity —
+       present in the markup, invisible on screen. It is the only thing
+       that tells you who said what once a reply is long enough to fill
+       the bubble, so it has to be readable. */
+    .turn-meta { font-size: 8.5px; letter-spacing: 2px; color: rgba(var(--lrgb),0.50); }
+    .turn.nora .turn-meta { color: rgba(var(--rgb),0.72); }
+    .turn-lat {
+      border-color: rgba(var(--rgb),0.28); background: rgba(var(--rgb),0.06);
+      padding: 1px 6px; font-size: 8px;
+    }
+
+    /* Bubbles: NORA's replies are the content of this dashboard, so they
+       get the lit edge and the user's turns stay recessive. */
+    .turn { margin-bottom: 15px; }
+    .turn-text { border-radius: 4px; padding: 10px 13px; }
+    .turn.nora .turn-text {
+      border-left-width: 2px;
+      box-shadow: inset 0 1px 0 rgba(var(--rgb),0.10),
+                  0 10px 26px -22px rgba(var(--rgb),0.9);
+    }
+    .turn.you .turn-text { border-radius: 4px; }
+    .turn:hover .turn-meta { color: rgba(var(--rgb),0.92); }
+
+    /* ── Command bar ── */
+    #cmd-field:focus-within {
+      border-color: rgba(var(--rgb),0.55);
+      box-shadow: 0 0 0 1px rgba(var(--rgb),0.14), 0 0 22px -8px rgba(var(--rgb),0.8);
+    }
   </style>
 </head>
 <body>
@@ -834,9 +1391,11 @@
       <div id="hdr-date">— — —</div>
     </div>
     <div class="hdr-right">
+      <div class="pill" id="hdr-latency" title="Round-trip of the last exchange">RTT&nbsp;<b id="hdr-latency-val">—</b></div>
       <div class="pill"><div class="dot"></div>ONLINE</div>
       <div class="pill"><div class="dot"></div>NLP</div>
       <div class="pill"><div class="dot"></div>AUDIO</div>
+      <button id="gear" type="button" title="Appearance settings" aria-label="Appearance settings">⚙</button>
     </div>
   </header>
 
@@ -877,7 +1436,7 @@
           <video id="cam-vid" autoplay muted playsinline></video>
           <div class="cam-off" id="cam-off">
             <div class="cam-icon-wrap">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(0,212,255,0.4)" stroke-width="1.5">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
               </svg>
             </div>
@@ -886,6 +1445,20 @@
           </div>
         </div>
         <button class="cam-btn" id="cam-btn">ENABLE CAMERA</button>
+      </div>
+
+      <div class="widget" id="latency-card">
+        <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
+        <div class="widget-head">
+          <div class="widget-title"><div class="sq"></div>RESPONSE TIME</div>
+          <div class="badge" id="lat-badge">IDLE</div>
+        </div>
+        <div class="lat-chart" id="lat-chart"><div class="lat-empty" id="lat-empty">NO EXCHANGES YET</div></div>
+        <div class="sboxrow">
+          <div class="sbox"><div class="sl">LAST</div><div class="sv" id="lat-last">—</div></div>
+          <div class="sbox"><div class="sl">MEDIAN</div><div class="sv" id="lat-med">—</div></div>
+          <div class="sbox"><div class="sl">PEAK</div><div class="sv" id="lat-max">—</div></div>
+        </div>
       </div>
     </div>
 
@@ -917,14 +1490,45 @@
         <div class="stg" id="stg-speaking">SPEAK</div>
       </div>
 
-      <div id="speech-wrap"><div id="speech"></div></div>
+      <section id="convo" class="center-col">
+        <div id="convo-head">
+          <div class="widget-title"><div class="sq"></div>TRANSCRIPT</div>
+          <div class="convo-meta">
+            <span class="convo-stat" id="convo-last">—</span>
+            <span class="convo-stat"><b id="convo-turns">0</b> TURNS</span>
+            <button class="convo-act" id="convo-copy" type="button" title="Copy transcript">COPY</button>
+            <button class="convo-act" id="convo-clear" type="button" title="Clear transcript (Ctrl+L)">CLEAR</button>
+          </div>
+        </div>
+        <div id="convo-scroll"><div id="convo-list"></div></div>
+        <div id="convo-empty">
+          <div class="ce-frame">
+            <div class="ce-eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <span class="ce-lead">AWAITING INPUT<span class="caret">▋</span></span>
+            <span class="hint">HOLD SPACE TO SPEAK · PRESS / TO TYPE</span>
+          </div>
+        </div>
+        <button id="convo-jump" type="button" hidden>NEW ↓</button>
+      </section>
 
-      <div id="ptt">CLICK TO SPEAK</div>
-      <div id="ptt-mode-pill" class="off"><div class="dot"></div><span id="ptt-mode-lbl">PASSIVE</span></div>
-      <button id="input-mode-btn">⌨ TEXT MODE</button>
-      <div id="text-input-wrap">
-        <input id="text-cmd" type="text" placeholder="TYPE A COMMAND..." autocomplete="off" spellcheck="false"/>
-        <button id="text-send">SEND</button>
+      <div id="chips" class="center-col"></div>
+
+      <div id="cmdbar" class="center-col">
+        <button id="ptt" type="button">CLICK TO SPEAK</button>
+        <div id="cmd-field">
+          <input id="text-cmd" type="text" placeholder="Type a command…" autocomplete="off" spellcheck="false"/>
+          <button id="text-send" type="button" title="Send">↵</button>
+        </div>
+        <button id="stop-btn" type="button" title="Cut NORA off (Esc)" hidden>STOP</button>
+      </div>
+
+      <div id="cmd-foot" class="center-col">
+        <div id="ptt-mode-pill" class="off"><div class="dot"></div><span id="ptt-mode-lbl">PASSIVE</span></div>
+        <div id="cmd-hints">
+          <span><kbd>SPACE</kbd> talk</span>
+          <span><kbd>/</kbd> type</span>
+          <span><kbd>ESC</kbd> stop</span>
+        </div>
       </div>
       <button id="panels-toggle">▼ SHOW PANELS</button>
     </div>
@@ -976,29 +1580,31 @@
       <div class="widget" id="music-card">
         <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
         <div class="widget-head">
-          <div class="widget-title"><div class="sq"></div>APPLE MUSIC</div>
+          <div class="widget-title"><div class="sq"></div>SPOTIFY</div>
           <div class="mus-src-pill" id="mus-src">—</div>
         </div>
         <div class="mus-track" id="mus-track">NO TRACK</div>
         <div class="mus-artist" id="mus-artist">—</div>
         <div class="mus-status" id="mus-status"><div class="dot"></div><span id="mus-status-lbl">IDLE</span></div>
         <div class="mus-progress"><div class="mus-progress-fill" id="mus-prog"></div></div>
+        <div class="mus-times"><span id="mus-elapsed">0:00</span><span id="mus-total">0:00</span></div>
         <div class="mus-ctrls">
           <button class="mus-btn" data-act="prev">«</button>
           <button class="mus-btn primary" data-act="toggle" id="mus-toggle">PLAY</button>
           <button class="mus-btn" data-act="next">»</button>
         </div>
         <div class="mus-vol-row">
-          <div class="slabel">VOL</div>
+          <button class="mus-mute" id="mus-mute" type="button" title="Mute system audio">VOL</button>
           <input type="range" min="0" max="100" value="60" id="mus-vol">
           <div class="sval" id="mus-vol-val">60%</div>
         </div>
+        <div class="mus-vol-note">SYSTEM OUTPUT</div>
       </div>
 
       <div class="widget" id="activity-card">
         <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
         <div class="widget-head">
-          <div class="widget-title"><div class="sq"></div>ACTIVITY LOG</div>
+          <div class="widget-title"><div class="sq"></div>COMMAND LOG</div>
           <div style="display:flex;gap:5px;align-items:center">
             <div class="badge" id="act-badge">LIVE</div>
             <div class="badge" id="hist-badge" style="cursor:pointer" title="Load full history">HISTORY</div>
@@ -1015,11 +1621,62 @@
   </div>
 </div>
 
+<div id="settings" hidden>
+  <div class="set-title">Appearance</div>
+  <div class="set-sub">ACCENT</div>
+  <div class="swatches" id="sw-row"></div>
+  <div class="set-sub">ATMOSPHERE</div>
+  <div class="set-row"><span>GRID</span><button class="tgl" data-key="grid" type="button"><i></i></button></div>
+  <div class="set-row"><span>SCANLINES</span><button class="tgl" data-key="scanlines" type="button"><i></i></button></div>
+  <div class="set-row"><span>AURORA</span><button class="tgl" data-key="aurora" type="button"><i></i></button></div>
+  <div class="set-row"><span>PARTICLES</span><button class="tgl" data-key="particles" type="button"><i></i></button></div>
+  <div class="set-row"><span>SPOTLIGHT</span><button class="tgl" data-key="spotlight" type="button"><i></i></button></div>
+  <div class="set-sub">BEHAVIOUR</div>
+  <div class="set-row"><span>TYPEWRITER</span><button class="tgl" data-key="typewriter" type="button"><i></i></button></div>
+  <div class="set-row"><span>BOOT SEQUENCE</span><button class="tgl" data-key="boot" type="button"><i></i></button></div>
+</div>
+
 <div id="ws-ind">HTTP</div>
 <button id="audio-unlock" hidden>TAP FOR AUDIO</button>
 
 <script>
 'use strict';
+
+// ═══════════════════════════════════════════════════
+//  SETTINGS — atmosphere + accent, persisted
+//  Stamped onto <html> before anything paints so a reload does not flash the
+//  default cyan at someone who picked amber. The panel UI is wired further
+//  down, once the orb's colour tables exist.
+// ═══════════════════════════════════════════════════
+const ACCENTS = {
+  cyan:    { rgb: [0,212,255],   lrgb: [142,216,255], label: 'CYAN'    },
+  ice:     { rgb: [126,192,255], lrgb: [196,224,255], label: 'ICE'     },
+  emerald: { rgb: [0,230,163],   lrgb: [152,246,214], label: 'EMERALD' },
+  amber:   { rgb: [255,172,48],  lrgb: [255,216,158], label: 'AMBER'   },
+  violet:  { rgb: [176,124,252], lrgb: [214,192,255], label: 'VIOLET'  },
+  crimson: { rgb: [255,84,112],  lrgb: [255,174,188], label: 'CRIMSON' },
+};
+const SET_DEFAULTS = {
+  accent: 'cyan', grid: true, scanlines: true, aurora: true,
+  particles: true, spotlight: true, typewriter: true, boot: true,
+};
+const SET = (() => {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('nora_settings_v1') || '{}'); } catch (_) {}
+  return Object.assign({}, SET_DEFAULTS, saved && typeof saved === 'object' ? saved : {});
+})();
+function saveSettings() {
+  try { localStorage.setItem('nora_settings_v1', JSON.stringify(SET)); } catch (_) {}
+}
+const ATMOSPHERE = ['grid','scanlines','aurora','particles','spotlight'];
+function stampSettings() {
+  const root = document.documentElement;
+  ATMOSPHERE.forEach(k => root.dataset[k] = SET[k] ? 'on' : 'off');
+  const a = ACCENTS[SET.accent] || ACCENTS.cyan;
+  root.style.setProperty('--rgb-idle',  a.rgb.join(','));
+  root.style.setProperty('--lrgb-idle', a.lrgb.join(','));
+}
+stampSettings();
 
 // ═══════════════════════════════════════════════════
 //  AMBIENT PARTICLE SYSTEM
@@ -1237,10 +1894,17 @@ function setOrbState(s) {
   const labels = { idle:['STANDBY',''], listening:['LISTENING','listening'], thinking:['THINKING','thinking'], speaking:['SPEAKING','on'] };
   const [txt, cls] = labels[s] || labels.idle;
   jstatus.textContent = txt; jstatus.className = cls;
-  const dc = s==='thinking'?'#c084fc':s==='speaking'?'#00ffc8':'#00d4ff';
-  const ds = s==='thinking'?'#a855f7':s==='speaking'?'#00ffc8':'#00d4ff';
-  tdots.forEach(d => { d.style.background = dc; d.style.boxShadow = `0 0 10px ${ds},0 0 3px #fff`; });
+  refreshTriDots();
   document.querySelectorAll('.widget').forEach(w => w.classList.toggle('active-glow', s !== 'idle'));
+}
+
+// Inline-styled because they need a literal colour, not a CSS var — so they
+// are repainted on state change *and* when the accent preset changes.
+function refreshTriDots() {
+  const s  = orbState;
+  const dc = s === 'thinking' ? '#c084fc' : s === 'speaking' ? '#00ffc8' : accentHex('l');
+  const ds = s === 'thinking' ? '#a855f7' : s === 'speaking' ? '#00ffc8' : accentHex();
+  tdots.forEach(d => { d.style.background = dc; d.style.boxShadow = `0 0 10px ${ds},0 0 3px #fff`; });
 }
 
 function stageToState(stage) {
@@ -1303,27 +1967,185 @@ function animateNum(el, target, suffix = '') {
 }
 
 // ═══════════════════════════════════════════════════
-//  TYPEWRITER SPEECH
+//  CONVERSATION TRANSCRIPT
+//  Replaces the old single fading speech line. Turns are kept in memory,
+//  mirrored to localStorage so a refresh does not erase the conversation,
+//  and timed so every reply carries the latency it actually cost.
 // ═══════════════════════════════════════════════════
-const speechEl   = document.getElementById('speech');
-const speechWrap = document.getElementById('speech-wrap');
-let typeTimer = null, fadeTimer = null, typeStr = '', typeIdx = 0;
+const convoList    = document.getElementById('convo-list');
+const convoScroll  = document.getElementById('convo-scroll');
+const convoEmpty   = document.getElementById('convo-empty');
+const convoJump    = document.getElementById('convo-jump');
+const convoLast    = document.getElementById('convo-last');
+const convoTurns   = document.getElementById('convo-turns');
+const hdrLatency   = document.getElementById('hdr-latency-val');
+const MAX_TURNS    = 120;
+const STORE_KEY    = 'nora_transcript_v1';
 
-function typewrite(text) {
-  clearTimeout(typeTimer); clearTimeout(fadeTimer);
-  typeStr = '« ' + text + ' »'; typeIdx = 0;
-  speechEl.textContent = ''; speechEl.style.opacity = '1';
-  speechEl.classList.add('typing'); speechWrap.classList.add('active');
-  function tick() {
-    if (typeIdx < typeStr.length) {
-      speechEl.textContent = typeStr.slice(0, ++typeIdx);
-      typeTimer = setTimeout(tick, 20 + Math.random() * 18);
-    } else {
-      speechEl.classList.remove('typing');
-      fadeTimer = setTimeout(() => { speechEl.style.opacity='0'; speechWrap.classList.remove('active'); }, 7000);
+let turns = [];                 // {who, text, t, lat}
+let pendingSince = 0;           // performance.now() when the user last spoke
+let latencies = [];
+let activeType = null;          // the reply currently being typed out
+let atBottom = true;
+
+function clockNow() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+convoScroll.addEventListener('scroll', () => {
+  atBottom = convoScroll.scrollHeight - convoScroll.scrollTop - convoScroll.clientHeight < 44;
+  if (atBottom) convoJump.hidden = true;
+}, { passive: true });
+convoJump.addEventListener('click', () => { atBottom = true; convoJump.hidden = true; stickBottom(); });
+
+function stickBottom(force) {
+  if (!atBottom && !force) { convoJump.hidden = false; return; }
+  convoScroll.scrollTop = convoScroll.scrollHeight;
+}
+
+function renderTurn(turn, animate) {
+  convoEmpty.hidden = true;
+  const row = document.createElement('div');
+  row.className = 'turn ' + turn.who;
+  if (!animate) row.style.animation = 'none';
+  const label = turn.who === 'you' ? 'YOU' : 'N.O.R.A';
+  const lat   = turn.lat ? `<span class="turn-lat">${turn.lat}</span>` : '';
+  row.innerHTML =
+    '<div class="turn-avatar"></div>' +
+    '<div class="turn-body">' +
+      `<div class="turn-meta"><span>${label}</span><span>${turn.t}</span>${lat}</div>` +
+      '<div class="turn-text"></div>' +
+    '</div>';
+  const textEl = row.querySelector('.turn-text');
+  convoList.appendChild(row);
+  while (convoList.children.length > MAX_TURNS) convoList.removeChild(convoList.firstChild);
+  if (animate && turn.who === 'nora' && SET.typewriter) typeInto(textEl, turn.text);
+  else textEl.textContent = turn.text;
+  convoTurns.textContent = turns.length;
+  return row;
+}
+
+// Snap the in-flight reply to its full text. Called whenever a newer turn
+// arrives so the older one lands complete instead of frozen mid-word.
+function finishTyping() {
+  if (!activeType) return;
+  clearTimeout(activeType.timer);
+  activeType.el.textContent = activeType.text;
+  activeType.el.classList.remove('typing');
+  activeType = null;
+}
+
+function typeInto(el, text) {
+  finishTyping();
+  const job = { el, text, timer: null };
+  activeType = job;
+  el.classList.add('typing');
+  let i = 0;
+  (function tick() {
+    if (activeType !== job) return;
+    el.textContent = text.slice(0, ++i);
+    if (atBottom) convoScroll.scrollTop = convoScroll.scrollHeight;
+    if (i < text.length) job.timer = setTimeout(tick, 11 + Math.random() * 9);
+    else { el.classList.remove('typing'); activeType = null; }
+  })();
+}
+
+function addTurn(who, text, lat) {
+  finishTyping();
+  const turn = { who, text, t: clockNow(), lat: lat || '' };
+  turns.push(turn);
+  if (turns.length > MAX_TURNS) turns = turns.slice(-MAX_TURNS);
+  renderTurn(turn, true);
+  stickBottom();
+  saveTranscript();
+}
+
+function saveTranscript() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(turns.slice(-40))); } catch (_) {}
+}
+
+function restoreTranscript() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch (_) {}
+  if (!Array.isArray(saved) || !saved.length) return;
+  turns = saved;
+  saved.forEach(t => renderTurn(t, false));
+  requestAnimationFrame(() => { convoScroll.scrollTop = convoScroll.scrollHeight; });
+}
+
+function clearTranscript() {
+  finishTyping();
+  turns = []; convoList.innerHTML = ''; convoEmpty.hidden = false;
+  convoTurns.textContent = '0'; latencies = []; convoLast.textContent = '—';
+  hdrLatency.textContent = '—';
+  renderLatency();
+  saveTranscript();
+}
+
+// ── Response-time chart ──
+// Measured client-side: the gap between the utterance the server echoed back
+// and the reply it spoke. That is the number a user actually feels, which is
+// why it is charted rather than any single stage's server-side timing.
+function renderLatency() {
+  const chart = document.getElementById('lat-chart');
+  const empty = document.getElementById('lat-empty');
+  const badge = document.getElementById('lat-badge');
+  chart.querySelectorAll('.lat-bar').forEach(b => b.remove());
+  if (!latencies.length) {
+    empty.hidden = false;
+    badge.textContent = 'IDLE'; badge.className = 'badge';
+    ['lat-last','lat-med','lat-max'].forEach(id => document.getElementById(id).textContent = '—');
+    return;
+  }
+  empty.hidden = true;
+  const peak   = Math.max(...latencies);
+  const sorted = [...latencies].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  latencies.forEach(v => {
+    const bar = document.createElement('div');
+    bar.className = 'lat-bar' + (v > 6 ? ' crit' : v > 3 ? ' slow' : '');
+    bar.style.height = Math.max(5, Math.round(v / peak * 100)) + '%';
+    bar.title = v.toFixed(2) + 's';
+    chart.appendChild(bar);
+  });
+  document.getElementById('lat-last').textContent = latencies[latencies.length - 1].toFixed(1) + 's';
+  document.getElementById('lat-med').textContent  = median.toFixed(1) + 's';
+  document.getElementById('lat-max').textContent  = peak.toFixed(1) + 's';
+  badge.textContent = latencies.length + (latencies.length === 1 ? ' TURN' : ' TURNS');
+  badge.className = 'badge live';
+}
+
+// ── Turn entry points ──
+// Both the WebSocket push and the HTTP poll land here, deduplicated on the
+// server's monotonic sequence numbers rather than on text (NORA repeating
+// herself is a real turn, not a duplicate frame).
+let lastUserSeq = -1, lastReplySeq = -1;
+
+function onUserTurn(text, seq) {
+  if (seq != null) { if (seq === lastUserSeq) return; lastUserSeq = seq; }
+  if (!text) return;
+  pendingSince = performance.now();
+  addTurn('you', text);
+  addActivity(text, null);
+  document.getElementById('cmd-cnt').textContent = ++cmdCount;
+}
+
+function onNoraTurn(text) {
+  let lat = '';
+  if (pendingSince) {
+    const secs = (performance.now() - pendingSince) / 1000;
+    pendingSince = 0;
+    if (secs < 600) {
+      lat = secs.toFixed(1) + 's';
+      latencies.push(secs); if (latencies.length > 24) latencies.shift();
+      const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+      convoLast.innerHTML = `LAST <b>${lat}</b> · AVG <b>${avg.toFixed(1)}s</b>`;
+      hdrLatency.textContent = lat;
+      renderLatency();
     }
   }
-  tick();
+  addTurn('nora', text, lat);
 }
 
 // ═══════════════════════════════════════════════════
@@ -1385,17 +2207,32 @@ loadHistory();
 const pttModePill = document.getElementById('ptt-mode-pill');
 const pttModeLbl  = document.getElementById('ptt-mode-lbl');
 let lastText      = '';
+let seqPrimed     = false;
 
 function applyState(d) {
   const stage = d.stage || (d.speaking ? 'speaking' : 'idle');
   setStage(stage);
   if (d.ptt_mode === 'on') { pttModePill.className='on'; pttModeLbl.textContent='PTT MODE'; }
   else { pttModePill.className='off'; pttModeLbl.textContent='PASSIVE'; }
-  if (d.text && d.text !== lastText) {
+  stopBtn.hidden = !d.speaking;
+
+  // The first snapshot describes whatever happened before this tab existed —
+  // adopt its counters silently rather than replaying a stale exchange on top
+  // of the restored transcript.
+  if (!seqPrimed) {
+    seqPrimed = true;
+    lastUserSeq  = d.user_seq  != null ? d.user_seq  : -1;
+    lastReplySeq = d.reply_seq != null ? d.reply_seq : -1;
+    lastText     = d.text || '';
+    return;
+  }
+
+  if (d.user_text && d.user_seq != null) onUserTurn(d.user_text, d.user_seq);
+  const fresh = d.reply_seq != null ? d.reply_seq !== lastReplySeq : d.text !== lastText;
+  if (d.text && fresh) {
+    if (d.reply_seq != null) lastReplySeq = d.reply_seq;
     lastText = d.text;
-    typewrite(d.text);
-    addActivity(d.text, d.last_success != null ? d.last_success : null);
-    document.getElementById('cmd-cnt').textContent = ++cmdCount;
+    onNoraTurn(d.text);
   }
 }
 
@@ -1417,14 +2254,31 @@ function playNextChunk() {
   if (!audioReady || !audioQueue.length) { audioEl = null; return; }
   const chunk = audioQueue.shift();
   audioEl = new Audio(`data:${chunk.mime};base64,${chunk.data}`);
-  audioEl.onended = audioEl.onerror = () => { audioEl = null; playNextChunk(); };
-  audioEl.play().catch(() => {
-    // Playback was refused — the unlock gesture has expired or never happened.
-    audioReady = false;
-    audioEl = null;
+  audioEl.onended = () => { audioEl = null; playNextChunk(); };
+  audioEl.onerror = () => {
+    // Decode failure — almost always a wrong MIME on the server side. Say so
+    // rather than moving on quietly; a silent skip here is indistinguishable
+    // from "NORA never spoke".
+    console.warn('NORA: could not decode audio chunk', chunk.mime, chunk.text);
     audioBtn.hidden = false;
-    audioBtn.classList.remove('live');
-    audioBtn.textContent = 'TAP FOR AUDIO';
+    audioBtn.textContent = 'AUDIO: BAD FORMAT';
+    audioEl = null;
+    playNextChunk();
+  };
+  audioEl.play().catch(err => {
+    audioEl = null;
+    if (err && err.name === 'NotAllowedError') {
+      // The unlock gesture expired or never happened — recoverable by tapping.
+      audioReady = false;
+      audioBtn.hidden = false;
+      audioBtn.classList.remove('live');
+      audioBtn.textContent = 'TAP FOR AUDIO';
+    } else {
+      console.warn('NORA: playback rejected', err && err.name, chunk.mime);
+      audioBtn.hidden = false;
+      audioBtn.textContent = 'AUDIO: ' + ((err && err.name) || 'FAILED');
+      playNextChunk();
+    }
   });
 }
 
@@ -1471,14 +2325,27 @@ function connectWS() {
     ? `${scheme}://${location.hostname}:${port}/ws${qs}`
     : `${scheme}://${location.hostname}:8765${qs}`;
   try { ws = new WebSocket(url); } catch (_) { startPolling(); return; }
-  ws.onopen  = () => { usingWS=true; wsInd.textContent='WS'; wsInd.className='ws'; clearTimeout(reconnTimer); if (pollInt) { clearInterval(pollInt); pollInt=null; } };
+  ws.onopen  = () => {
+    usingWS=true; wsInd.textContent='WS'; wsInd.className='ws';
+    clearTimeout(reconnTimer); if (pollInt) { clearInterval(pollInt); pollInt=null; }
+    // Also authenticate by message. The query string is the primary path, but a
+    // reverse proxy is free to rewrite it; the server ignores this packet when
+    // the query-string token already checked out.
+    if (token) { try { ws.send(JSON.stringify({type:'auth', token})); } catch (_) {} }
+  };
   ws.onmessage = ev => {
     try {
       const m = JSON.parse(ev.data);
       if (m.type === 'state') applyState(m.data);
       if (m.type === 'stage') setStage(m.stage);
+      if (m.type === 'user')  onUserTurn(m.text, m.seq);
       if (m.type === 'audio') enqueueAudio(m);
       if (m.type === 'audio_stop') stopAudio(m.seq);
+      if (m.type === 'error') {
+        // Surface auth failure instead of reconnect-looping in silence.
+        wsInd.textContent = 'AUTH?'; wsInd.className = '';
+        localStorage.removeItem('nora_token');
+      }
     } catch (_) {}
   };
   ws.onclose = ws.onerror = () => { usingWS=false; wsInd.textContent='HTTP'; wsInd.className=''; reconnTimer=setTimeout(connectWS,5000); startPolling(); };
@@ -1526,8 +2393,13 @@ const musTrack=document.getElementById('mus-track'),musArtist=document.getElemen
       musSrc=document.getElementById('mus-src'),musStatus=document.getElementById('mus-status'),
       musStatLbl=document.getElementById('mus-status-lbl'),musProg=document.getElementById('mus-prog'),
       musToggle=document.getElementById('mus-toggle'),musVol=document.getElementById('mus-vol'),
-      musVolVal=document.getElementById('mus-vol-val');
-let fakeProg=0, lastMusKey='';
+      musVolVal=document.getElementById('mus-vol-val'),musMute=document.getElementById('mus-mute'),
+      musElapsed=document.getElementById('mus-elapsed'),musTotal=document.getElementById('mus-total');
+let volHeldUntil=0, isMuted=false;
+function fmtDur(s) {
+  s = Math.max(0, Math.round(s));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
 
 async function pollMusic() {
   try {
@@ -1540,11 +2412,18 @@ async function pollMusic() {
     musStatus.className   = 'mus-status'+(st==='playing'?' playing':st==='paused'?' paused':'');
     musStatLbl.textContent = st.toUpperCase();
     musToggle.textContent  = st==='playing'?'PAUSE':'PLAY';
-    const key = track+'|'+st;
-    if (key !== lastMusKey) { fakeProg=0; lastMusKey=key; }
-    if (st==='playing') fakeProg=Math.min(100,fakeProg+0.4);
-    else if (st!=='paused') fakeProg=0;
-    musProg.style.width = fakeProg+'%';
+    // Real MPRIS position, not a bar that crept forward on a timer and lied
+    // the moment anything was seeked or paused outside NORA.
+    const len = Number(d.length_sec) || 0, pos = Number(d.position_sec) || 0;
+    musProg.style.width = len > 0 ? Math.max(0, Math.min(100, pos / len * 100)) + '%' : '0%';
+    musElapsed.textContent = fmtDur(len > 0 ? pos : 0);
+    musTotal.textContent   = fmtDur(len);
+
+    // Don't yank the slider out from under a drag that is still in flight.
+    if (d.volume != null && performance.now() > volHeldUntil) {
+      musVol.value = d.volume; musVolVal.textContent = d.volume + '%';
+    }
+    if (d.muted != null) setMuteUI(!!d.muted);
   } catch (_) {}
 }
 setInterval(pollMusic, 1000); pollMusic();
@@ -1556,7 +2435,22 @@ document.querySelectorAll('.mus-btn').forEach(b => b.addEventListener('click', (
   else if (a==='prev') musicCtl({action:'prev'}); else if (a==='next') musicCtl({action:'next'});
 }));
 let volTimer=null;
-musVol.addEventListener('input', () => { musVolVal.textContent=musVol.value+'%'; clearTimeout(volTimer); volTimer=setTimeout(()=>musicCtl({action:'volume',level:parseInt(musVol.value,10)}),180); });
+musVol.addEventListener('input', () => {
+  musVolVal.textContent = musVol.value + '%';
+  volHeldUntil = performance.now() + 1400;   // outlast the debounce + one poll
+  clearTimeout(volTimer);
+  volTimer = setTimeout(() => musicCtl({ action: 'volume', level: parseInt(musVol.value, 10) }), 180);
+});
+
+function setMuteUI(m) {
+  isMuted = m;
+  musMute.textContent = m ? 'MUTE' : 'VOL';
+  musMute.classList.toggle('on', m);
+}
+musMute.addEventListener('click', () => {
+  setMuteUI(!isMuted);
+  musicCtl({ action: 'mute', muted: isMuted });
+});
 
 // ═══════════════════════════════════════════════════
 //  CLOCK / DATE
@@ -1609,19 +2503,21 @@ fetchWeather(); setInterval(fetchWeather,600000);
 // ═══════════════════════════════════════════════════
 let camOn=false, camStream=null;
 const camVid=document.getElementById('cam-vid'), camBtn=document.getElementById('cam-btn'),
-      camOff=document.getElementById('cam-off'), camLive=document.getElementById('cam-live');
+      camOff=document.getElementById('cam-off'), camLive=document.getElementById('cam-live'),
+      camCard=document.getElementById('camera-card');
 camBtn.addEventListener('click', async () => {
   if (!camOn) {
     try {
       camStream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
       camVid.srcObject=camStream; camVid.style.display='block'; camOff.style.display='none';
       camLive.classList.add('on'); document.getElementById('cam-badge').textContent='LIVE';
-      camBtn.textContent='DISABLE CAMERA'; camOn=true;
+      camBtn.textContent='DISABLE CAMERA'; camOn=true; camCard.classList.add('live');
     } catch (_) { document.getElementById('cam-badge').textContent='NO ACCESS'; }
   } else {
     if (camStream) camStream.getTracks().forEach(t=>t.stop());
     camVid.style.display='none'; camOff.style.display=''; camLive.classList.remove('on');
     document.getElementById('cam-badge').textContent='INACTIVE'; camBtn.textContent='ENABLE CAMERA'; camOn=false;
+    camCard.classList.remove('live');
   }
 });
 
@@ -1643,36 +2539,45 @@ async function pollAnalytics() {
 pollAnalytics(); setInterval(pollAnalytics,30000);
 
 // ═══════════════════════════════════════════════════
-//  PTT
+//  PUSH-TO-TALK + COMMAND BAR
+//  Voice and text are peers now — the text field is always there instead of
+//  hidden behind a mode toggle, and both routes end up in the same transcript
+//  because the server echoes every utterance back.
 // ═══════════════════════════════════════════════════
-const pttEl=document.getElementById('ptt');
-let pttActive=false;
-async function pttReq(action) { try { await fetch('/ptt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}); } catch (_) {} }
-function pttToggle() {
-  pttActive=!pttActive;
-  if (pttActive) { pttEl.classList.add('held'); pttEl.textContent='LISTENING… (CLICK TO STOP)'; pttReq('press'); }
-  else { pttEl.classList.remove('held'); pttEl.textContent='CLICK TO SPEAK'; pttReq('release'); }
-}
-pttEl.addEventListener('click', pttToggle);
-pttEl.addEventListener('touchstart', e => { e.preventDefault(); pttToggle(); }, {passive:false});
+const pttEl    = document.getElementById('ptt');
+const textCmd  = document.getElementById('text-cmd');
+const textSend = document.getElementById('text-send');
+const stopBtn  = document.getElementById('stop-btn');
+let pttActive  = false;
 
-// ═══════════════════════════════════════════════════
-//  INPUT MODE TOGGLE
-// ═══════════════════════════════════════════════════
-const inputModeBtn=document.getElementById('input-mode-btn'), textInputWrap=document.getElementById('text-input-wrap'),
-      textCmd=document.getElementById('text-cmd'), textSend=document.getElementById('text-send');
-let textModeActive=false;
-inputModeBtn.addEventListener('click', () => {
-  textModeActive=!textModeActive;
-  if (textModeActive) { inputModeBtn.textContent='🎙 VOICE MODE'; inputModeBtn.classList.add('text-active'); pttEl.style.display='none'; textInputWrap.classList.add('visible'); textCmd.focus(); }
-  else { inputModeBtn.textContent='⌨ TEXT MODE'; inputModeBtn.classList.remove('text-active'); pttEl.style.display=''; textInputWrap.classList.remove('visible'); }
-});
-async function sendTextCommand() {
-  const text=textCmd.value.trim(); if (!text) return; textCmd.value='';
-  try { const r=await fetch('/type_command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}); if (r.ok) addActivity(text,null); } catch (_) {}
+async function pttReq(action) { try { await fetch('/ptt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})}); } catch (_) {} }
+
+function pttSet(on) {
+  if (on === pttActive) return;
+  pttActive = on;
+  pttEl.classList.toggle('held', on);
+  pttEl.textContent = on ? 'LISTENING… RELEASE TO SEND' : 'CLICK TO SPEAK';
+  pttReq(on ? 'press' : 'release');
 }
-textSend.addEventListener('click',sendTextCommand);
-textCmd.addEventListener('keydown', e => { if (e.key==='Enter') sendTextCommand(); });
+pttEl.addEventListener('click', () => pttSet(!pttActive));
+pttEl.addEventListener('touchstart', e => { e.preventDefault(); pttSet(!pttActive); }, {passive:false});
+
+async function sendCommand(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  try { await fetch('/type_command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}); } catch (_) {}
+}
+function sendTextCommand() { const t = textCmd.value; textCmd.value = ''; sendCommand(t); }
+textSend.addEventListener('click', sendTextCommand);
+textCmd.addEventListener('keydown', e => { if (e.key === 'Enter') sendTextCommand(); });
+
+// Cut NORA off mid-sentence: silence this device's mirrored audio immediately,
+// then reach the same stop_all() the spoken "stop" phrase does.
+async function interrupt() {
+  stopAudio(audioSeq);
+  try { await fetch('/interrupt',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch (_) {}
+}
+stopBtn.addEventListener('click', interrupt);
 
 // ═══════════════════════════════════════════════════
 //  CURSOR SPOTLIGHT + AURORA PARALLAX
@@ -1696,7 +2601,7 @@ addEventListener('pointermove', e => {
 (function boot() {
   const el = document.getElementById('boot');
   if (!el) return;
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { el.remove(); return; }
+  if (!SET.boot || matchMedia('(prefers-reduced-motion: reduce)').matches) { el.remove(); return; }
 
   const LINES = [
     ['CORE RUNTIME',    'ONLINE'],
@@ -1746,6 +2651,158 @@ panelsToggle.addEventListener('click', () => {
   panelsToggle.textContent=panelsOpen?'▲ HIDE PANELS':'▼ SHOW PANELS';
   panelsToggle.classList.toggle('open',panelsOpen);
 });
+
+// ═══════════════════════════════════════════════════
+//  ORB FIT — scale the 340px orb to the viewport
+//  Fixed at 340px it ate the whole centre column on short screens and left
+//  the transcript nothing; the transcript is the part that must survive.
+// ═══════════════════════════════════════════════════
+function fitOrb() {
+  const target = Math.max(146, Math.min(innerHeight * 0.255, 300));
+  document.documentElement.style.setProperty('--orb-scale', (target / 340).toFixed(3));
+}
+fitOrb();
+addEventListener('resize', fitOrb);
+
+// ═══════════════════════════════════════════════════
+//  QUICK COMMAND CHIPS
+// ═══════════════════════════════════════════════════
+const CHIPS = [
+  "what's on my screen", 'read the screen', "what's the weather",
+  'play music', 'pause music', 'next track', 'focus mode on', 'what can you do',
+];
+const chipsEl = document.getElementById('chips');
+CHIPS.forEach(c => {
+  const b = document.createElement('button');
+  b.className = 'chip'; b.type = 'button'; b.textContent = c;
+  b.addEventListener('click', () => sendCommand(c));
+  chipsEl.appendChild(b);
+});
+function checkChipOverflow() {
+  chipsEl.classList.toggle('overflowing', chipsEl.scrollWidth - chipsEl.clientWidth > 4);
+}
+// Deferred a frame: at parse time the row has no layout yet, so scrollWidth
+// and clientWidth are both 0 and the check silently never fires.
+requestAnimationFrame(checkChipOverflow);
+addEventListener('resize', checkChipOverflow);
+chipsEl.addEventListener('scroll', () => {
+  const end = chipsEl.scrollWidth - chipsEl.scrollLeft - chipsEl.clientWidth < 4;
+  chipsEl.classList.toggle('overflowing', !end && chipsEl.scrollWidth > chipsEl.clientWidth);
+}, { passive: true });
+
+// ═══════════════════════════════════════════════════
+//  SETTINGS PANEL
+// ═══════════════════════════════════════════════════
+const gearBtn  = document.getElementById('gear');
+const setPanel = document.getElementById('settings');
+
+function accentHex(which) {
+  const a = ACCENTS[SET.accent] || ACCENTS.cyan;
+  const [r,g,b] = which === 'l' ? a.lrgb : a.rgb;
+  return `#${[r,g,b].map(v => v.toString(16).padStart(2,'0')).join('')}`;
+}
+
+function applyAccent() {
+  stampSettings();
+  const a = ACCENTS[SET.accent] || ACCENTS.cyan;
+  // The orb canvas and particle field draw from JS colour tables, not CSS
+  // vars, so retint them in place — AMB aliases whichever array is current.
+  STATE_RGB.idle.splice(0, 3, ...a.rgb);
+  STATE_RGB.listening.splice(0, 3, ...a.rgb);
+  refreshTriDots();
+  document.querySelectorAll('.sw').forEach(sw => sw.classList.toggle('on', sw.dataset.accent === SET.accent));
+}
+
+function buildSettings() {
+  const sw = document.getElementById('sw-row');
+  Object.entries(ACCENTS).forEach(([key, a]) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'sw'; b.dataset.accent = key; b.title = a.label;
+    b.style.background = `radial-gradient(circle at 32% 30%, rgba(${a.lrgb.join(',')},0.95), rgba(${a.rgb.join(',')},0.9) 55%, rgba(${a.rgb.map(v=>Math.round(v*0.35)).join(',')},1))`;
+    b.style.color = `rgba(${a.rgb.join(',')},0.85)`;
+    b.addEventListener('click', () => { SET.accent = key; saveSettings(); applyAccent(); });
+    sw.appendChild(b);
+  });
+  document.querySelectorAll('.tgl').forEach(t => {
+    const key = t.dataset.key;
+    t.classList.toggle('on', !!SET[key]);
+    t.addEventListener('click', () => {
+      SET[key] = !SET[key];
+      t.classList.toggle('on', SET[key]);
+      saveSettings(); stampSettings();
+    });
+  });
+  applyAccent();
+}
+buildSettings();
+
+function toggleSettings(open) {
+  const show = open != null ? open : setPanel.hidden;
+  if (show) {
+    setPanel.hidden = false; setPanel.classList.add('opening');
+    requestAnimationFrame(() => setPanel.classList.remove('opening'));
+  } else {
+    setPanel.classList.add('closing');
+    setTimeout(() => { setPanel.hidden = true; setPanel.classList.remove('closing'); }, 180);
+  }
+  gearBtn.classList.toggle('open', show);
+}
+gearBtn.addEventListener('click', e => { e.stopPropagation(); toggleSettings(); });
+setPanel.addEventListener('click', e => e.stopPropagation());
+addEventListener('click', () => { if (!setPanel.hidden) toggleSettings(false); });
+
+// ═══════════════════════════════════════════════════
+//  KEYBOARD SHORTCUTS
+//  Hold SPACE to talk, "/" to type, ESC to cut NORA off mid-sentence.
+// ═══════════════════════════════════════════════════
+function typingInField() {
+  const t = document.activeElement;
+  return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+}
+let spaceHeld = false;
+addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (typingInField()) { document.activeElement.blur(); return; }
+    interrupt(); return;
+  }
+  if (typingInField() || e.ctrlKey || e.metaKey || e.altKey) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l' && !e.shiftKey) { e.preventDefault(); clearTranscript(); }
+    return;
+  }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!e.repeat && !spaceHeld) { spaceHeld = true; pttSet(true); }
+    return;
+  }
+  if (e.key === '/') { e.preventDefault(); textCmd.focus(); return; }
+});
+addEventListener('keyup', e => {
+  if (e.code === 'Space' && spaceHeld) { spaceHeld = false; pttSet(false); }
+});
+// Hardware media keys drive the same MPRIS transport the voice commands use.
+addEventListener('keydown', e => {
+  if (e.key === 'MediaPlayPause')      musicCtl({ action: 'toggle' });
+  else if (e.key === 'MediaTrackNext') musicCtl({ action: 'next' });
+  else if (e.key === 'MediaTrackPrevious') musicCtl({ action: 'prev' });
+});
+
+// ═══════════════════════════════════════════════════
+//  TRANSCRIPT ACTIONS
+// ═══════════════════════════════════════════════════
+function flashConvoAct(id, label) {
+  const el = document.getElementById(id);
+  const was = el.textContent;
+  el.textContent = label;
+  setTimeout(() => { el.textContent = was; }, 1100);
+}
+document.getElementById('convo-clear').addEventListener('click', clearTranscript);
+document.getElementById('convo-copy').addEventListener('click', async () => {
+  if (!turns.length) return;
+  const dump = turns.map(t => `[${t.t}] ${t.who === 'you' ? 'YOU ' : 'NORA'}: ${t.text}`).join('\n');
+  try { await navigator.clipboard.writeText(dump); flashConvoAct('convo-copy', 'COPIED'); }
+  catch (_) { flashConvoAct('convo-copy', 'BLOCKED'); }
+});
+restoreTranscript();
 </script>
 </body>
 </html>

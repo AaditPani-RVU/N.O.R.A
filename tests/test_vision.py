@@ -1,4 +1,4 @@
-"""Tests for the vision module (NORA-vision-plan.md Phase 1).
+"""Tests for the vision module (NORA-vision-plan.md Phases 1 and 2).
 
 Stdlib unittest only — run with:  python -m unittest tests.test_vision -v
 
@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from nora import context
-from nora.vision import camera, faces, perception
+from nora.vision import camera, faces, perception, presence
 
 
 def _bbox(x: float, y: float = 0.0, size: float = 100.0) -> tuple:
@@ -330,6 +330,26 @@ class CommandRegistrationTest(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(set(command_engine.get_available_actions())))
 
+    def test_phase_two_actions_are_registered(self) -> None:
+        from nora import command_engine
+        import nora.commands.vision_commands  # noqa: F401
+
+        expected = {"set_owner", "set_face_greeting", "set_face_persona", "guest_mode_status"}
+        self.assertTrue(expected.issubset(set(command_engine.get_available_actions())))
+
+    def test_set_owner_requires_confirmation(self) -> None:
+        from nora import command_engine, security
+        import nora.commands.vision_commands  # noqa: F401
+
+        meta = command_engine.get_action_meta("set_owner")
+        self.assertTrue(meta.requires_confirmation)
+        self.assertTrue(security.needs_confirmation("set_owner"),
+                        "set_owner missing from security.destructive_actions")
+
+    def test_a_guest_cannot_promote_themselves(self) -> None:
+        from nora import security
+        self.assertIn("set_owner", security.guest_restricted_actions())
+
     def test_deletion_actions_require_confirmation(self) -> None:
         from nora import command_engine, security
         import nora.commands.vision_commands  # noqa: F401
@@ -348,6 +368,333 @@ class CommandRegistrationTest(unittest.TestCase):
         block = command_engine.get_action_signatures()
         self.assertIn("Vision & Camera:", block)
         self.assertIn("learn_face(name)", block)
+
+
+# ── Phase 2: profiles, ownership, guest mode ─────────────────────────────────
+
+def _with_config(**vision_overrides):
+    """Patch the parsed config with vision overrides, deep-merged one level.
+
+    Every consumer reads through nora.config.get_config(), which returns the
+    module-level _config, so swapping that reaches security, presence, and
+    faces at once.
+    """
+    from nora import config as config_module
+
+    base = dict(config_module.get_config())
+    vision = dict(base.get("vision") or {})
+    for key, value in vision_overrides.items():
+        if isinstance(value, dict) and isinstance(vision.get(key), dict):
+            merged = dict(vision[key])
+            merged.update(value)
+            vision[key] = merged
+        else:
+            vision[key] = value
+    base["vision"] = vision
+    return mock.patch.object(config_module, "_config", base)
+
+
+class _StoreCase(unittest.TestCase):
+    """Redirects the face store to a temp file so ~/.nora is never touched."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._orig = faces._PATH
+        faces._PATH = Path(self._tmp.name) / "faces.json"
+
+    def tearDown(self) -> None:
+        faces._PATH = self._orig
+        self._tmp.cleanup()
+
+
+class ProfileTest(_StoreCase):
+    def test_set_owner_is_exclusive(self) -> None:
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        faces.enroll("Sam", [[0.0, 1.0, 0.0]])
+
+        faces.set_owner("aadit")
+        self.assertEqual(faces.owner(), "aadit")
+
+        faces.set_owner("sam")
+        self.assertEqual(faces.owner(), "sam")
+        self.assertFalse(faces.is_trusted("aadit"), "the previous owner was not demoted")
+        trusted = [p["key"] for p in faces.list_people() if p["trusted"]]
+        self.assertEqual(trusted, ["sam"])
+
+    def test_set_owner_rejects_a_stranger(self) -> None:
+        with self.assertRaises(KeyError):
+            faces.set_owner("nobody")
+
+    def test_owner_is_none_until_designated(self) -> None:
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        self.assertIsNone(faces.owner())
+        self.assertFalse(faces.is_trusted("aadit"))
+
+    def test_config_owner_outranks_the_stored_flag(self) -> None:
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        faces.enroll("Sam", [[0.0, 1.0, 0.0]])
+        faces.set_owner("sam")
+        with _with_config(face={"owner": "Aadit"}):
+            self.assertEqual(faces.owner(), "aadit")
+            self.assertTrue(faces.is_trusted("aadit"))
+            self.assertFalse(faces.is_trusted("sam"))
+
+    def test_greeting_defaults_then_customizes(self) -> None:
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        self.assertEqual(faces.greeting_for("aadit"), "Hey Aadit.")
+
+        faces.set_profile("aadit", greeting="Welcome back, sir.")
+        self.assertEqual(faces.greeting_for("aadit"), "Welcome back, sir.")
+
+        faces.set_profile("aadit", greeting="   ")
+        self.assertEqual(faces.greeting_for("aadit"), "Hey Aadit.",
+                         "clearing the greeting did not fall back to the default")
+
+    def test_persona_hints_are_validated_and_merged(self) -> None:
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        faces.set_profile("aadit", persona={"tone": "casual", "nonsense": "x"})
+        self.assertEqual(faces.persona_for("aadit"), {"tone": "casual"})
+
+        faces.set_profile("aadit", persona={"verbosity": "concise"})
+        self.assertEqual(faces.persona_for("aadit"),
+                         {"tone": "casual", "verbosity": "concise"})
+
+    def test_profiles_survive_enrollment_and_deletion(self) -> None:
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        faces.set_profile("aadit", greeting="Welcome back.")
+        faces.enroll("Aadit", [[0.9, 0.1, 0.0]])
+        self.assertEqual(faces.greeting_for("aadit"), "Welcome back.")
+
+        faces.forget("aadit")
+        self.assertIsNone(faces.get_profile("aadit"))
+
+    def test_set_profile_cannot_grant_ownership(self) -> None:
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        with self.assertRaises(TypeError):
+            faces.set_profile("aadit", trusted=True)      # type: ignore[call-arg]
+
+
+class GuestPresenceTest(_StoreCase):
+    """Who counts as a guest — the decision guest mode rests on."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        faces.enroll("Sam", [[0.0, 1.0, 0.0]])
+        context.vision.present = []
+        context.vision.unknown_count = 0
+
+    def tearDown(self) -> None:
+        context.vision.present = []
+        context.vision.unknown_count = 0
+        super().tearDown()
+
+    def test_unknown_face_is_a_guest_even_with_no_owner_set(self) -> None:
+        context.update_vision(present=[], unknown_count=1)
+        with _with_config(enabled=True):
+            self.assertTrue(presence.guest_present())
+
+    def test_enrolled_person_is_not_a_guest_until_an_owner_exists(self) -> None:
+        # Enrolling a face must not lock the user out of their own recall.
+        context.update_vision(present=["aadit"], unknown_count=0)
+        with _with_config(enabled=True):
+            self.assertFalse(presence.guest_present())
+
+    def test_non_owner_is_a_guest_once_an_owner_is_designated(self) -> None:
+        faces.set_owner("aadit")
+        context.update_vision(present=["sam"], unknown_count=0)
+        with _with_config(enabled=True):
+            self.assertTrue(presence.guest_present())
+
+    def test_owner_alone_is_not_a_guest(self) -> None:
+        faces.set_owner("aadit")
+        context.update_vision(present=["aadit"], unknown_count=0)
+        with _with_config(enabled=True):
+            snap = presence.snapshot()
+            self.assertTrue(snap["owner_present"])
+            self.assertFalse(snap["guest_present"])
+
+    def test_empty_frame_is_not_a_guest(self) -> None:
+        faces.set_owner("aadit")
+        context.update_vision(present=[], unknown_count=0)
+        with _with_config(enabled=True):
+            self.assertFalse(presence.guest_present())
+
+    def test_vision_disabled_never_restricts(self) -> None:
+        faces.set_owner("aadit")
+        context.update_vision(present=["sam"], unknown_count=2)
+        with _with_config(enabled=False):
+            self.assertFalse(presence.guest_present())
+            self.assertFalse(presence.guest_mode_active())
+
+    def test_guest_mode_can_be_switched_off_independently(self) -> None:
+        faces.set_owner("aadit")
+        context.update_vision(present=["sam"], unknown_count=0)
+        with _with_config(enabled=True, guest_mode={"enabled": False}):
+            self.assertTrue(presence.guest_present(), "presence itself should still resolve")
+            self.assertFalse(presence.guest_mode_active())
+
+
+class GuestGuardTest(_StoreCase):
+    """The action-path guard: restricts only, and only while a guest is there."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        faces.enroll("Sam", [[0.0, 1.0, 0.0]])
+        faces.set_owner("aadit")
+        context.vision.present = []
+        context.vision.unknown_count = 0
+
+    def tearDown(self) -> None:
+        context.vision.present = []
+        context.vision.unknown_count = 0
+        super().tearDown()
+
+    def _guest(self):
+        context.update_vision(present=["sam"], unknown_count=0)
+        return _with_config(enabled=True)
+
+    def _owner_only(self):
+        context.update_vision(present=["aadit"], unknown_count=0)
+        return _with_config(enabled=True)
+
+    def test_private_action_is_withheld_while_a_guest_is_present(self) -> None:
+        from nora import security
+        with self._guest():
+            self.assertTrue(security.guest_blocks("recall"))
+            self.assertTrue(security.guest_blocks("check_email"))
+
+    def test_nothing_is_withheld_from_the_owner_alone(self) -> None:
+        from nora import security
+        with self._owner_only():
+            self.assertFalse(security.guest_blocks("recall"))
+
+    def test_harmless_actions_still_run_with_a_guest_present(self) -> None:
+        from nora import security
+        with self._guest():
+            self.assertFalse(security.guest_blocks("get_time"))
+            self.assertFalse(security.guest_blocks("play_music"))
+
+    def test_guest_mode_never_grants(self) -> None:
+        """The asymmetry: a visible owner must not relax any existing guard."""
+        from nora import security
+        with self._owner_only():
+            self.assertTrue(security.needs_confirmation("forget_all_faces"))
+            self.assertEqual(security.is_blocked("forget_face"),
+                             "forget_face" in security._blocked())
+
+    def test_restricted_categories_extend_the_list(self) -> None:
+        from nora import security
+        import nora.commands.spotify  # noqa: F401  — registers play_music's category
+
+        with self._guest():
+            self.assertFalse(security.guest_blocks("play_music"))
+        context.update_vision(present=["sam"], unknown_count=0)
+        with _with_config(enabled=True,
+                          guest_mode={"restricted_actions": [], "restricted_categories": ["music"]}):
+            self.assertTrue(security.guest_blocks("play_music"))
+            self.assertFalse(security.guest_blocks("recall"))
+
+    def test_decline_message_can_name_the_guest(self) -> None:
+        from nora import security
+        with _with_config(enabled=True, guest_mode={"decline": "Not while {who} is here."}):
+            context.update_vision(present=["sam"], unknown_count=1)
+            message = security.guest_decline_message("recall")
+            self.assertIn("Sam", message)
+            self.assertNotIn("{who}", message)
+
+    def test_execute_declines_without_calling_the_handler(self) -> None:
+        import asyncio
+        from nora import command_engine
+        from nora.schemas import ActionStep, IntentResponse
+
+        called = []
+        with mock.patch.dict(command_engine._registry,
+                             {"recall": lambda **kw: called.append(kw) or "secret"},
+                             clear=False):
+            with self._guest():
+                intent = IntentResponse(intent="recall", steps=[ActionStep(action="recall")])
+                results = asyncio.run(command_engine.execute(intent))
+
+        self.assertEqual(called, [], "the handler ran despite guest mode")
+        self.assertFalse(results[0].success)
+        self.assertTrue(results[0].withheld, "a refusal was reported as a failure")
+        self.assertNotIn("secret", results[0].message)
+
+    def test_a_withheld_step_is_spoken_as_a_refusal_not_a_failure(self) -> None:
+        from nora.pipeline import summarize_results
+        from nora.schemas import StepResult
+
+        summary = summarize_results([
+            StepResult(action="recall", success=False, withheld=True,
+                       message="I'll keep that private.")
+        ])
+        self.assertEqual(summary, "I'll keep that private.")
+        self.assertNotIn("Failed", summary)
+
+    def test_execute_runs_the_handler_for_the_owner(self) -> None:
+        import asyncio
+        from nora import command_engine
+        from nora.schemas import ActionStep, IntentResponse
+
+        called = []
+        with mock.patch.dict(command_engine._registry,
+                             {"recall": lambda **kw: called.append(kw) or "the answer"},
+                             clear=False):
+            with self._owner_only():
+                intent = IntentResponse(intent="recall", steps=[ActionStep(action="recall")])
+                results = asyncio.run(command_engine.execute(intent))
+
+        self.assertEqual(len(called), 1)
+        self.assertTrue(results[0].success)
+
+
+class PresencePromptTest(_StoreCase):
+    """The fusion point: what the LLM is told about who is in the room."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        faces.enroll("Aadit", [[1.0, 0.0, 0.0]])
+        faces.enroll("Sam", [[0.0, 1.0, 0.0]])
+        faces.set_owner("aadit")
+        context.vision.present = []
+        context.vision.unknown_count = 0
+
+    def tearDown(self) -> None:
+        context.vision.present = []
+        context.vision.unknown_count = 0
+        super().tearDown()
+
+    def test_empty_when_nobody_is_visible(self) -> None:
+        context.update_vision(present=[], unknown_count=0)
+        with _with_config(enabled=True):
+            self.assertEqual(presence.format_for_prompt(), "")
+
+    def test_names_the_owner(self) -> None:
+        context.update_vision(present=["aadit"], unknown_count=0)
+        with _with_config(enabled=True):
+            block = presence.format_for_prompt()
+        self.assertIn("Aadit (owner)", block)
+        self.assertNotIn("GUEST MODE", block)
+
+    def test_guest_mode_instruction_is_included(self) -> None:
+        context.update_vision(present=["aadit"], unknown_count=1)
+        with _with_config(enabled=True):
+            block = presence.format_for_prompt()
+        self.assertIn("GUEST MODE", block)
+        self.assertIn("not read private content aloud", block)
+
+    def test_persona_hint_only_when_alone_in_frame(self) -> None:
+        faces.set_profile("aadit", persona={"tone": "casual"})
+
+        context.update_vision(present=["aadit"], unknown_count=0)
+        with _with_config(enabled=True):
+            self.assertIn("tone: casual", presence.format_for_prompt())
+
+        context.update_vision(present=["aadit"], unknown_count=1)
+        with _with_config(enabled=True):
+            self.assertNotIn("tone: casual", presence.format_for_prompt())
 
 
 if __name__ == "__main__":

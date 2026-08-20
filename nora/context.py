@@ -46,7 +46,7 @@ def set_ptt_enabled(value: bool) -> None:
 class MusicState:
     track: str = ""
     artist: str = ""
-    source: str = ""          # "local" | "apple_music_com" | "apple_music_web" | "youtube"
+    source: str = ""          # "spotify" | "local"
     status: str = "stopped"   # "playing" | "paused" | "stopped"
     last_track: str = ""      # preserved across stop so "resume music" works
     last_artist: str = ""

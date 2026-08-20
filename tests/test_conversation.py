@@ -181,6 +181,26 @@ class DialogueActTest(unittest.TestCase):
                 act = dialogue.classify(text, has_prior_turn=True)
                 self.assertEqual(act, Act.COMMAND, f"{text!r} would be answered from imagination")
 
+    def test_screen_questions_never_reach_the_chat_path(self) -> None:
+        # Observed in the wild: "what's on my screen" classified as a question,
+        # went to the chat model, and got answered "Your screen is just the
+        # desktop" — invented, because the chat path cannot see anything.
+        # These have to reach read_screen.
+        for text in [
+            "what is on my screen", "whats on my screen right now",
+            "what do you see on my screen", "what am I looking at",
+            "read my screen", "what is happening on my screen right now",
+            "what is this window", "what is showing",
+            # Whisper garbles this one regularly; it must still route right.
+            "What did on my screen right now?",
+        ]:
+            with self.subTest(text=text):
+                act = dialogue.classify(text, has_prior_turn=True)
+                self.assertFalse(
+                    dialogue.is_conversational(act),
+                    f"{text!r} would be answered without looking at the screen",
+                )
+
     def test_lookup_topics_in_chat_do_not_hijack_the_action_path(self) -> None:
         # The other half of the same problem: a topic word in a conversational
         # turn used to drag it onto the action path, where there is no
@@ -249,6 +269,39 @@ class ForSpeechTest(unittest.TestCase):
         self.assertNotIn("-", out)
         self.assertIn("install ripgrep.", out.lower())
         self.assertIn("run it.", out.lower())
+
+    def test_urls_become_the_site_name(self) -> None:
+        # Nobody can click a link they are hearing, and reading the path aloud
+        # ("slash petrol dash price dash in dash bangalore dot html") is worse
+        # than useless — say who said it instead.
+        cases = {
+            "Per www.goodreturns.in/petrol-price-in-bangalore.html today.":
+                "Per goodreturns today.",
+            "Reported by https://www.theguardian.com/world/iran":
+                "Reported by theguardian",
+            "See en.wikipedia.org/wiki/Iran": "See wikipedia",
+            "Sources: bbc.co.uk and reuters.com.": "Sources: bbc and reuters.",
+            "Rates from goodreturns.in today.": "Rates from goodreturns today.",
+        }
+        for raw, spoken in cases.items():
+            self.assertEqual(conversation.for_speech(raw), spoken, raw)
+
+    def test_dotted_non_urls_are_left_alone(self) -> None:
+        for raw in ("Pi is 3.14 and the module is nora.commands.web_search",
+                    "Petrol is Rs.106.86 in Bangalore.",
+                    "The U.S. Department said so."):
+            self.assertEqual(conversation.for_speech(raw), raw, raw)
+
+    def test_a_missing_space_after_a_full_stop_is_not_a_domain(self) -> None:
+        # Models drop the space after a full stop, and ".in"/".me"/".info" are
+        # both TLDs and ordinary words — matching them ate the following word.
+        self.assertEqual(
+            conversation.for_speech("I finished.In the meantime, ask me."),
+            "I finished. In the meantime, ask me.",
+        )
+        self.assertEqual(conversation.for_speech("It ended.Me too."), "It ended. Me too.")
+        self.assertEqual(conversation.for_speech("Done.Info arrives later."),
+                         "Done. Info arrives later.")
 
     def test_strips_emoji(self) -> None:
         self.assertNotIn("🚀", conversation.for_speech("Done 🚀"))
@@ -332,6 +385,85 @@ class ForSpeechTest(unittest.TestCase):
         self.assertEqual(conversation.for_speech(""), "")
 
 
+class LeakedReasoningTest(unittest.TestCase):
+    """A hybrid-reasoning model dumping its scratchpad into `content`.
+
+    Both samples below are real replies NORA spoke aloud (nora.log, 2026-08-20
+    16:25 and 16:32) after the Groq candidates were unavailable and the chain
+    fell through to Nemotron, which has no reasoning_format switch. The config
+    fix (chat_template_kwargs.thinking) stops it at the provider; these guard
+    the net underneath it.
+    """
+
+    LEAKS = [
+        'The prior context: "How many units does Nora have?" The assistant '
+        'said they need to look it up. Now user says "Yeah, can you do it?" '
+        "So we should proceed to retrieve the unit count. Likely we have a "
+        "function to query some system? Not fully defined.",
+        "Must not repeat previous opening. Must not restate question. In "
+        'prior conversation, we told them "Yes, you asked me to tell you '
+        'about Kanye West." That\'s it.',
+        "We need to recall what we previously told the user about Kanye "
+        "West. So now user asks what we said. We should respond with that "
+        "info again?",
+    ]
+
+    # Real replies from the same log. These must survive — the validator gates
+    # genuine answers, so a false positive costs the user a real response.
+    GENUINE = [
+        "I told you that Kanye West, born June 8, 1977, is an American "
+        "producer, rapper, and designer.",
+        "You asked me to recall your recent notes. I'm ready to retrieve "
+        "whatever you need.",
+        "Yes, you asked me to tell you about Kanye West.",
+        "I'm not sure of the exact unit count offhand; I'll need to look "
+        "that up for you. Give me a moment and I'll get the current number.",
+        # "We need to" addressed to the user, not about them.
+        "We need to get you set up with an API key first, then I can "
+        "search live.",
+        "The user manual for that printer is probably on the maker's site.",
+    ]
+
+    def test_leaked_scratchpad_is_detected(self):
+        for raw in self.LEAKS:
+            self.assertTrue(conversation.looks_like_analysis(raw), raw[:60])
+
+    def test_genuine_replies_are_not_flagged(self):
+        for raw in self.GENUINE:
+            self.assertFalse(conversation.looks_like_analysis(raw), raw[:60])
+
+    def test_router_falls_through_to_the_next_model_on_a_leak(self):
+        """A leak must be treated as a failed call, not spoken."""
+        from nora import model_router
+
+        calls = []
+
+        def fake_call(candidate, messages, max_tokens, temperature, timeout, extras):
+            calls.append(candidate["name"])
+            if candidate["name"] == "leaky":
+                return self.LEAKS[0]
+            return "He's an American producer and designer."
+
+        candidates = [{"name": "leaky", "model": "m"}, {"name": "clean", "model": "m"}]
+        with mock.patch.object(model_router, "_candidates_for", return_value=candidates), \
+             mock.patch.object(model_router, "_call_openai_compatible", fake_call):
+            text, used = model_router.complete(
+                "chat", [{"role": "user", "content": "hi"}],
+                validate=lambda t: not conversation.looks_like_analysis(t),
+            )
+
+        self.assertEqual(calls, ["leaky", "clean"])
+        self.assertEqual(used, "clean")
+        self.assertNotIn("prior context", text.lower())
+
+    def test_for_speech_removes_analysis_sentences(self):
+        spoken = conversation.for_speech(
+            "The user asked about Kanye West. He's an American producer."
+        )
+        self.assertNotIn("user asked", spoken.lower())
+        self.assertIn("American producer", spoken)
+
+
 class ConversationRespondTest(unittest.TestCase):
     def setUp(self) -> None:
         dialogue.clear()
@@ -347,11 +479,42 @@ class ConversationRespondTest(unittest.TestCase):
         reply = conversation.respond("cool thanks", None, Act.BACKCHANNEL)
         self.assertIn(reply, phrasing._POOLS["thanks_reply"])
 
-    def test_records_both_sides_of_the_exchange(self) -> None:
+    def test_records_the_user_turn_but_leaves_noras_to_the_speaker(self) -> None:
+        # respond() used to record NORA's side as well, and speaker.speak()
+        # records everything NORA says centrally — so every chat reply landed
+        # in the transcript twice. as_messages() merges consecutive same-role
+        # turns, so the model was shown itself repeating verbatim while being
+        # told not to repeat itself.
         with mock.patch.object(conversation, "_generate", return_value="Paris."):
-            conversation.respond("what's the capital of France", None, Act.QUESTION)
+            reply = conversation.respond("what's the capital of France", None, Act.QUESTION)
+        self.assertEqual(reply, "Paris.")
         self.assertEqual(dialogue.last_user_utterance(), "what's the capital of France")
-        self.assertEqual(dialogue.last_nora_reply(), "Paris.")
+        nora_turns = [t for t in dialogue.history() if t.speaker == "nora"]
+        self.assertEqual(nora_turns, [], "respond() must not record NORA's side")
+
+    def test_a_spoken_reply_lands_in_the_transcript_exactly_once(self) -> None:
+        # The other half of the contract: speaker.speak owns the recording, so
+        # the reply must still reach the transcript — once.
+        from nora import speaker
+        with mock.patch.object(speaker, "_speak_streaming") as streaming:
+            streaming.side_effect = lambda text, mood=None, spoken=None: (
+                spoken.append(text) if spoken is not None else None
+            )
+            speaker.speak("Paris.", mood="chat")
+        nora_turns = [t.text for t in dialogue.history() if t.speaker == "nora"]
+        self.assertEqual(nora_turns, ["Paris."])
+
+    def test_an_interrupted_reply_records_only_what_was_spoken(self) -> None:
+        # Barge-in cuts playback part-way. Recording the full reply left NORA
+        # referring back to sentences the user never heard.
+        from nora import speaker
+        with mock.patch.object(speaker, "_speak_streaming") as streaming:
+            streaming.side_effect = lambda text, mood=None, spoken=None: (
+                spoken.append("First part.") if spoken is not None else None
+            )
+            speaker.speak("First part. Second part. Third part.", mood="chat")
+        nora_turns = [t.text for t in dialogue.history() if t.speaker == "nora"]
+        self.assertEqual(nora_turns, ["First part."])
 
     def test_does_not_double_record_a_turn_the_pipeline_already_logged(self) -> None:
         dialogue.record_user("what's the capital of France")

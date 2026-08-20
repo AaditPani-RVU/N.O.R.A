@@ -66,9 +66,9 @@ _Annotated with status: ✅ exists | 🔨 in roadmap | 🆕 new from DELIVERABLE
 | `restart` / `reboot` | Restart (requires confirmation) | ✅ |
 | `sleep` / `put computer to sleep` | Sleep mode | ✅ |
 | `lock screen` | Lock workstation | ✅ |
-| `volume up` / `volume down` | Adjust system volume | ✅ |
-| `set volume to [N] percent` | Set exact volume | ✅ |
-| `mute` / `unmute` | Toggle mute | ✅ |
+| `volume up` / `volume down` / `louder` | Nudge system volume ±10 from where it is (`adjust_volume`) | ✅ |
+| `set volume to [N] percent` | Set exact volume (`set_volume`) | ✅ |
+| `mute` / `unmute` | Toggle the mute flag, keeping the level underneath (`mute_audio`) | ✅ |
 | `brightness up` / `brightness down` | Adjust display brightness | ✅ |
 | `set brightness to [N] percent` | Set exact brightness | ✅ |
 | `take a screenshot` | Capture screen to clipboard/file | ✅ |
@@ -118,19 +118,51 @@ _Annotated with status: ✅ exists | 🔨 in roadmap | 🆕 new from DELIVERABLE
 
 ---
 
-## Music
+## Music (Spotify)
+
+Spotify is the only music backend. Playback runs over **MPRIS D-Bus** against the
+local desktop client — no keyboard automation, no browser, and no Spotify Premium.
+NORA launches Spotify automatically if it isn't already running.
 
 | Voice Command | Action | Status |
 |---------------|--------|--------|
-| `play [song / artist / album]` | Play local music | ✅ |
-| `play [song] on Apple Music` | Play via Apple Music | ✅ |
+| `play music` / `play something` | Replay your last-played track | ✅ |
+| `play [song]` | Play a song by name | ✅ |
+| `play [song] by [artist]` | Play an exact song by an artist | ✅ |
+| `play some [artist]` | Play an artist's popular tracks | ✅ |
+| `play the album [name]` | Play a full album | ✅ |
+| `play the [name] playlist` | Play a public playlist | ✅ |
 | `pause` / `pause music` | Pause playback | ✅ |
 | `resume` / `resume music` | Resume playback | ✅ |
 | `stop music` | Stop playback | ✅ |
 | `next track` / `skip` | Next song | ✅ |
 | `previous track` / `go back` | Previous song | ✅ |
-| `volume up` / `volume down` | Adjust music volume | ✅ |
-| `what's playing` | Speak current track | ✅ |
+| `what's playing` / `what song is this` | Speak the current track | ✅ |
+| `shuffle on` / `turn off shuffle` | Toggle shuffle | ✅ |
+| `repeat track` / `repeat all` / `repeat off` | Set repeat mode | ✅ |
+| `volume up` / `volume down` | Adjust system volume | ✅ |
+
+### Search accuracy (optional credentials)
+
+Everything above works with **no setup at all**: NORA hands the query to Spotify's
+own `spotify:search:` URI and the desktop client plays the top result.
+
+Adding credentials upgrades *accuracy*, not capability. A field-qualified Web API
+lookup reliably picks the original recording where a loose search can land on a
+cover or a remix, and it can target an artist, album or playlist specifically:
+
+1. Create an app at <https://developer.spotify.com/dashboard> (no redirect URI needed).
+2. Add the pair to `.env`:
+
+   ```
+   SPOTIFY_CLIENT_ID=your_client_id
+   SPOTIFY_CLIENT_SECRET=your_client_secret
+   ```
+
+This uses the **client-credentials** grant: no browser login, no refresh tokens, and
+no Premium — the Web API is only ever used to look things up, never to control
+playback. Your private playlists are not visible to an app token; `play the [name]
+playlist` matches public and editorial playlists only.
 
 ---
 

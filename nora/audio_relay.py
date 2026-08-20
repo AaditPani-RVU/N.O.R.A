@@ -28,6 +28,29 @@ _seq_lock = threading.Lock()
 _enabled: bool | None = None
 
 
+def sniff_mime(raw: bytes) -> str:
+    """Identify the container from its magic bytes.
+
+    The filename is not evidence: speaker.py writes every chunk to
+    `nora_tts_N.mp3` regardless of backend, and the local Kokoro path fills it
+    with RIFF/WAVE. pygame sniffs content so local playback never noticed, but a
+    browser hands `data:audio/mpeg` straight to its MP3 decoder, which rejects a
+    WAV header and fails the play() promise -- silently, since autoplay
+    rejections look identical.
+    """
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WAVE":
+        return "audio/wav"
+    if raw[:4] == b"OggS":
+        return "audio/ogg"
+    if raw[:4] == b"fLaC":
+        return "audio/flac"
+    if raw[4:8] == b"ftyp":
+        return "audio/mp4"
+    if raw[:3] == b"ID3" or (raw[:1] == b"\xff" and raw[1:2] in (b"\xfb", b"\xf3", b"\xf2", b"\xfa")):
+        return "audio/mpeg"
+    return "audio/mpeg"
+
+
 def enabled() -> bool:
     """Config gate, resolved once. `audio_relay.enabled` under websocket_api."""
     global _enabled
@@ -67,7 +90,7 @@ def push_chunk(path: str | Path, text: str = "") -> None:
         ui_server.ws_push({
             "type": "audio",
             "seq": _next_seq(),
-            "mime": "audio/mpeg",
+            "mime": sniff_mime(raw),
             "text": text,
             "data": base64.b64encode(raw).decode("ascii"),
         })

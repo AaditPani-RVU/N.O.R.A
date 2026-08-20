@@ -138,9 +138,14 @@ def gated(speak_fn: Callable[[str], None]) -> Callable[[str], None]:
 
 def _flush() -> None:
     global _deferred
+    if not (_speak_fn and allows_proactive_speech()):
+        # The user is back but still busy (on a call, inside a quiet window).
+        # Leave the queue alone: draining it here spoke to nobody and lost the
+        # suggestion, which contradicts "re-timed, not dropped".
+        return
     with _lock:
         pending, _deferred = _deferred, []
-    if pending and _speak_fn and allows_proactive_speech():
+    if pending:
         # Speak only the most recent deferred suggestion; a backlog read
         # aloud all at once is worse than losing stale ones.
         _speak_fn(pending[-1])

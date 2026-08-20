@@ -13,28 +13,46 @@ from nora.schemas import IntentResponse
 logger = logging.getLogger("nora.intent_parser")
 
 # Module-level singletons — avoid per-call client construction overhead
-_groq_client: "object | None" = None
+_groq_clients: dict[tuple, "object"] = {}
 _claude_client: "object | None" = None
-# Flips false (per process) if the OpenAI-compatible endpoint rejects response_format
-_json_mode_ok = True
+# Endpoints (base_url, model) known to reject response_format. Tracked per
+# endpoint rather than as one process-wide flag: intent parsing now fails over
+# between Groq and NVIDIA, and a single flag meant one fallback model refusing
+# JSON mode would permanently disable it for the primary provider too —
+# a healthy path degraded by a broken one it never even used.
+_json_mode_unsupported: set[tuple[str, str]] = set()
 
 
-def _get_groq_client(api_key: str, timeout_sec: float) -> "object":
-    global _groq_client
-    if _groq_client is None:
-        import os
-        from openai import OpenAI
-        # llm.api_base lets any OpenAI-compatible endpoint stand in for Groq
-        # (OpenRouter, Cerebras, Together free tiers) with zero code changes.
-        cfg = get_config().get("llm", {})
-        base_url = cfg.get("api_base", "https://api.groq.com/openai/v1")
-        key_env = cfg.get("api_key_env", "GROQ_API_KEY")
-        _groq_client = OpenAI(
+def _get_groq_client(
+    api_key: str, timeout_sec: float,
+    base_url: str | None = None, key_env: str | None = None,
+) -> "object":
+    """Return a cached OpenAI-compatible client for one endpoint.
+
+    Keyed by endpoint rather than held as a single global: intent parsing now
+    fails over across providers, so Groq and NVIDIA clients coexist. A single
+    global would have handed the Groq client to an NVIDIA candidate and sent
+    the wrong key to the wrong host.
+    """
+    import os
+    from openai import OpenAI
+
+    # llm.api_base lets any OpenAI-compatible endpoint stand in for Groq
+    # (OpenRouter, Cerebras, Together free tiers) with zero code changes.
+    cfg = get_config().get("llm", {})
+    base_url = base_url or cfg.get("api_base", "https://api.groq.com/openai/v1")
+    key_env = key_env or cfg.get("api_key_env", "GROQ_API_KEY")
+
+    cache_key = (base_url, key_env, timeout_sec)
+    client = _groq_clients.get(cache_key)
+    if client is None:
+        client = OpenAI(
             api_key=api_key or os.environ.get(key_env, ""),
             base_url=base_url,
             timeout=timeout_sec,
         )
-    return _groq_client
+        _groq_clients[cache_key] = client
+    return client
 
 
 def _get_claude_client(timeout_sec: float) -> "object":
@@ -62,6 +80,11 @@ EXECUTION BIAS — CRITICAL (follow these exactly):
 - "play music" / "play something" → ALWAYS emit play_music(track="", artist=""). NEVER ask what to play.
 - "open [app]" → ALWAYS emit open_app(name="[app]"). NEVER ask which version or instance.
 - Single-word commands → execute the obvious default. "screenshot" → take_screenshot(). "time" → get_time().
+- ANY question about what is currently on screen, in this window, or what the
+  user is looking at → read_screen(question="..."). NEVER ask_claude() for
+  these: ask_claude cannot see the screen and will invent an answer. And never
+  take_screenshot() either — that saves a file to disk without describing it.
+  read_screen is the only action that actually looks.
 - Partial or colloquial phrases → find the closest registered action and execute it.
 - Questions or research requests → use ask_claude() or tell_me_about(). NEVER say "I need more info."
 - Hard multi-step reasoning, math, or logic problems (NOT everyday factual questions) → deep_reasoning().
@@ -89,10 +112,15 @@ INTERRUPTION
 - "stop", "cancel", "pause everything", "shut up" â†' stop_all().
   This halts TTS, stops music, and clears pending steps.
 
-MUSIC PRIORITY
-- play_music handles the chain automatically: local â†' Apple Music COM â†' Apple Music URI â†' YouTube.
-- "resume music" â†' resume_music().
-- For a specific song/artist on Apple Music, use apple_music_play_song / apple_music_play_artist.
+MUSIC (Spotify only)
+- All music runs through Spotify on the local desktop client. There is no other music backend.
+- "play music" / "play something" with no title → play_music(track="", artist="") — it replays the user's preference.
+- A specific song → spotify_play_song(song). A song plus artist → play_music(track, artist).
+- An artist with no song ("play some Slowdive") → spotify_play_artist(artist).
+- An album → spotify_play_album(album, artist). A playlist → spotify_play_playlist(name).
+- Transport: resume_music, pause_music, toggle_music, stop_music, next_track, previous_track.
+- "what's playing" / "what song is this" → now_playing(). NEVER guess the track from memory.
+- spotify_set_volume(level) changes Spotify's volume only; set_volume(level) changes system volume.
 
 RESPONSE FORMAT (exactly one of these four shapes):
   Execution plan: {{"intent": "...", "steps": [{{"action": "name", "parameters": {{}}}}], "requires_confirmation": false}}
@@ -140,13 +168,19 @@ User: "resume music"
 {{"intent": "resume last track", "steps": [{{"action": "resume_music", "parameters": {{}}}}], "requires_confirmation": false}}
 
 User: "play Blinding Lights"
-{{"intent": "play song on Apple Music", "steps": [{{"action": "apple_music_play_song", "parameters": {{"song": "Blinding Lights"}}}}], "requires_confirmation": false}}
+{{"intent": "play song on Spotify", "steps": [{{"action": "spotify_play_song", "parameters": {{"song": "Blinding Lights"}}}}], "requires_confirmation": false}}
 
 User: "play something by The Weeknd"
-{{"intent": "play artist", "steps": [{{"action": "apple_music_play_artist", "parameters": {{"artist": "The Weeknd"}}}}], "requires_confirmation": false}}
+{{"intent": "play artist on Spotify", "steps": [{{"action": "spotify_play_artist", "parameters": {{"artist": "The Weeknd"}}}}], "requires_confirmation": false}}
+
+User: "play the album Souvlaki"
+{{"intent": "play album on Spotify", "steps": [{{"action": "spotify_play_album", "parameters": {{"album": "Souvlaki", "artist": ""}}}}], "requires_confirmation": false}}
+
+User: "what song is this"
+{{"intent": "now playing", "steps": [{{"action": "now_playing", "parameters": {{}}}}], "requires_confirmation": false}}
 
 User: "next song"
-{{"intent": "skip track", "steps": [{{"action": "apple_music_next_track", "parameters": {{}}}}], "requires_confirmation": false}}
+{{"intent": "skip track", "steps": [{{"action": "next_track", "parameters": {{}}}}], "requires_confirmation": false}}
 
 User: "start coding"
 {{"intent": "coding workflow", "steps": [{{"action": "open_app", "parameters": {{"name": "vscode"}}}}, {{"action": "open_app", "parameters": {{"name": "chrome"}}}}, {{"action": "play_music", "parameters": {{"track": "", "artist": ""}}}}], "requires_confirmation": false}}
@@ -177,6 +211,15 @@ User: "play"
 
 User: "screenshot"
 {{"intent": "take screenshot", "steps": [{{"action": "take_screenshot", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "what's on my screen"
+{{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What is on the screen right now?"}}}}], "requires_confirmation": false}}
+
+User: "what am I looking at"
+{{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What is on the screen right now?"}}}}], "requires_confirmation": false}}
+
+User: "what does this error say"
+{{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What does the error message say?"}}}}], "requires_confirmation": false}}
 
 User: "time"
 {{"intent": "get current time", "steps": [{{"action": "get_time", "parameters": {{}}}}], "requires_confirmation": false}}
@@ -343,6 +386,16 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
     except Exception:
         pass
 
+    # Inject who the camera can see (vision Phase 2). Empty unless vision is
+    # on and someone is in frame; carries the guest-mode instruction with it.
+    try:
+        from nora.vision.presence import format_for_prompt as _presence_fmt
+        presence_block = _presence_fmt()
+        if presence_block:
+            prompt += "\n\n" + presence_block
+    except Exception:
+        pass
+
     # Inject repo context pack (branch, dirty files, recent commits)
     try:
         from nora.repo_context import format_for_prompt as _repo_fmt
@@ -448,9 +501,16 @@ def check_ollama_connection() -> bool:
 
 
 def _parse_via_groq(
-    text: str, cfg: dict, memory_ctx: dict | None = None, screen_ctx: dict | None = None
+    text: str, cfg: dict, memory_ctx: dict | None = None,
+    screen_ctx: dict | None = None, net_attempts: int = 3,
 ) -> IntentResponse:
-    """Call the Groq API (OpenAI-compatible) to parse intent."""
+    """Call an OpenAI-compatible endpoint to parse intent.
+
+    ``net_attempts`` is 3 when this endpoint is all there is, and 1 when the
+    router is going to try another provider straight after — retrying a dead
+    host three times with backoff before failing over turns a 2s recovery into
+    a 9s one, which on stage reads as a hang.
+    """
     import os
     import time as _time
     from openai import APIConnectionError, APITimeoutError
@@ -459,28 +519,38 @@ def _parse_via_groq(
     if not api_key:
         raise EnvironmentError(f"{cfg.get('api_key_env', 'GROQ_API_KEY')} environment variable not set.")
 
-    model = cfg.get("model", "llama-3.1-8b-instant")
+    model = cfg.get("model", "openai/gpt-oss-120b")
     temperature = float(cfg.get("temperature", 0.1))
     max_tokens = int(cfg.get("max_tokens", 512))
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
     system_prompt = _build_system_prompt(memory_ctx, screen_ctx)
 
-    client = _get_groq_client(api_key, timeout_sec)
+    client = _get_groq_client(
+        api_key, timeout_sec,
+        base_url=cfg.get("api_base"), key_env=cfg.get("api_key_env"),
+    )
 
-    global _json_mode_ok
+    endpoint = (
+        cfg.get("api_base") or "https://api.groq.com/openai/v1",
+        model,
+    )
     last_exc: Exception = RuntimeError("no attempts made")
-    for net_attempt in range(3):
+    for net_attempt in range(net_attempts):
         if net_attempt > 0:
             _time.sleep(net_attempt)  # 1s, 2s backoff
         for json_attempt in range(2):
             prompt = text if json_attempt == 0 else f"Return ONLY a valid JSON object for this command: {text}"
-            logger.info(f"Sending to Groq (net {net_attempt+1}/3, json {json_attempt+1}/2): '{text}'")
+            logger.info(
+                f"Sending to {model} (net {net_attempt+1}/{net_attempts}, "
+                f"json {json_attempt+1}/2): '{text}'")
             # Enforced JSON mode: the endpoint constrains decoding to valid JSON,
             # eliminating the fence-stripping/regex failure class entirely.
             # Disabled once per process if the endpoint rejects response_format.
             extra: dict = {}
-            if bool(cfg.get("json_mode", True)) and _json_mode_ok:
+            if bool(cfg.get("json_mode", True)) and endpoint not in _json_mode_unsupported:
                 extra["response_format"] = {"type": "json_object"}
+            if cfg.get("extra_body"):
+                extra["extra_body"] = cfg["extra_body"]
             try:
                 resp = client.chat.completions.create(
                     model=model,
@@ -509,10 +579,11 @@ def _parse_via_groq(
                 break  # skip json retry, go straight to next network attempt
             except Exception as e:
                 if extra and "response_format" in str(e):
-                    # Endpoint/model doesn't support JSON mode — drop it for
-                    # the rest of the process and retry immediately.
-                    _json_mode_ok = False
-                    logger.warning("JSON mode rejected by endpoint — falling back to plain text")
+                    # This endpoint doesn't support JSON mode — drop it for
+                    # this endpoint only, and retry immediately.
+                    _json_mode_unsupported.add(endpoint)
+                    logger.warning(
+                        "JSON mode rejected by %s — falling back to plain text for it", endpoint[1])
                     continue
                 logger.warning(f"Groq unexpected error: {e}")
                 last_exc = e
@@ -667,6 +738,42 @@ def _parse_via_ollama(
     raise last_exc
 
 
+def _intent_candidates() -> list[dict]:
+    """Candidates for the router's "intent" role, in preference order."""
+    return get_config().get("llm_router", {}).get("roles", {}).get("intent", []) or []
+
+
+def _parse_via_router(
+    text: str, memory_ctx: dict | None = None, screen_ctx: dict | None = None
+) -> IntentResponse:
+    """Try each configured intent candidate in order; first one to answer wins.
+
+    Deliberately not routed through ``model_router.complete``: intent parsing
+    needs JSON-mode decoding, the two-shot "return ONLY JSON" retry and schema
+    validation, all of which live in ``_parse_via_groq``. This reuses the
+    router's *configuration* rather than its call path.
+    """
+    base = get_config().get("llm", {})
+    errors: list[str] = []
+
+    for candidate in _intent_candidates():
+        name = candidate.get("name", candidate.get("model", "?"))
+        cfg = {
+            **base,
+            "model": candidate["model"],
+            "api_base": candidate.get("base_url") or base.get("api_base"),
+            "api_key_env": candidate.get("api_key_env") or base.get("api_key_env", "GROQ_API_KEY"),
+            "extra_body": candidate.get("extra_body"),
+        }
+        try:
+            return _parse_via_groq(text, cfg, memory_ctx, screen_ctx, net_attempts=1)
+        except Exception as e:
+            logger.warning("intent: %s failed — %s", name, e)
+            errors.append(f"{name}: {e}")
+
+    raise RuntimeError("all intent candidates failed: " + " | ".join(errors))
+
+
 def parse_intent(
     text: str,
     memory_ctx: dict | None = None,
@@ -687,13 +794,21 @@ def parse_intent(
         return fp
 
     cfg = get_config().get("llm", {})
-    provider = cfg.get("provider", "ollama").lower()
-    if provider == "groq":
-        result = _parse_via_groq(text, cfg, memory_ctx, screen_ctx)
-    elif provider == "claude":
-        result = _parse_via_claude(text, cfg, memory_ctx, screen_ctx)
+
+    # Layer 2 — the router first, if an "intent" role is configured. The action
+    # path used to hang off a single endpoint: when it was down, intent parsing
+    # failed outright and NORA could not do anything at all, while the chat
+    # path sailed on through its own fallback chain. Same treatment for both.
+    if _intent_candidates():
+        result = _parse_via_router(text, memory_ctx, screen_ctx)
     else:
-        result = _parse_via_ollama(text, cfg, memory_ctx, screen_ctx)
+        provider = cfg.get("provider", "ollama").lower()
+        if provider == "groq":
+            result = _parse_via_groq(text, cfg, memory_ctx, screen_ctx)
+        elif provider == "claude":
+            result = _parse_via_claude(text, cfg, memory_ctx, screen_ctx)
+        else:
+            result = _parse_via_ollama(text, cfg, memory_ctx, screen_ctx)
 
     # Layer 3 — rescue if LLM returned a clarification or produced no steps
     if _is_clarification(result):
@@ -749,8 +864,24 @@ _DEICTIC_WORDS = (
 )
 
 
+# The substring probes above are space-padded, so they only match the exact
+# phrasings listed — "on screen" and "on the screen" hit, "on my screen" does
+# not, and trailing punctuation defeats all of them ("my screen?" is not
+# " screen "). The result was that the most explicitly screen-directed
+# utterance possible got no screen snippet attached. Word-boundary matching
+# handles the possessives and the punctuation; \b after "screen" keeps it from
+# firing on "screenshot", which needs no OCR of its own.
+_SCREEN_RE = re.compile(
+    r"\b(?:my|the|your|this)\s+screen\b|\bon\s+screen\b"
+    r"|\bsee\s+on\b|\bshowing\b|\bdisplayed\b",
+    re.I,
+)
+
+
 def needs_screen_context(text: str) -> bool:
     """Return True if the command likely requires knowing what's on screen."""
+    if _SCREEN_RE.search(text):
+        return True
     lower = " " + text.lower() + " "
     return any(w in lower for w in _DEICTIC_WORDS)
 
@@ -759,7 +890,7 @@ def _call_llm(system: str, messages: list[dict]) -> str:
     """Generic LLM call that returns raw text. Used by the ReAct planner."""
     cfg = get_config().get("llm", {})
     provider = cfg.get("provider", "ollama").lower()
-    model = cfg.get("model", "llama-3.1-8b-instant")
+    model = cfg.get("model", "openai/gpt-oss-120b")
     max_tokens = int(cfg.get("max_tokens", 512))
     temperature = float(cfg.get("temperature", 0.1))
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))

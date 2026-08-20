@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from datetime import datetime
+from unittest import mock
 from pathlib import Path
 
 from nora import (
@@ -200,7 +201,35 @@ class TestFocus(IsolatedStateMixin):
         focus._last_activity_ts = time.time() - 100000
         gated("suggestion while away")
         self.assertEqual(spoken, [])
-        focus.note_activity()  # flush on return
+        # The flush asks the machine whether it may speak: PipeWire (a mic
+        # stream open right now reads as CALL) and the learned quiet hours.
+        # Pin both, or this passes or fails depending on what the box is doing.
+        with mock.patch.object(focus, "_pipewire_state",
+                               return_value=focus.FocusState.AVAILABLE), \
+             mock.patch("nora.silent_hours.is_silent_now", return_value=False):
+            focus._cache = None
+            focus.note_activity()  # flush on return
+        self.assertEqual(spoken, ["suggestion while away"])
+
+    def test_deferred_speech_survives_a_still_busy_return(self):
+        """Coming back mid-call must re-time the suggestion, not bin it."""
+        spoken: list[str] = []
+        gated = focus.gated(spoken.append)
+        focus._last_activity_ts = time.time() - 100000
+        gated("suggestion while away")
+
+        with mock.patch.object(focus, "_pipewire_state",
+                               return_value=focus.FocusState.CALL):
+            focus._cache = None
+            focus.note_activity()
+        self.assertEqual(spoken, [])
+        self.assertEqual(focus._deferred, ["suggestion while away"])
+
+        with mock.patch.object(focus, "_pipewire_state",
+                               return_value=focus.FocusState.AVAILABLE), \
+             mock.patch("nora.silent_hours.is_silent_now", return_value=False):
+            focus._cache = None
+            focus.note_activity()
         self.assertEqual(spoken, ["suggestion while away"])
 
 

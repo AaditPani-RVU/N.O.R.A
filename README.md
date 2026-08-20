@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Powered by NeuroSym](https://img.shields.io/badge/guardrails-neurosym--ai-blueviolet?style=flat-square)](https://github.com/AaditPani-RVU/NeuroSym-AI)
 [![Platform](https://img.shields.io/badge/platform-Linux-orange?style=flat-square&logo=linux&logoColor=white)]()
-[![Tests](https://img.shields.io/badge/tests-228%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-232%20passing-brightgreen?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-brightgreen?style=flat-square)]()
 
 **A local, voice-controlled AI assistant with neuro-symbolic guardrails —**  
@@ -215,6 +215,24 @@ PipeWire graph mutation lets NORA do something no proprietary OS exposes as a co
 - Remote mic support (`nora_remote.py`) — use your phone as a microphone
 - **Remote audio out** — replies mirror to any browser on your tailnet, so NORA can talk on your phone while executing on the laptop ([details](#remote--mobile))
 
+### Dashboard
+
+A single-file HUD at **`http://localhost:8766`** (`nora/static/index.html`) — no build step,
+no framework, no CDN. It opens on the laptop and on any phone on the tailnet.
+
+- **Orb + stage bar** — the pipeline as it runs: `LISTEN › STT › GUARD › LLM › ACT › SPEAK`
+- **Transcript** — both sides of the conversation, each reply tagged with the model that
+  produced it and its round-trip latency
+- **Live panels** — system stats, camera, response-time histogram, weather, uptime,
+  Spotify transport, command log
+- **Appearance** — accent colour, and toggles for grid, scanlines, aurora, particles,
+  spotlight, typewriter and the boot sequence
+
+Idle is a designed state, not a blank box: the transcript sits behind a corner reticle and
+a slow equaliser so a waiting assistant never reads as a crashed one. Everything is
+theme-driven off one `--rgb` accent token, so the swatch picker retints the whole HUD —
+orb, bars, borders and glow — in one step.
+
 ### Written Output — `claude_logs/`
 
 Every document NORA produces — a change log, a summary, a note — lands in **`claude_logs/`**
@@ -239,12 +257,60 @@ to the same folder rather than to whatever directory NORA was launched from.
 |---|---|
 | Applications | Open/close apps, switch windows |
 | Web | Search, open URLs |
-| Music | Local playback, Apple Music, YouTube |
+| Music | Spotify over MPRIS D-Bus — play by song/artist/album/playlist, transport, shuffle, repeat |
 | Files | Open, move, delete (with confirmation) |
 | System | Volume, brightness, shutdown, lock |
 | Memory | Recall past commands, inject knowledge |
 | Notifications | Voice reminders |
 | Code | Screen intelligence, clipboard extraction |
+
+### Model Routing
+
+Every LLM call goes through `nora/model_router.py` under a **role** — `chat`, `intent`,
+`research`, `live_search`, `reasoning` — and each role is an *ordered* chain of candidates
+in `config.yaml`. The first candidate not in rate-limit cooldown wins. A 429 sends that
+candidate to cooldown (honouring `Retry-After` when the provider sends one) and the chain
+falls through; any other error — auth, connection, timeout, empty response — falls through
+immediately. Roles are what let a fast model answer small talk while a slower, stronger one
+handles `deep_reasoning`.
+
+**Hybrid-reasoning models must have their thinking channel suppressed.** This is the one
+rule that is not optional. A model like `gpt-oss` or Nemotron emits a scratchpad before its
+answer; providers normally return it in a separate field, but when the thinking runs long it
+overflows into `content` — and since NORA speaks `content`, she reads her own scratchpad out
+loud:
+
+> *"We need to recall what we previously told the user about Kanye West. So now user asks…"*
+
+Each provider spells the switch differently, so it lives per-candidate in `extra_body`:
+
+```yaml
+- name: groq_gpt_oss_120b          # Groq
+  extra_body:
+    reasoning_format: "hidden"
+
+- name: nvidia_nemotron_nano_30b   # NVIDIA
+  extra_body:
+    chat_template_kwargs:
+      thinking: false
+```
+
+Two nets sit under that, because the config only protects models someone remembered to
+configure:
+
+1. `model_router.complete(validate=...)` — a rejected reply is treated exactly like a failed
+   call, so a leak falls through to the next model instead of reaching the speaker.
+2. `conversation.for_speech()` — strips `<think>` blocks and any surviving analysis
+   sentences on the way to TTS.
+
+The detector (`conversation.looks_like_analysis`) distinguishes a scratchpad from a real
+answer by **who the user is to the sentence**: a leak talks *about* them in the third person
+("we need to recall what we told the user"), a genuine reply talks *to* them ("we need to
+get you set up with an API key"). Guarding that distinction matters — the validator gates
+real answers, so a false positive costs the user a response.
+
+If you add a reasoning-capable model to any spoken role, set its suppression flag and add a
+sample to `tests/test_conversation.py::LeakedReasoningTest`.
 
 ### Cognitive Memory
 - **Semantic store** — ChromaDB + `all-MiniLM-L6-v2` embeddings, everything persisted
@@ -341,6 +407,19 @@ python main.py
 llm:
   provider: "groq"              # groq | claude | ollama
   model: "openai/gpt-oss-120b"
+
+llm_router:                     # ordered fallback chain per role
+  roles:
+    chat:
+      - name: groq_gpt_oss_120b
+        model: "openai/gpt-oss-120b"
+        extra_body:
+          reasoning_format: "hidden"      # or NORA speaks her own scratchpad
+      - name: nvidia_nemotron_nano_30b    # survives a full Groq outage
+        model: "nvidia/nemotron-3-nano-30b-a3b"
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
 
 transcriber:
   device: "cuda"                # cuda | cpu
@@ -439,20 +518,25 @@ mirror, not a handoff, so nothing changes about local behaviour.
 ### 1. Put both devices on a tailnet
 
 ```bash
-tailscale up                                    # laptop and phone
-tailscale serve --bg 8766                       # dashboard, HTTPS
-tailscale serve --bg --set-path=/ws 8765        # WebSocket, same origin
+# laptop (Debian/Ubuntu)
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# phone: install Tailscale from the Play Store, sign in with the same account
 ```
 
-`tailscale serve` is doing more than convenience here: it fronts NORA with a real cert on
-`<laptop>.<tailnet>.ts.net`. Browsers refuse microphone access outside a secure context, so
-plain `http://100.x.x.x:8766` will silently deny the mic on your phone.
+That's the whole transport. No `tailscale serve`, no certificates, no port forwarding —
+the tailnet is a private network and both ports are reachable directly on it.
 
-### 2. Open the dashboard
+### 2. Open the dashboard on your phone
 
-`https://<laptop>.<tailnet>.ts.net` — append `?token=…` if `NORA_API_TOKEN` is set in `.env`
-(it is remembered in `localStorage` afterwards). The socket scheme follows the page, so
-`wss://` is automatic over TLS.
+```
+http://<laptop-tailscale-ip>:8766/?token=<NORA_API_TOKEN>
+```
+
+Find the IP with `tailscale ip -4`, and the token with `grep NORA_API_TOKEN .env`.
+The token is remembered in `localStorage`, so later visits need only the bare URL.
+Omit it entirely if `NORA_API_TOKEN` is unset.
 
 ### 3. Tap **TAP FOR AUDIO** once
 
@@ -474,6 +558,34 @@ clears the queue on both ends.
 > **Note** — the relay is strictly a side channel. If no client is connected NORA skips the
 > encoding entirely, and every failure path inside `nora/audio_relay.py` is swallowed: a
 > browser that is absent, slow, or throwing can never stall the machine actually speaking.
+
+### Issuing commands from the phone
+
+Tap **⌨ TEXT MODE** and type. The command posts to `/type_command`, runs through the full
+pipeline on the laptop, and the spoken reply comes back to your phone.
+
+The **CLICK TO SPEAK** button is *not* the phone's microphone — it triggers the laptop's mic
+over `POST /ptt`, which is useless when you're not in the room. Speaking into the phone
+needs one of:
+
+| Route | Status |
+|---|---|
+| Text mode over the tailnet | ✅ Works today |
+| `nora_remote.py` with `NORA_HOST` set to the tailnet IP | ✅ Works — needs Python (Termux on Android) |
+| Browser mic capture in the dashboard | ❌ Not implemented — would need `getUserMedia` + HTTPS via `tailscale serve` |
+
+### Optional — HTTPS
+
+Only required if you add browser mic capture later, since `getUserMedia` refuses to run
+outside a secure context:
+
+```bash
+tailscale serve --bg 8766                    # needs MagicDNS + HTTPS certs enabled
+tailscale serve --bg --set-path=/ws 8765     # in the Tailscale admin console
+```
+
+The dashboard already handles this: the socket switches to `wss://` automatically when the
+page is served over TLS.
 
 ---
 

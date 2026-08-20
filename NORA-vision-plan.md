@@ -31,7 +31,7 @@ An earlier draft of this plan claimed the repo has no `requirements.txt`. **It d
 
 ---
 
-## Phase 1 — Core: camera, face memory, greet-once
+## Phase 1 — Core: camera, face memory, greet-once — **shipped**
 
 ### New: `nora/vision/camera.py`
 
@@ -134,7 +134,7 @@ Add both `forget_face` and `forget_all_faces` to `security.destructive_actions` 
 
 ---
 
-## Phase 2 — Per-person profiles + guest mode
+## Phase 2 — Per-person profiles + guest mode — **shipped**
 
 Builds on the Phase 1 identity signal. When the visible person is not the enrolled owner (`trusted: true`), NORA enters guest mode: memory recall, email, and calendar actions decline to read private content aloud. Enforce in `nora/security.py` alongside the existing `is_blocked()` check, so it's one guard in the action path rather than scattered per-command checks — consistent with the NeuroSym action-guard design already in the project. Per-person greeting text and persona preference live in the `faces.json` record.
 
@@ -144,6 +144,20 @@ Builds on the Phase 1 identity signal. When the visible person is not the enroll
 - **Forbidden:** owner visible → unlock anything, skip a confirmation, raise a risk ceiling, or authenticate.
 
 Write this into the guard as a comment, not just into this document. The failure mode is someone later adding "auto-unlock when Aadit is seen" because nothing said not to — at which point a printed photo held to the webcam is a credential.
+
+### What shipped, and the four decisions the plan didn't cover
+
+- **`nora/vision/presence.py`** — new. Derives *who is present and what it means* (owner, known guests, unknown faces) from `context.VisionState`, plus `format_for_prompt()`. `security.py` holds enforcement and imports this; derivation and policy stay separate so prompts, commands, and the action guard all read one answer.
+- **Guest guard** — `security.guest_blocks(action)`, checked in `command_engine.execute()` immediately after `is_blocked()`. Restricted set comes from `vision.guest_mode.restricted_actions` (memory, email, calendar, `read_screen`, `set_owner`), extensible by category. The asymmetry note lives above it as a comment.
+- **Profiles** — `faces.set_profile()` writes `greeting` and `persona` per person; `greeting_for()` feeds the perception loop, `persona_for()` feeds the prompt but only when that person is alone in frame (with a second face, whose preference applies is undefined).
+- **Voice surface** — `set_owner`, `set_face_greeting`, `set_face_persona`, `guest_mode_status`.
+
+1. **Ownership had no way to be set.** `enroll()` writes `trusted: false` and nothing flipped it, so the plan as written locks the user out of their own recall the moment they enroll a face. Ownership is now designated deliberately: `set_owner(name)` (exclusive — it demotes any previous owner in the same write) or `vision.face.owner` in config.yaml, which outranks the stored flag because a file only the user edits is a stronger statement of intent and survives a memory wipe. `set_owner` is high risk, requires confirmation, and is itself guest-restricted so a guest cannot promote themselves.
+2. **No owner designated ⇒ only unknown faces count as guests.** Otherwise enrolling a second person's face silently starts withholding the owner's own email. Once an owner exists, enrolled non-owners are guests too.
+3. **Refused is not failed.** `StepResult` gained `withheld: bool`. A guest decline is a deliberate refusal, so the pipeline speaks the decline verbatim instead of "Failed: …", and the tool-trust ledger doesn't score the tool for a policy decision.
+4. **Proactive suggestions go quiet in guest mode.** They narrate the owner's habits out loud, which is exactly the content guest mode withholds — one check in `proactive._can_suggest()`.
+
+Runtime verification (real webcam, two people in frame) is still outstanding; the logic above is covered by 31 stubbed tests in `tests/test_vision.py` (62 across both phases).
 
 ## Phase 3 — Presence-aware automation + gestures
 

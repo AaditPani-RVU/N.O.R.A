@@ -1,4 +1,4 @@
-"""Vision & camera voice commands — Phase 1 of the vision module.
+"""Vision & camera voice commands — Phases 1 and 2 of the vision module.
 
     open_camera()        — start capture + perception loop
     close_camera()       — release the device; off means off
@@ -8,6 +8,18 @@
     forget_face(name)    — delete one person from face memory
     forget_all_faces()   — wipe face memory entirely
     list_known_faces()   — everyone NORA has learned
+
+Phase 2 adds per-person profiles and guest mode:
+
+    set_owner(name)              — designate whose face is the owner's
+    set_face_greeting(name, ...) — what NORA says when they arrive
+    set_face_persona(name, ...)  — how NORA speaks while they're alone in frame
+    guest_mode_status()          — whether private things are being withheld
+
+Guest mode itself is enforced in nora/security.py, in the action path — not
+here. Recognition may only take capability away, never grant it: a face is
+defeated by a printed photograph, so `set_owner` is itself withheld while a
+guest is present, and no command in this file unlocks anything.
 
 Privacy contract enforced here (see NORA-vision-plan.md):
   * enroll() is reachable only through learn_face — deliberate, spoken, named
@@ -258,7 +270,131 @@ def list_known_faces() -> str:
     people = faces.list_people()
     if not people:
         return "I haven't learned anyone's face yet. Say 'learn my face' to start."
-    names = ", ".join(p["name"] for p in people)
+    names = ", ".join(f"{p['name']} (owner)" if p["trusted"] else p["name"] for p in people)
     if len(people) == 1:
         return f"I know one face: {names}."
     return f"I know {len(people)} faces: {names}."
+
+
+# ── Profiles & guest mode (Phase 2) ──────────────────────────────────────────
+
+@register(
+    "set_owner",
+    sig="set_owner(name)",
+    description="Designate whose face is the owner's — everyone else is a guest",
+    risk="high",
+    requires_confirmation=True,
+    category="vision",
+)
+def set_owner(name: str) -> str:
+    if not name or not name.strip():
+        return "Tell me whose face should be the owner's."
+    try:
+        key = faces.set_owner(name)
+    except KeyError:
+        return (
+            f"I haven't learned {name.strip()}'s face yet. "
+            f"Say 'learn {name.strip()}'s face' first."
+        )
+    except ValueError as e:
+        return str(e)
+
+    who = faces.display_name(key)
+    return (
+        f"{who} is the owner now. With anyone else in front of the camera "
+        "I'll keep private things to myself — but I still won't unlock "
+        "anything just because I can see a face."
+    )
+
+
+@register(
+    "set_face_greeting",
+    sig="set_face_greeting(name, greeting)",
+    description="Set what NORA says when a particular person arrives",
+    risk="medium",
+    category="vision",
+)
+def set_face_greeting(name: str, greeting: str = "") -> str:
+    if not name or not name.strip():
+        return "Tell me whose greeting to change."
+    try:
+        profile = faces.set_profile(name, greeting=greeting)
+    except KeyError:
+        return f"I haven't learned {name.strip()}'s face yet."
+
+    if not profile.get("greeting"):
+        return f"Back to the default greeting for {profile['name']}."
+    return f"When I see {profile['name']} I'll say: {profile['greeting']}"
+
+
+@register(
+    "set_face_persona",
+    sig="set_face_persona(name, tone)",
+    description="Set how NORA speaks while a particular person is alone on camera",
+    risk="medium",
+    category="vision",
+)
+def set_face_persona(name: str, tone: str = "", verbosity: str = "", style: str = "") -> str:
+    if not name or not name.strip():
+        return "Tell me whose style to change."
+
+    from nora import persona as persona_module
+
+    requested = {"tone": tone, "verbosity": verbosity, "style": style}
+    hints: dict[str, str] = {}
+    rejected: list[str] = []
+    for dim, value in requested.items():
+        value = (value or "").strip().lower()
+        if not value:
+            continue
+        if value in persona_module.VALID[dim]:
+            hints[dim] = value
+        else:
+            rejected.append(f"{dim} can be {', '.join(persona_module.VALID[dim])}")
+
+    if not hints:
+        if rejected:
+            return "I didn't recognize that style — " + "; ".join(rejected) + "."
+        return "Tell me a tone, verbosity, or style to use."
+
+    try:
+        profile = faces.set_profile(name, persona=hints)
+    except KeyError:
+        return f"I haven't learned {name.strip()}'s face yet."
+
+    described = ", ".join(f"{k} {v}" for k, v in sorted(hints.items()))
+    return f"When {profile['name']} is on camera I'll be {described}."
+
+
+@register(
+    "guest_mode_status",
+    sig="guest_mode_status()",
+    description="Say whether NORA is currently withholding private things for a guest",
+    risk="low",
+    category="vision",
+)
+def guest_mode_status() -> str:
+    from nora import security
+    from nora.vision import presence
+
+    snap = presence.snapshot()
+    owner_key = snap["owner"]
+
+    if not presence.enabled():
+        if not owner_key:
+            return "Guest mode is off, and no owner is set."
+        return f"Guest mode is off. {faces.display_name(owner_key)} is the owner."
+
+    if security.guest_mode_active():
+        who = presence.describe_guests() or "someone who isn't the owner"
+        return f"Guest mode is on — {who} is here, so I'm keeping private things to myself."
+
+    if not owner_key:
+        return (
+            "No owner is set, so I only treat faces I don't recognize as guests. "
+            "Say 'you're the owner' after learning your face to change that."
+        )
+    if snap["owner_present"]:
+        return f"Just {faces.display_name(owner_key)} — nothing is being withheld."
+    return "Guest mode is on standby. I don't see anyone who isn't the owner."
+

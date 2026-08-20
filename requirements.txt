@@ -40,3 +40,13 @@ insightface>=1.0.1
 onnxruntime>=1.17.0
 # Swap onnxruntime for onnxruntime-gpu and set vision.detector_device: "cuda"
 # to run detection/embedding on the GPU.
+
+# ── Spotify / MPRIS (Linux) ────────────────────────────────────────────────
+# Music control talks to the Spotify desktop client over MPRIS D-Bus.
+# No pip package is required: NORA uses python-dbus when it is importable and
+# otherwise shells out to `gdbus`, which ships with glib on every desktop.
+# For the faster in-process path, install the distro package:
+#     Debian/Ubuntu:  sudo apt install python3-dbus
+#     Fedora:         sudo dnf install python3-dbus
+#     Arch:           sudo pacman -S python-dbus
+# Web API search (optional, accuracy only) reuses `requests`, already listed above.

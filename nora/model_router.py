@@ -22,7 +22,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from nora.config import get_config
 
@@ -127,7 +127,14 @@ def _log_attempt(role: str, candidate: dict, outcome: str, latency_ms: float, er
 # Candidate call implementations
 # ---------------------------------------------------------------------------
 
-def _call_openai_compatible(candidate: dict, messages: list[dict], max_tokens: int, temperature: float, timeout_sec: float) -> str:
+def _call_openai_compatible(
+    candidate: dict,
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float,
+    timeout_sec: float,
+    extras_out: dict | None = None,
+) -> str:
     from openai import OpenAI, APIStatusError, APIConnectionError, APITimeoutError
 
     api_key = os.environ.get(candidate.get("api_key_env", ""), "")
@@ -158,10 +165,23 @@ def _call_openai_compatible(candidate: dict, messages: list[dict], max_tokens: i
         raise
     except (APIConnectionError, APITimeoutError):
         raise
-    return resp.choices[0].message.content or ""
+    message = resp.choices[0].message
+    # Provider-specific fields the OpenAI schema has no slot for land in
+    # model_extra — Groq's agentic models return the searches they ran there
+    # (`executed_tools`), which is how web_search gets its source URLs.
+    if extras_out is not None:
+        extras_out.update(getattr(message, "model_extra", None) or {})
+    return message.content or ""
 
 
-def _call_ollama(candidate: dict, messages: list[dict], max_tokens: int, temperature: float, timeout_sec: float) -> str:
+def _call_ollama(
+    candidate: dict,
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float,
+    timeout_sec: float,
+    extras_out: dict | None = None,
+) -> str:
     import requests
 
     base_url = candidate.get("base_url", "http://localhost:11434")
@@ -200,12 +220,25 @@ def complete(
     max_tokens: int = 512,
     temperature: float = 0.2,
     timeout_sec: float | None = None,
+    extras_out: dict | None = None,
+    validate: "Callable[[str], bool] | None" = None,
 ) -> tuple[str, str]:
     """Try each configured candidate for `role` in order; return (text, candidate_name).
 
     Skips candidates still in rate-limit cooldown. Falls through on any
     error (auth, connection, timeout, rate limit) to the next candidate.
     Raises AllCandidatesFailed only if every candidate failed or was skipped.
+
+    `extras_out`, if given, is filled with the winning candidate's
+    non-standard response fields (see _call_openai_compatible).
+
+    `validate`, if given, is called with each candidate's reply and must
+    return True for it to be accepted. A rejected reply is treated exactly
+    like a failed call — the candidate is logged and the chain falls through
+    to the next one. This is how a reply that came back *syntactically* fine
+    but semantically unusable (a model dumping its chain-of-thought into
+    `content`) gets a second chance on a different model instead of being
+    handed to the speaker.
     """
     candidates = _candidates_for(role)
     if not candidates:
@@ -225,13 +258,17 @@ def complete(
 
         start = time.monotonic()
         try:
+            if extras_out is not None:
+                extras_out.clear()
             if candidate.get("provider") == "ollama":
-                text = _call_ollama(candidate, messages, max_tokens, temperature, timeout_sec)
+                text = _call_ollama(candidate, messages, max_tokens, temperature, timeout_sec, extras_out)
             else:
-                text = _call_openai_compatible(candidate, messages, max_tokens, temperature, timeout_sec)
+                text = _call_openai_compatible(candidate, messages, max_tokens, temperature, timeout_sec, extras_out)
             latency_ms = (time.monotonic() - start) * 1000
             if not text.strip():
                 raise RuntimeError("empty response")
+            if validate is not None and not validate(text):
+                raise RuntimeError("reply rejected by validator")
             _clear_cooldown(name)
             _log_attempt(role, candidate, "ok", latency_ms)
             logger.info("model_router: role=%s -> %s (%.0fms)", role, name, latency_ms)

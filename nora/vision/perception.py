@@ -200,7 +200,7 @@ def _maybe_greet(present: list[str], last_seen: dict[str, float]) -> None:
             if away < regreet:
                 continue                      # still the same visit
         _greeted_at[name] = now
-        greeting = f"Hey {faces.display_name(name)}."
+        greeting = faces.greeting_for(name)      # per-person text, Phase 2
         threading.Thread(
             target=_speak, args=(greeting,), daemon=True, name="nora-vision-greet"
         ).start()
