@@ -21,6 +21,7 @@
   <a href="#architecture">Architecture</a> ·
   <a href="#linux-flagship-features">Flagship Features</a> ·
   <a href="#core-features">Core</a> ·
+  <a href="#step-by-step-setup-start-here">Setup</a> ·
   <a href="#installation">Install</a> ·
   <a href="#configuration">Config</a> ·
   <a href="#usage">Usage</a> ·
@@ -354,7 +355,178 @@ write into a refusal.
 
 ## Installation
 
-### System dependencies
+### Step-by-step setup (start here)
+
+If this is your first time with NORA, follow these ten steps in order. Everything below
+this subsection is the condensed reference version of the same thing.
+
+**Before you start, you need:**
+
+| Requirement | Notes |
+|---|---|
+| A Linux desktop | Debian/Ubuntu, Fedora, or Arch. Wayland or X11 both work. |
+| Python 3.10 or newer | `python3 --version` |
+| A working microphone | Anything the OS sees — laptop mic is fine. |
+| A Groq API key | Free at [console.groq.com](https://console.groq.com/keys). Or skip it and use Ollama in step 5. |
+| ~3 GB of disk | Python deps + the Whisper speech model that downloads on first run. |
+
+---
+
+**Step 1 — Install the base system packages**
+
+These cover audio capture, audio playback, and cloning the repo. Nothing NORA-specific yet.
+
+```bash
+# Debian / Ubuntu
+sudo apt update
+sudo apt install -y git python3 python3-pip python3-venv \
+                    libportaudio2 portaudio19-dev ffmpeg
+
+# Fedora
+sudo dnf install -y git python3 python3-pip portaudio-devel ffmpeg
+
+# Arch
+sudo pacman -S --needed git python python-pip portaudio ffmpeg
+```
+
+**Step 2 — Clone the repo**
+
+Note the `-b linux` — that is this branch, the one with the five flagship features.
+
+```bash
+git clone -b linux https://github.com/AaditPani-RVU/N.O.R.A.git
+cd N.O.R.A
+```
+
+**Step 3 — Make a virtual environment**
+
+Skipping this works, but it will scatter ~40 packages into your system Python. Don't skip it.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+You will need to re-run `source .venv/bin/activate` in every new terminal before starting NORA.
+
+**Step 4 — Install the Python dependencies**
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Two runtime imports are not pinned in requirements.txt yet — install them too:
+pip install edge-tts websockets
+```
+
+This is the slow step (a few minutes). `chromadb` and `sentence-transformers` pull in torch,
+so expect the download to be large.
+
+**Step 5 — Give NORA a brain**
+
+Pick *one* of these two. Groq is the default and much faster; Ollama is fully offline.
+
+```bash
+# Option A — Groq (recommended, free tier is plenty)
+echo "GROQ_API_KEY=gsk_your_key_here" > .env
+```
+
+```bash
+# Option B — fully local, no API key
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull phi3:mini
+ollama serve            # leave this running in its own terminal
+# then edit config.yaml → llm.provider: "ollama"
+```
+
+Optional extra keys — add them to `.env` on their own lines if you want the matching feature:
+
+```bash
+NVIDIA_API_KEY=...        # fallback model chain, survives a Groq outage
+BRAVE_API_KEY=...         # web search
+NORA_API_TOKEN=...        # required if you expose the dashboard to your phone (see Remote & Mobile)
+SPOTIFY_CLIENT_ID=...     # only for Spotify *search*; playback control needs no keys
+SPOTIFY_CLIENT_SECRET=...
+```
+
+**Step 6 — (Optional) Install the Linux flagship dependencies**
+
+Skip this on a first run if you only want voice control. NORA degrades gracefully — the
+flagship features simply report unavailable, nothing crashes.
+
+```bash
+sudo apt install -y python3-gi gir1.2-atspi-2.0 at-spi2-core ydotool  # F1 screen control
+sudo apt install -y bpftrace linux-headers-$(uname -r)                # F3 why-engine
+sudo apt install -y btrfs-progs criu                                  # F4 time travel
+sudo apt install -y pipewire pipewire-pulse wireplumber               # F5 adaptive audio
+sudo apt install -y python3-dbus                                      # faster Spotify/MPRIS path
+```
+
+**Step 7 — Run the one-time privileged bootstrap**
+
+```bash
+python nora_linux_setup.py
+```
+
+This asks for `sudo` and does three things: installs a udev rule for `/dev/uinput`, adds you
+to the `input` group, and installs the capability-pinned `bpf_runner` and `snap_runner`
+helpers. NORA's own process stays unprivileged.
+
+> **Log out and back in afterwards.** Group membership does not apply to your current session.
+> This matters even if you skipped step 6: the push-to-talk hotkey reads `/dev/input`, so
+> without the `input` group you would have to run NORA with `sudo -E python main.py`.
+
+**Step 8 — Check your microphone**
+
+```bash
+python test_mic.py
+```
+
+Speak or clap while it cycles through your input devices. It prints which ones actually
+picked up sound. If none do, fix that before going further — everything downstream depends on it.
+
+**Step 9 — Run the full preflight**
+
+```bash
+python -m nora.preflight
+```
+
+This exercises every stage for real — mic, transcription, LLM, guardrails, TTS playback — and
+warms the models so the first command isn't slow. It prints `READY`, `USABLE, with risk`, or
+a failure telling you exactly which stage broke. Add `--no-audio` if you're on a headless box.
+
+**Step 10 — Start her**
+
+```bash
+python main.py
+```
+
+Your browser opens the dashboard at `http://localhost:8766`. Then:
+
+- **Hold `Ctrl` + `` ` ``**, speak a command, release. That's push-to-talk.
+- Or type into the dashboard box if you'd rather not talk.
+- Say `exit` or `shut down nora` to stop cleanly.
+
+Try `"what time is it"` first — it's the shortest path through the whole pipeline. Then move
+on to the command lists under [Usage](#usage).
+
+---
+
+**If something goes wrong**
+
+| Symptom | Fix |
+|---|---|
+| `LLM backend not reachable` at startup | `.env` is missing, the key is wrong, or (Ollama) `ollama serve` isn't running. |
+| `No input audio device found` | Mic isn't visible to PortAudio. Re-run step 1, then `python test_mic.py`. |
+| Hotkey does nothing | You're not in the `input` group yet — finish step 7 and log out/in, or run `sudo -E python main.py`. |
+| `ModuleNotFoundError: edge_tts` / `websockets` | You missed the second `pip install` in step 4. |
+| `ImportError` mentioning `gi` or `Atspi` | Step 6 was skipped. Either install those packages or ignore it — F1 just stays off. |
+| First run hangs for a minute | Whisper and the embedding model are downloading. Only happens once. |
+| Voice sounds like it's reading its own thoughts | Set `reasoning_format: "hidden"` under your chat model in `config.yaml`. |
+
+---
+
+### Quick reference — system dependencies
 
 ```bash
 # AT-SPI2 screen control (F1)

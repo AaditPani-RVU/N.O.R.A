@@ -309,6 +309,70 @@
     .orb-core.s-thinking { background:radial-gradient(circle,#fff 0%,#e9d5ff 45%,rgba(120,0,220,0) 100%); animation:pulse-think  1.2s ease-in-out infinite; }
     .orb-core.s-speaking { background:radial-gradient(circle,#fff 0%,#afffee 45%,rgba(0,200,150,0) 100%); animation:pulse-speak  0.9s ease-in-out infinite; }
 
+    /* ── Orb interaction layer ───────────────────────────────────────────
+       The orb is the largest thing on screen and was, until now, the only
+       thing you could not touch. These sit on top of the existing stack
+       without altering it: a hit target, a cursor-tracked specular glint,
+       a bloom behind the core that scales with NORA's voice, and the
+       affordance label that only appears when you are near it. */
+    .orb-wrap { --voice: 0; }
+
+    .orb-hit {
+      position:absolute; z-index:6; top:50%; left:50%;
+      width:268px; height:268px; margin:-134px 0 0 -134px;
+      border:0; padding:0; border-radius:50%;
+      background:transparent; cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .orb-hit:focus-visible { outline:1px solid rgba(var(--rgb),0.65); outline-offset:8px; }
+
+    .orb-glint {
+      position:absolute; z-index:3; pointer-events:none;
+      top:50%; left:50%; width:238px; height:238px; margin:-119px 0 0 -119px;
+      border-radius:50%; mix-blend-mode:screen; opacity:0;
+      background:radial-gradient(circle at var(--gx,50%) var(--gy,50%),
+                 rgba(var(--lrgb),0.20) 0%, rgba(var(--lrgb),0.06) 30%, transparent 64%);
+      transition:opacity var(--t-mid) var(--ease);
+    }
+    .orb-wrap.hovered .orb-glint { opacity:1; }
+
+    /* Behind the core (z-index 1 vs 2) so it reads as the core's own
+       overspill rather than a second object. */
+    .orb-bloom {
+      position:absolute; z-index:1; pointer-events:none;
+      top:50%; left:50%; width:64px; height:64px; margin:-32px 0 0 -32px;
+      border-radius:50%;
+      background:radial-gradient(circle, rgba(var(--lrgb),0.50) 0%, rgba(var(--rgb),0.20) 42%, transparent 72%);
+      transform:scale(calc(0.55 + var(--voice) * 2.1));
+      opacity:calc(0.12 + var(--voice) * 0.88);
+      will-change:transform,opacity;
+    }
+    .orb-wrap .orb-halo { filter:blur(14px) brightness(calc(1 + var(--voice) * 0.75)); }
+
+    .orb-cta {
+      position:absolute; z-index:5; pointer-events:none;
+      left:50%; bottom:12px; transform:translateX(-50%) translateY(5px);
+      font-family:var(--mono); font-size:7.5px; letter-spacing:3.5px;
+      color:rgba(var(--lrgb),0.85); text-shadow:0 0 12px rgba(var(--rgb),0.7);
+      white-space:nowrap; opacity:0;
+      transition:opacity 180ms var(--ease), transform 180ms var(--ease);
+    }
+    .orb-wrap.hovered .orb-cta { opacity:1; transform:translateX(-50%) translateY(0); }
+
+    /* Click feedback. Written against --orb-scale so the punch composes with
+       the viewport fit instead of snapping the orb back to full size. */
+    @keyframes orb-punch {
+      0%   { transform:scale(calc(var(--orb-scale,1) * 1)); }
+      32%  { transform:scale(calc(var(--orb-scale,1) * 1.045)); }
+      100% { transform:scale(calc(var(--orb-scale,1) * 1)); }
+    }
+    .orb-wrap.punch { animation:orb-punch 430ms var(--ease-out); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .orb-bloom { transform:scale(1); opacity:0.35; }
+      .orb-wrap.punch { animation:none; }
+    }
+
     /* ── NORA label ── */
     .jlabel { text-align: center; }
     .jname { font-family:var(--disp);font-size:31px;font-weight:700;letter-spacing:13px;padding-left:13px;color:var(--c);text-shadow:0 0 28px var(--cg); }
@@ -1473,7 +1537,11 @@
         <div class="ring r5"></div>
         <div class="tri-ring" id="tri-ring"></div>
         <canvas id="orbc" width="340" height="340"></canvas>
+        <div class="orb-bloom" id="orb-bloom"></div>
         <div class="orb-core s-idle" id="orb-core"></div>
+        <div class="orb-glint" id="orb-glint"></div>
+        <div class="orb-cta" id="orb-cta">CLICK TO SPEAK</div>
+        <button class="orb-hit" id="orb-hit" type="button" aria-label="Talk to NORA"></button>
       </div>
 
       <div class="jlabel">
@@ -1631,6 +1699,7 @@
   <div class="set-row"><span>AURORA</span><button class="tgl" data-key="aurora" type="button"><i></i></button></div>
   <div class="set-row"><span>PARTICLES</span><button class="tgl" data-key="particles" type="button"><i></i></button></div>
   <div class="set-row"><span>SPOTLIGHT</span><button class="tgl" data-key="spotlight" type="button"><i></i></button></div>
+  <div class="set-row"><span>ORB DETAIL</span><button class="tgl" data-key="orbdetail" type="button"><i></i></button></div>
   <div class="set-sub">BEHAVIOUR</div>
   <div class="set-row"><span>TYPEWRITER</span><button class="tgl" data-key="typewriter" type="button"><i></i></button></div>
   <div class="set-row"><span>BOOT SEQUENCE</span><button class="tgl" data-key="boot" type="button"><i></i></button></div>
@@ -1659,6 +1728,7 @@ const ACCENTS = {
 const SET_DEFAULTS = {
   accent: 'cyan', grid: true, scanlines: true, aurora: true,
   particles: true, spotlight: true, typewriter: true, boot: true,
+  orbdetail: true,
 };
 const SET = (() => {
   let saved = {};
@@ -1773,6 +1843,353 @@ function spawnArc() {
 const STATE_RGB = { idle:[0,212,255], listening:[0,220,255], thinking:[192,132,252], speaking:[0,255,200] };
 function srgb(alpha) { const [r,g,b] = STATE_RGB[orbState]||STATE_RGB.idle; return `rgba(${r},${g},${b},${alpha})`; }
 
+// ═══════════════════════════════════════════════════
+//  ORB DETAIL LAYERS
+//  Everything below is drawn on the same canvas as the base orb and does
+//  two jobs the base orb did not: give it enough internal structure to
+//  read as a machine rather than a glow, and make it visibly answer to
+//  the two things it should answer to — your cursor, and NORA's voice.
+//  All of it is skippable (settings → ORB DETAIL) and all of it stands
+//  down under prefers-reduced-motion.
+// ═══════════════════════════════════════════════════
+const orbWrapEl  = document.getElementById('orb-wrap');
+const orbHitEl   = document.getElementById('orb-hit');
+const orbGlintEl = document.getElementById('orb-glint');
+const orbCtaEl   = document.getElementById('orb-cta');
+const CALM       = matchMedia('(prefers-reduced-motion: reduce)');
+const detailOn   = () => SET.orbdetail !== false;
+
+let orbPx = 0, orbPy = 0;      // parallax offset, eased toward the pointer
+let orbTx = 0, orbTy = 0;      // its target
+let orbHover = false;
+let pressGlow = 0;             // 0..1, decays after a click or a state change
+
+// ── Voice envelope ────────────────────────────────────────────────────────
+// Two sources, in priority order. If this device is mirroring NORA's audio
+// we measure the real thing off an AnalyserNode. If it isn't — the common
+// case, where she is speaking out of the laptop's own speakers and this tab
+// hears nothing — we synthesise an envelope for the duration of the reply so
+// the orb still moves in sympathy with what she is saying. The synthetic one
+// is never used while real samples are arriving.
+let voiceLvl = 0, voiceRaw = 0, voiceSynthUntil = 0;
+let voiceEl = null, vctx = null, vAnalyser = null, vBuf = null;
+const vRouted = new WeakSet();
+
+// Built inside the audio-unlock gesture, never lazily: routing an element
+// into a *suspended* context would leave it silent, and a mute orb is worth
+// far less than audible speech. If the context is not running when a chunk
+// arrives we simply leave that chunk on the plain <audio> path.
+function primeVoiceAnalyser() {
+  if (vctx) { if (vctx.state !== 'running') vctx.resume().catch(() => {}); return; }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    vctx = new AC();
+    vAnalyser = vctx.createAnalyser();
+    vAnalyser.fftSize = 256;
+    vAnalyser.smoothingTimeConstant = 0.70;
+    vBuf = new Uint8Array(vAnalyser.frequencyBinCount);
+    vAnalyser.connect(vctx.destination);
+    if (vctx.state !== 'running') vctx.resume().catch(() => {});
+  } catch (_) { vctx = null; vAnalyser = null; }
+}
+
+function attachVoiceAnalyser(el) {
+  voiceEl = el;
+  if (!detailOn() || !vctx || !vAnalyser || vctx.state !== 'running') return;
+  // An element can only be routed once, and each chunk is its own element,
+  // so the set is bookkeeping against a double-attach.
+  if (vRouted.has(el)) return;
+  try {
+    vRouted.add(el);
+    vctx.createMediaElementSource(el).connect(vAnalyser);
+  } catch (_) {
+    // Routing refused. Playback is unaffected — the orb just falls back to
+    // the synthetic envelope, which is the usual case on this device anyway.
+  }
+}
+
+function voiceIsLive() {
+  return !!(vAnalyser && voiceEl && !voiceEl.paused && !voiceEl.ended);
+}
+
+function sampleVoice() {
+  if (!voiceIsLive()) { voiceRaw = 0; return; }
+  vAnalyser.getByteFrequencyData(vBuf);
+  let sum = 0;
+  for (let i = 2; i < 48; i++) sum += vBuf[i];   // speech energy lives low
+  voiceRaw = Math.min(1, (sum / 46 / 255) * 2.4);
+}
+
+// ── Ripples ───────────────────────────────────────────────────────────────
+// Expanding for anything NORA emits, contracting (negative vr) for anything
+// you put in — so the orb reads as breathing out and breathing in.
+const RIPPLES = [];
+function spawnRipple(x, y, opts) {
+  if (CALM.matches || !detailOn()) return;
+  if (RIPPLES.length > 14) RIPPLES.shift();
+  RIPPLES.push(Object.assign({ x, y, r: 8, vr: 2.6, w: 1.5, life: 1, fade: 0.018 }, opts || {}));
+}
+
+const ELECTRONS = Array.from({ length: 3 }, (_, i) => ({
+  a: (i / 3) * Math.PI * 2,
+  sp: 0.020 + i * 0.006,
+  rx: 74 + i * 14,
+  ry: 25 + i * 10,
+  tilt: (i / 3) * Math.PI * 0.9,
+  trail: [],
+}));
+
+// ── Per-frame state ───────────────────────────────────────────────────────
+function tickOrbMotion() {
+  const k = CALM.matches ? 1 : 0.085;
+  orbPx += (orbTx - orbPx) * k;
+  orbPy += (orbTy - orbPy) * k;
+  pressGlow *= 0.94;
+
+  sampleVoice();
+  let target;
+  if (voiceIsLive()) {
+    target = voiceRaw;
+  } else if (performance.now() < voiceSynthUntil) {
+    const t = performance.now();
+    target = 0.26 + 0.30 * Math.abs(Math.sin(t * 0.0105))
+                  + 0.17 * Math.abs(Math.sin(t * 0.0271));
+  } else {
+    target = 0;
+  }
+  // Fast attack, slow release — the shape a voice actually has.
+  voiceLvl += (target - voiceLvl) * (target > voiceLvl ? 0.34 : 0.09);
+  if (voiceLvl < 0.002) voiceLvl = 0;
+  orbWrapEl.style.setProperty('--voice', voiceLvl.toFixed(3));
+}
+
+// ── Layer: shaded sphere ──────────────────────────────────────────────────
+// Drawn under everything else. The rings used to float in front of nothing;
+// this gives them a volume to sit on, lit from the upper left.
+function drawSphere() {
+  const [r, g, b] = STATE_RGB[orbState] || STATE_RGB.idle;
+  const gr = oc.createRadialGradient(CX - 36, CY - 40, 6, CX, CY, 124);
+  gr.addColorStop(0,    `rgba(${r},${g},${b},${0.15 + voiceLvl * 0.10})`);
+  gr.addColorStop(0.44, `rgba(${r},${g},${b},0.065)`);
+  gr.addColorStop(0.84, `rgba(${(r * 0.35) | 0},${(g * 0.35) | 0},${b},0.045)`);
+  gr.addColorStop(1,    'rgba(0,0,0,0)');
+  oc.save();
+  oc.beginPath(); oc.arc(CX, CY, 124, 0, Math.PI * 2);
+  oc.fillStyle = gr; oc.fill();
+  oc.strokeStyle = srgb(0.09 + voiceLvl * 0.16 + pressGlow * 0.10);
+  oc.lineWidth = 1.4; oc.stroke();
+  oc.restore();
+}
+
+// ── Layer: rim gauge ──────────────────────────────────────────────────────
+// 84 ticks, every seventh a major. Brightness rides the scan sweep, so the
+// rim reads as being *swept* rather than merely decorated.
+function drawRimGauge(active) {
+  const R = 129, N = 84;
+  const lift = pressGlow * 0.30 + voiceLvl * 0.28 + (orbHover ? 0.14 : 0);
+  oc.save();
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const d = ((a - scanAngle) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const near = d < 0.9 ? 1 - d / 0.9 : 0;
+    const major = i % 7 === 0;
+    const len = (major ? 9 : 4.5) + near * 3.5;
+    oc.strokeStyle = srgb(Math.min(0.95,
+      (major ? 0.28 : 0.14) * (active ? 1.3 : 1) + near * 0.7 + lift));
+    oc.lineWidth = major ? 1.2 : 0.7;
+    oc.beginPath();
+    oc.moveTo(CX + Math.cos(a) * R, CY + Math.sin(a) * R);
+    oc.lineTo(CX + Math.cos(a) * (R + len), CY + Math.sin(a) * (R + len));
+    oc.stroke();
+  }
+  oc.restore();
+}
+
+// ── Layer: iris ───────────────────────────────────────────────────────────
+// Six blades that widen as she wakes up: tight in standby, open while
+// speaking. Gives the orb a shutter, which is what makes it look aimed.
+function drawIris(active) {
+  const open = 0.30 + (active ? 0.26 : 0) + voiceLvl * 0.30 + pressGlow * 0.16;
+  const half = (Math.PI / 6) * Math.max(0.18, 1.30 - open);
+  const spin = scanAngle * -0.35;
+  oc.save(); oc.lineWidth = 2.2; oc.lineCap = 'round';
+  oc.strokeStyle = srgb(0.13 + (active ? 0.11 : 0) + voiceLvl * 0.28);
+  for (let i = 0; i < 6; i++) {
+    const c = (i / 6) * Math.PI * 2 + spin;
+    oc.beginPath(); oc.arc(CX, CY, 97, c - half, c + half); oc.stroke();
+  }
+  oc.restore();
+}
+
+// ── Layer: electrons ──────────────────────────────────────────────────────
+// Three particles on tilted elliptical orbits with fading trails. The far
+// half of each orbit is dimmed, which is the whole trick that sells depth.
+function drawElectrons(active) {
+  if (CALM.matches) return;
+  const boost = 1 + voiceLvl * 0.9;
+  for (const e of ELECTRONS) {
+    e.a += e.sp * (active ? 1.5 : 1) * boost;
+    const ct = Math.cos(e.tilt), st = Math.sin(e.tilt);
+    const ux = Math.cos(e.a) * e.rx, uy = Math.sin(e.a) * e.ry;
+    const x = CX + ux * ct - uy * st, y = CY + ux * st + uy * ct;
+    const front = Math.sin(e.a) > 0;
+
+    e.trail.push([x, y]);
+    if (e.trail.length > 18) e.trail.shift();
+
+    oc.save();
+    oc.lineWidth = 0.9;
+    for (let k = 1; k < e.trail.length; k++) {
+      const f = k / e.trail.length;
+      oc.strokeStyle = srgb(f * (front ? 0.34 : 0.13));
+      oc.beginPath();
+      oc.moveTo(e.trail[k - 1][0], e.trail[k - 1][1]);
+      oc.lineTo(e.trail[k][0], e.trail[k][1]);
+      oc.stroke();
+    }
+    oc.beginPath(); oc.arc(x, y, front ? 2.4 : 1.4, 0, Math.PI * 2);
+    oc.fillStyle = srgb(front ? 0.95 : 0.38); oc.fill();
+    if (front) {
+      oc.beginPath(); oc.arc(x, y, 6 + voiceLvl * 6, 0, Math.PI * 2);
+      oc.strokeStyle = srgb(0.16 + voiceLvl * 0.30); oc.lineWidth = 0.7; oc.stroke();
+    }
+    oc.restore();
+  }
+}
+
+// ── Layer: filaments ──────────────────────────────────────────────────────
+// Radial spikes off the core whose length is the voice envelope. This is the
+// layer that makes "she is talking" legible from across the room.
+function drawFilaments(ts) {
+  if (voiceLvl < 0.02 || CALM.matches) return;
+  const N = 30;
+  oc.save(); oc.lineWidth = 0.9;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2 + ts * 0.0004;
+    const n = 0.45 + 0.55 * Math.abs(Math.sin(i * 2.399 + ts * 0.004));
+    const len = 12 + voiceLvl * 48 * n;
+    oc.strokeStyle = srgb(0.08 + voiceLvl * 0.55 * n);
+    oc.beginPath();
+    oc.moveTo(CX + Math.cos(a) * 21, CY + Math.sin(a) * 21);
+    oc.lineTo(CX + Math.cos(a) * (21 + len), CY + Math.sin(a) * (21 + len));
+    oc.stroke();
+  }
+  oc.restore();
+}
+
+// ── Layer: ripples ────────────────────────────────────────────────────────
+function drawRipples() {
+  for (let i = RIPPLES.length - 1; i >= 0; i--) {
+    const p = RIPPLES[i];
+    p.r = Math.max(0, p.r + p.vr);
+    p.vr *= 0.986;
+    p.life -= p.fade;
+    if (p.life <= 0 || p.r <= 0) { RIPPLES.splice(i, 1); continue; }
+    const [r, g, b] = STATE_RGB[orbState] || STATE_RGB.idle;
+    oc.save();
+    oc.strokeStyle = `rgba(${r},${g},${b},${(p.life * 0.5).toFixed(3)})`;
+    oc.lineWidth = Math.max(0.3, p.w * p.life);
+    oc.beginPath(); oc.arc(p.x, p.y, p.r, 0, Math.PI * 2); oc.stroke();
+    oc.restore();
+  }
+}
+
+function drawOrbDetail(ts, active) {
+  drawRimGauge(active);
+  drawIris(active);
+  drawElectrons(active);
+  drawFilaments(ts);
+}
+
+// ── Reactions ─────────────────────────────────────────────────────────────
+// Called from the existing state machine and turn handlers so the orb
+// acknowledges every event, not just the ones that change its colour.
+// The affordance has to say what a click will *do*, which is not the same
+// thing in every state — mid-reply the orb is a stop button.
+function refreshOrbCta() {
+  const held = document.getElementById('ptt').classList.contains('held');
+  orbCtaEl.textContent = held            ? 'CLICK TO SEND'
+                       : orbState === 'speaking' ? 'CLICK TO INTERRUPT'
+                       : 'CLICK TO SPEAK';
+}
+
+function onOrbStateChanged(s) {
+  refreshOrbCta();
+  spawnRipple(CX, CY, {
+    r: 12,
+    vr: s === 'speaking' ? 5.2 : s === 'idle' ? 2.6 : 3.8,
+    w:  s === 'idle' ? 1.0 : 1.9,
+  });
+  if (s !== 'speaking') voiceSynthUntil = 0;
+  if (s === 'thinking') pressGlow = Math.max(pressGlow, 0.55);
+}
+
+// NORA's reply reaches the orb before it reaches the transcript: one ring per
+// clause, so a long answer visibly rolls out of the core and a curt one is a
+// single blip. The word count also sets how long the synthetic voice envelope
+// runs, which is the closest we can get to her real speech duration without
+// hearing it on this device.
+function orbReactToReply(text) {
+  const s = String(text || '');
+  const clauses = Math.min(6, Math.max(1, s.split(/[.!?,;:]+/).filter(x => x.trim()).length));
+  for (let i = 0; i < clauses; i++) {
+    setTimeout(() => spawnRipple(CX, CY, { r: 8, vr: 2.3 + i * 0.4, w: 1.5 }), i * 110);
+  }
+  const words = s.split(/\s+/).filter(Boolean).length;
+  voiceSynthUntil = performance.now() + Math.min(40, Math.max(1.2, words / 2.6)) * 1000;
+}
+
+// Your turn contracts instead of expanding — the orb takes it in.
+function orbReactToUser() {
+  spawnRipple(CX, CY, { r: 152, vr: -4.0, w: 1.7, fade: 0.020 });
+  pressGlow = Math.max(pressGlow, 0.4);
+}
+
+// ── Pointer + click ───────────────────────────────────────────────────────
+orbHitEl.addEventListener('pointermove', e => {
+  const r = orbHitEl.getBoundingClientRect();
+  if (!r.width) return;
+  const nx = (e.clientX - r.left) / r.width  - 0.5;
+  const ny = (e.clientY - r.top)  / r.height - 0.5;
+  orbTx = nx * 15; orbTy = ny * 13;
+  orbGlintEl.style.setProperty('--gx', (50 + nx * 80).toFixed(1) + '%');
+  orbGlintEl.style.setProperty('--gy', (50 + ny * 80).toFixed(1) + '%');
+}, { passive: true });
+
+orbHitEl.addEventListener('pointerenter', () => {
+  orbHover = true; orbWrapEl.classList.add('hovered');
+});
+orbHitEl.addEventListener('pointerleave', () => {
+  orbHover = false; orbWrapEl.classList.remove('hovered');
+  orbTx = orbTy = 0;
+});
+
+// The orb is now the same gesture as the CLICK TO SPEAK button. It is the
+// most obvious target on the page, so it should be the one you can hit —
+// and the shockwave starts where you actually clicked, not at the centre.
+orbHitEl.addEventListener('click', e => {
+  const r = orbHitEl.getBoundingClientRect();
+  const x = CX + ((e.clientX - r.left) / r.width  - 0.5) * 268;
+  const y = CY + ((e.clientY - r.top)  / r.height - 0.5) * 268;
+  pressGlow = 1;
+  spawnRipple(x,  y,  { r: 4,  vr: 3.4, w: 2.1 });
+  spawnRipple(CX, CY, { r: 10, vr: 4.6, w: 1.2 });
+  orbWrapEl.classList.remove('punch');
+  void orbWrapEl.offsetWidth;              // restart the animation
+  orbWrapEl.classList.add('punch');
+  // Mid-reply the orb cuts her off; otherwise it is the talk button.
+  if (orbState === 'speaking' && !pttActive) interrupt();
+  else pttSet(!pttActive);
+  refreshOrbCta();
+});
+orbWrapEl.addEventListener('animationend', ev => {
+  if (ev.animationName === 'orb-punch') orbWrapEl.classList.remove('punch');
+});
+// SPACE is the global talk key and already preventDefault()s, so a focused
+// orb never double-fires; Enter still activates it as a button should.
+orbHitEl.addEventListener('keydown', e => { if (e.key === ' ') e.preventDefault(); });
+
 let lastFrameT = 0;
 function drawOrb(ts) {
   requestAnimationFrame(drawOrb);
@@ -1784,6 +2201,17 @@ function drawOrb(ts) {
   const listening = orbState === 'listening';
   const thinking  = orbState === 'thinking';
   const active    = orbState !== 'idle';
+
+  // Three parallax planes: the sphere barely moves, the base orb moves a
+  // little, the detail layers move most. Ripples stay in screen space.
+  tickOrbMotion();
+  const detail = detailOn();
+  if (detail) {
+    oc.save(); oc.translate(orbPx * 0.18, orbPy * 0.18);
+    drawSphere();
+    oc.restore();
+  }
+  oc.save(); oc.translate(orbPx * 0.35, orbPy * 0.35);
 
   oc.globalAlpha = speaking ? 0.10 : thinking ? 0.075 : listening ? 0.07 : 0.055;
   oc.drawImage(hexOff, 0, 0); oc.globalAlpha = 1;
@@ -1873,6 +2301,15 @@ function drawOrb(ts) {
     }
     oc.closePath(); oc.stroke(); oc.restore();
   }
+
+  oc.restore();                                   // base plane
+
+  if (detail) {
+    oc.save(); oc.translate(orbPx, orbPy);
+    drawOrbDetail(ts, active);
+    oc.restore();
+  }
+  drawRipples();
 }
 requestAnimationFrame(drawOrb);
 
@@ -1896,6 +2333,7 @@ function setOrbState(s) {
   jstatus.textContent = txt; jstatus.className = cls;
   refreshTriDots();
   document.querySelectorAll('.widget').forEach(w => w.classList.toggle('active-glow', s !== 'idle'));
+  onOrbStateChanged(s);
 }
 
 // Inline-styled because they need a literal colour, not a CSS var — so they
@@ -2126,6 +2564,7 @@ function onUserTurn(text, seq) {
   if (seq != null) { if (seq === lastUserSeq) return; lastUserSeq = seq; }
   if (!text) return;
   pendingSince = performance.now();
+  orbReactToUser();
   addTurn('you', text);
   addActivity(text, null);
   document.getElementById('cmd-cnt').textContent = ++cmdCount;
@@ -2145,6 +2584,7 @@ function onNoraTurn(text) {
       renderLatency();
     }
   }
+  orbReactToReply(text);
   addTurn('nora', text, lat);
 }
 
@@ -2254,6 +2694,9 @@ function playNextChunk() {
   if (!audioReady || !audioQueue.length) { audioEl = null; return; }
   const chunk = audioQueue.shift();
   audioEl = new Audio(`data:${chunk.mime};base64,${chunk.data}`);
+  // Route it through the orb's analyser so the centre reacts to the actual
+  // waveform of what she is saying, not an approximation of it.
+  attachVoiceAnalyser(audioEl);
   audioEl.onended = () => { audioEl = null; playNextChunk(); };
   audioEl.onerror = () => {
     // Decode failure — almost always a wrong MIME on the server side. Say so
@@ -2302,6 +2745,7 @@ audioBtn.addEventListener('click', () => {
   // One silent play inside a real user gesture is what unlocks the rest.
   const silent = new Audio('data:audio/mpeg;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCA');
   silent.play().catch(() => {});
+  primeVoiceAnalyser();          // same gesture arms the orb's voice analyser
   audioReady = true;
   audioBtn.classList.add('live');
   audioBtn.textContent = 'AUDIO ON';
