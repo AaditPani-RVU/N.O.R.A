@@ -3,10 +3,11 @@
 # NORA
 ### *Never Off, Rarely Asked*
 
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Powered by NeuroSym](https://img.shields.io/badge/guardrails-neurosym--ai-blueviolet?style=flat-square)](https://github.com/AaditPani-RVU/NeuroSym-AI)
 [![Platform](https://img.shields.io/badge/platform-Linux-orange?style=flat-square&logo=linux&logoColor=white)]()
+[![Tests](https://img.shields.io/badge/tests-228%20passing-brightgreen?style=flat-square)]()
 [![Status](https://img.shields.io/badge/status-active-brightgreen?style=flat-square)]()
 
 **A local, voice-controlled AI assistant with neuro-symbolic guardrails —**  
@@ -14,6 +15,19 @@
 
 > This is the **Linux flagship branch**. It adds five kernel-native features on top of the core assistant:  
 > AT-SPI2 screen control · D-Bus universal remote · eBPF causal observer · time-travel filesystem · adaptive PipeWire audio.
+
+<sub>
+  <a href="#what-is-nora">What is NORA</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#linux-flagship-features">Flagship Features</a> ·
+  <a href="#core-features">Core</a> ·
+  <a href="#installation">Install</a> ·
+  <a href="#configuration">Config</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#remote--mobile">Remote &amp; Mobile</a> ·
+  <a href="#extending-nora">Extend</a> ·
+  <a href="#tech-stack">Stack</a>
+</sub>
 
 </div>
 
@@ -69,7 +83,11 @@ On Linux she goes further. By exploiting the accessibility bus, D-Bus IPC, eBPF 
   │  ACTION ENGINE  +  TTS RESPONSE                                  │
   │  Core commands · plugins · Linux flagship modules (F1–F5)        │
   │  AT-SPI2 · D-Bus · eBPF · btrfs/CRIU · PipeWire · Wayland IPC   │
-  └──────────────────────────────────────────────────────────────────┘
+  └────────┬─────────────────────────────────┬───────────────────────┘
+           │                                 │
+           ▼                                 ▼
+   local speakers (pygame)          WebSocket audio relay
+                                    phone on the tailnet
 ```
 
 ---
@@ -195,6 +213,26 @@ PipeWire graph mutation lets NORA do something no proprietary OS exposes as a co
 - Local Whisper transcription — nothing sent to a speech API
 - Text input fallback for silent environments
 - Remote mic support (`nora_remote.py`) — use your phone as a microphone
+- **Remote audio out** — replies mirror to any browser on your tailnet, so NORA can talk on your phone while executing on the laptop ([details](#remote--mobile))
+
+### Written Output — `claude_logs/`
+
+Every document NORA produces — a change log, a summary, a note — lands in **`claude_logs/`**
+inside the project root, named `YYYY-MM-DD_slug.md`. One directory, always the same place.
+
+```
+"Write a log for the vision guest-mode change"
+  → claude_logs/2026-08-20_vision-guest-mode.md
+"What logs do you have?"
+  → recent_logs — reads the directory, no guessing
+```
+
+NORA owns persistence, not the model. When a request needs a document, Claude runs with
+**no file-writing tools at all** and returns the content; `nora/claude_logs.py` writes it.
+That inversion is deliberate — a one-shot `claude -p` has nobody to approve a write, so
+left to itself it would narrate a save it could never perform, and NORA would speak the
+phantom path as fact. Relative destinations (`logs/x.md`, a bare `notes.md`) are resolved
+to the same folder rather than to whatever directory NORA was launched from.
 
 ### Built-in Commands
 | Category | Actions |
@@ -238,6 +276,13 @@ action_guard = Guard(rules=[
 - **Action guard** — blocks runaway plans, enforces confirmation on destructive ops, prevents sandbox escapes
 - **Full audit trace** — every blocked command logged with rule ID, severity, and offending text
 - **0.48ms average overhead** — invisible in a voice pipeline
+
+**Confirm ≠ block.** The two outcomes are distinct and gated separately. A plan that merely
+*needs consent* — `create_file`, `move_file`, anything in `DESTRUCTIVE_ACTIONS` — is routed to
+a spoken *"create file. Confirm?"*, while only a hard-deny (`deny_above: critical`, e.g. a path
+outside the sandbox) refuses outright. The distinction lives in `hard_denied`, not in
+neurosym's `ok`, which is simply "zero violations" — conflating them turns every ordinary file
+write into a refusal.
 
 ---
 
@@ -295,7 +340,7 @@ python main.py
 ```yaml
 llm:
   provider: "groq"              # groq | claude | ollama
-  model: "llama-3.1-8b-instant"
+  model: "openai/gpt-oss-120b"
 
 transcriber:
   device: "cuda"                # cuda | cpu
@@ -303,6 +348,11 @@ transcriber:
 
 speaker:
   voice: "en-GB-SoniaNeural"
+
+websocket_api:
+  enabled: true
+  port: 8765
+  relay_audio: true             # mirror spoken replies to phones on the tailnet
 
 neurosym:
   enabled: true
@@ -366,6 +416,64 @@ Hold [Ctrl+`] → speak → release
 | `what did I do today` | Episodic memory recall |
 | `show my patterns` | Display learned workflow habits |
 | `discover dbus for <app>` | Introspect a D-Bus service on demand |
+| `what logs do you have` | List recent documents in `claude_logs/` |
+
+---
+
+## Remote & Mobile
+
+Drive NORA from your phone from anywhere: **commands execute on the laptop, the voice comes
+out of your phone.** The laptop keeps speaking through its own speakers too — the relay is a
+mirror, not a handoff, so nothing changes about local behaviour.
+
+```
+   ┌─── phone (anywhere) ─────────┐          ┌─── laptop (tailnet) ───────────┐
+   │  dashboard in the browser    │          │  listener → intent → action    │
+   │    ├─ typed / PTT command  ──┼── wss ──▶│                                │
+   │    └─ <audio> playback     ◀─┼── wss ───┼── edge-tts MP3 chunks          │
+   │       "TAP FOR AUDIO" once   │          │  …and pygame, locally, as ever │
+   └──────────────────────────────┘          └────────────────────────────────┘
+                        WireGuard via Tailscale — no port forwarding
+```
+
+### 1. Put both devices on a tailnet
+
+```bash
+tailscale up                                    # laptop and phone
+tailscale serve --bg 8766                       # dashboard, HTTPS
+tailscale serve --bg --set-path=/ws 8765        # WebSocket, same origin
+```
+
+`tailscale serve` is doing more than convenience here: it fronts NORA with a real cert on
+`<laptop>.<tailnet>.ts.net`. Browsers refuse microphone access outside a secure context, so
+plain `http://100.x.x.x:8766` will silently deny the mic on your phone.
+
+### 2. Open the dashboard
+
+`https://<laptop>.<tailnet>.ts.net` — append `?token=…` if `NORA_API_TOKEN` is set in `.env`
+(it is remembered in `localStorage` afterwards). The socket scheme follows the page, so
+`wss://` is automatic over TLS.
+
+### 3. Tap **TAP FOR AUDIO** once
+
+Android blocks programmatic playback until the page has seen a real user gesture. One tap
+per session unlocks it; the button then hides itself. If playback is ever refused later it
+reappears rather than failing silently.
+
+Replies arrive as MP3 chunks, one sentence at a time, queued in order — so remote playback
+tracks local playback instead of waiting for the whole reply to synthesise. Saying *"stop"*
+clears the queue on both ends.
+
+| Setting | Where | Meaning |
+|---|---|---|
+| `websocket_api.enabled` | `config.yaml` | Master switch for the socket API |
+| `websocket_api.relay_audio` | `config.yaml` | Mirror spoken audio to clients (default `true`) |
+| `NORA_API_TOKEN` | `.env` | Require token auth on the socket |
+| `NORA_HOST` | `.env` | Target for `nora_remote.py` — set to the tailnet name |
+
+> **Note** — the relay is strictly a side channel. If no client is connected NORA skips the
+> encoding entirely, and every failure path inside `nora/audio_relay.py` is swallowed: a
+> browser that is absent, slow, or throwing can never stall the machine actually speaking.
 
 ---
 
@@ -411,7 +519,8 @@ transports are handled for you (zero dependencies, `mcpforge/`). Add it under
 | 5 — Linux F3: eBPF Why Engine | ✅ Done | bpftrace scripts, anomaly drill-down |
 | 5 — Linux F4: Time-travel + CRIU | ✅ Done | btrfs/zfs/rsync snapshots, process checkpoint |
 | 5 — Linux F5: PipeWire + Wayland | ✅ Done | Audio graph mutation, compositor tiling |
-| 6 — Autonomous Planning | 🔜 Planned | Multi-step goal decomposition, long-horizon tasks |
+| 6 — Remote & Mobile | ✅ Done | Tailscale reach, WebSocket audio relay, phone playback |
+| 7 — Autonomous Planning | 🔜 Planned | Multi-step goal decomposition, long-horizon tasks |
 
 ---
 
@@ -420,10 +529,12 @@ transports are handled for you (zero dependencies, `mcpforge/`). Add it under
 | Layer | Technology |
 |---|---|
 | Speech-to-Text | [faster-whisper](https://github.com/guillaumekynast/faster-whisper) `distil-small.en` |
-| LLM | Groq `llama-3.1-8b-instant` / Claude / Ollama |
+| LLM | Groq `openai/gpt-oss-120b` / Claude / Ollama |
+| Web research | Groq `groq/compound-mini` (live search) → Brave / DuckDuckGo snippets |
 | Guardrails | [NeuroSym-AI](https://github.com/AaditPani-RVU/NeuroSym-AI) `v0.2.0` |
 | Memory | [ChromaDB](https://www.trychroma.com/) + `sentence-transformers` |
-| TTS | [edge-tts](https://github.com/rany2/edge-tts) `en-GB-SoniaNeural` |
+| TTS | [edge-tts](https://github.com/rany2/edge-tts) `en-GB-SoniaNeural` + `pygame.mixer` |
+| Remote transport | [Tailscale](https://tailscale.com/) (WireGuard) + `websockets` · base64 MP3 relay |
 | Screen control | `gi.repository.Atspi` (AT-SPI2) + `ydotool` + Qwen2-VL-2B (VLM fallback) |
 | App automation | `dbus-next` (asyncio D-Bus) |
 | Kernel observability | `bpftrace` (eBPF, BTF-aware) |

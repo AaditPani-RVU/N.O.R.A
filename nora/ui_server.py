@@ -143,6 +143,13 @@ def ws_push(msg: dict) -> None:
         pass
 
 
+def has_ws_clients() -> bool:
+    """True when at least one client is connected. Lets callers skip expensive
+    payload work (base64-encoding TTS audio) when nobody is on the other end."""
+    with _ws_lock:
+        return bool(_ws_clients)
+
+
 def ws_notify(message: str) -> None:
     """Push a proactive notification string to all connected WebSocket clients."""
     ws_push({"type": "notification", "message": message})

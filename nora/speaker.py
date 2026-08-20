@@ -12,6 +12,7 @@ from pathlib import Path
 import edge_tts
 import pygame
 
+from nora import audio_relay
 from nora.config import get_config
 
 logger = logging.getLogger("nora.speaker")
@@ -107,27 +108,50 @@ def speak(text: str, mood: str | None = None) -> None:
     except Exception:
         pass
     logger.info(f"Speaking [{mood or 'info'}]: {text}")
-    # Everything NORA says goes into the transcript. Follow-ups reference
-    # action summaries ("did that work?") as often as chat replies, so this is
-    # captured centrally rather than at each call site.
-    try:
-        from nora import dialogue
-        dialogue.record_nora(text, kind=mood or "info")
-    except Exception:
-        pass
     _stop_requested = False
     _ui_notify(speaking=True, text=text)
-    t = threading.Thread(target=_speak_streaming, args=(text, mood), daemon=True)
+
+    # Collects the sentences that actually reached the speakers. Barge-in can
+    # cut playback off part-way through, and recording the full reply as
+    # though it had been delivered left NORA referring back to things the user
+    # never heard ("as I said...").
+    spoken: list[str] = []
+    t = threading.Thread(target=_speak_streaming, args=(text, mood, spoken), daemon=True)
     t.start()
     t.join()
     _ui_notify(speaking=False)
 
+    # Everything NORA says goes into the transcript. Follow-ups reference
+    # action summaries ("did that work?") as often as chat replies, so this is
+    # captured centrally rather than at each call site.
+    said = " ".join(spoken).strip()
+    if not said and not _stop_requested:
+        # Playback never reported a sentence (fallback path, or a TTS error)
+        # but nothing interrupted us either — keep the turn rather than lose it.
+        said = text
+    if said:
+        try:
+            from nora import dialogue
+            dialogue.record_nora(said, kind=mood or "info")
+        except Exception:
+            pass
 
-def _gen_chunk(sentence: str, voice: str, rate: str, path: str) -> None:
-    """Generate one sentence's audio file. Designed to run in a thread pool."""
+
+def _gen_chunk(sentence: str, voice: str, rate: str, path: str,
+               local_failed: threading.Event | None = None) -> None:
+    """Generate one sentence's audio file. Designed to run in a thread pool.
+
+    `local_failed` keeps one utterance in one voice. Kokoro and edge-tts are
+    different voices (bf_emma vs Sonia), so a per-sentence fallback is audible
+    as the voice changing mid-answer. Once the local backend declines any
+    sentence, the rest of that utterance stays on edge-tts.
+    """
     from nora import tts_local
-    if tts_local.synth_if_enabled(sentence, rate, path):
-        return  # local Kokoro backend produced the chunk (STACK.md)
+    if local_failed is None or not local_failed.is_set():
+        if tts_local.synth_if_enabled(sentence, rate, path):
+            return  # local Kokoro backend produced the chunk (STACK.md)
+        if local_failed is not None and tts_local.enabled():
+            local_failed.set()
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(_generate_audio(sentence, voice, rate, path))
@@ -135,7 +159,8 @@ def _gen_chunk(sentence: str, voice: str, rate: str, path: str) -> None:
         loop.close()
 
 
-def _speak_streaming(text: str, mood: str | None = None) -> None:
+def _speak_streaming(text: str, mood: str | None = None,
+                     spoken: list[str] | None = None) -> None:
     """Pipeline TTS: generate sentence N+1 while sentence N is playing.
 
     For short single-sentence text this behaves identically to the old path.
@@ -202,11 +227,13 @@ def _speak_streaming(text: str, mood: str | None = None) -> None:
         threading.Thread(target=_barge_in_monitor, daemon=True, name="nora-barge-in").start()
 
     ready: queue.Queue[tuple[int, str | None]] = queue.Queue()
+    # Set if the local backend declines any sentence — see _gen_chunk.
+    local_failed = threading.Event()
 
     def gen(idx: int) -> None:
         path = str(tmp_dir / f"nora_tts_{idx}.mp3")
         try:
-            _gen_chunk(sentences[idx], voice, rate, path)
+            _gen_chunk(sentences[idx], voice, rate, path, local_failed)
             ready.put((idx, path))
         except Exception as e:
             logger.warning("TTS generation failed for chunk %d: %s", idx, e)
@@ -242,10 +269,16 @@ def _speak_streaming(text: str, mood: str | None = None) -> None:
 
             try:
                 sound = pygame.mixer.Sound(path)
+                # Mirror to the dashboard before local playback starts, so a
+                # phone on the tailnet hears the sentence at roughly the same
+                # moment. Failures inside the relay are swallowed there.
+                audio_relay.push_chunk(path, sentences[i])
                 with _lock:
                     channel = _tts_channel or pygame.mixer.find_channel(True)
                     channel.stop()
                     channel.play(sound)
+                if spoken is not None:
+                    spoken.append(sentences[i])
 
                 # Kick off the next sentence generation while this one plays
                 if submitted < n:
@@ -262,6 +295,8 @@ def _speak_streaming(text: str, mood: str | None = None) -> None:
             except Exception as e:
                 logger.warning("TTS playback failed for chunk %d: %s", i, e)
                 _speak_fallback(sentences[i])
+                if spoken is not None and (not spoken or spoken[-1] != sentences[i]):
+                    spoken.append(sentences[i])
 
     finally:
         executor.shutdown(wait=False)
@@ -289,6 +324,9 @@ def stop() -> None:
     """Stop TTS playback only — does not affect background music."""
     global _stop_requested
     _stop_requested = True
+    # Remote listeners have their own queue; without this a barge-in would cut
+    # the laptop off mid-sentence while the phone kept talking.
+    audio_relay.push_stop()
     with _lock:
         try:
             if _initialized and _tts_channel:
