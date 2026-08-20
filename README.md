@@ -30,6 +30,12 @@
   <a href="#tech-stack">Stack</a>
 </sub>
 
+<br>
+
+<img src="docs/assets/dashboard.png" alt="NORA dashboard — idle state, orb centered, transcript panel awaiting input, live system/weather/Spotify panels around the edges" width="880">
+
+<sub>The dashboard at idle — one static HTML file, no build step, retints from a single accent token.</sub>
+
 </div>
 
 ---
@@ -232,7 +238,7 @@ no framework, no CDN. It opens on the laptop and on any phone on the tailnet.
 Idle is a designed state, not a blank box: the transcript sits behind a corner reticle and
 a slow equaliser so a waiting assistant never reads as a crashed one. Everything is
 theme-driven off one `--rgb` accent token, so the swatch picker retints the whole HUD —
-orb, bars, borders and glow — in one step.
+orb, bars, borders and glow — in one step. (Screenshot [above](#nora).)
 
 ### Written Output — `claude_logs/`
 
