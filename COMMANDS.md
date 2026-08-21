@@ -94,6 +94,35 @@ _Annotated with status: ✅ exists | 🔨 in roadmap | 🆕 new from DELIVERABLE
 
 ---
 
+## Orb Takeovers (dashboard visuals)
+
+The dashboard's orb is a display surface, not a status light: on these commands
+it morphs into an instrument, holds, then shrinks back — the same pattern the
+globe uses for `show me <place>`. Everything is tappable, and the takeovers are
+built for a phone as well as a desktop.
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| `show processes` / `what's running` / `what's eating my CPU` | Orb becomes a live process constellation — tap a body to inspect it, terminate or force-kill from the card | 🆕 |
+| `show your memory` / `what do you remember` | Orb becomes a constellation of her memory: one star per memory, placed by meaning, so related memories sit together | 🆕 |
+| `show me what you know about <topic>` | Same constellation with the closest-matching stars lit up | 🆕 |
+| `close that` / `hide that` | Dismiss whatever the orb is showing | 🆕 |
+
+Also on the dashboard, with no command needed:
+
+- **Album art** — while a track is on the deck, the orb wears the cover,
+  sphere-mapped and slowly turning (fast while playing, a creep while paused).
+  The halo retints to the sleeve's own dominant colour.
+
+Interaction: drag to spin a constellation, tap a node for its card, tap the
+dimmed area or press `Esc` to dismiss. Under 560px wide the detail card becomes
+a bottom sheet with thumb-sized buttons and the field lifts to make room.
+
+**Endpoints** (same-origin, no external host except the album-art CDN):
+`GET /processes`, `GET /memory_graph`, `POST /proc_kill`, `GET /takeovers.js`.
+
+---
+
 ## Monitoring & Anomaly Watchdog
 
 | Voice Command | Action | Status |

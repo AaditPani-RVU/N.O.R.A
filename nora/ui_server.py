@@ -5,9 +5,14 @@ from __future__ import annotations
 HTTP endpoints
 --------------
 GET  /           → index.html
+GET  /geo.js     → globe coastline/border geometry for the location takeover
 GET  /state      → {speaking, text, status, ptt_mode, user_text, user_seq, reply_seq}
 GET  /metrics    → system vitals
 GET  /music      → {track, artist, source, status}
+GET  /processes  → live process table for the process constellation
+GET  /memory_graph → memory embeddings projected to a sphere
+GET  /takeovers.js → album-art skin + constellation renderers
+POST /proc_kill  → terminate a pid picked out of the constellation
 POST /ptt        → push-to-talk button control
 POST /music_ctl  → dispatch playback controls from the UI (play/pause/next/prev/volume)
 
@@ -68,6 +73,8 @@ _state: dict = {
     "user_text": "",
     "user_seq": 0,
     "reply_seq": 0,
+    "location": None,
+    "location_seq": 0,
 }
 _lock = threading.Lock()
 
@@ -126,6 +133,36 @@ def notify_user(text: str) -> None:
         _state["user_text"] = text
         seq = _state["user_seq"] = int(_state.get("user_seq", 0)) + 1
     ws_push({"type": "user", "text": text, "seq": seq})
+
+
+def notify_location(name: str, country: str, lat: float, lon: float) -> None:
+    """Push a geocoded place for the dashboard's orb-to-globe morph.
+
+    Rides the same _state snapshot as notify()/the /state poll (rather than
+    a bespoke WS-only message type) so it reaches the dashboard whether the
+    client has a live WebSocket or has fallen back to HTTP polling — both
+    read applyState()/_serve_state() off the same dict.
+    """
+    with _lock:
+        _state["location"] = {"name": name, "country": country, "lat": lat, "lon": lon}
+        _state["location_seq"] = int(_state.get("location_seq", 0)) + 1
+        snapshot = {**_state, "ptt_mode": "on" if context.get_ptt_enabled() else "off"}
+    ws_push({"type": "state", "data": snapshot})
+
+
+def notify_takeover(kind: str, **extra: Any) -> None:
+    """Ask the dashboard to morph the orb into one of the takeovers.
+
+    *kind* is "processes", "memory", or "off" to dismiss whatever is up.
+    Rides the shared _state snapshot with its own monotonic seq for exactly
+    the reason notify_location() does: it then reaches the page over a live
+    WebSocket and over the HTTP polling fallback without a second code path.
+    """
+    with _lock:
+        _state["takeover"] = {"kind": kind, **extra}
+        _state["takeover_seq"] = int(_state.get("takeover_seq", 0)) + 1
+        snapshot = {**_state, "ptt_mode": "on" if context.get_ptt_enabled() else "off"}
+    ws_push({"type": "state", "data": snapshot})
 
 
 def notify_ptt_mode(enabled: bool) -> None:
@@ -402,8 +439,23 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_history()
         elif route == "/analytics":
             self._serve_analytics()
+        elif route == "/processes":
+            self._serve_processes()
+        elif route == "/memory_graph":
+            self._serve_memory_graph()
         elif route in ("/", "/index.html"):
             self._serve_file(_STATIC_DIR / "index.html", "text/html; charset=utf-8")
+        elif route == "/takeovers.js":
+            # Album-art skin plus the process and memory constellations.
+            # Split out of index.html for the same reason geo.js is: that
+            # file is long enough already. Still same-origin.
+            self._serve_file(_STATIC_DIR / "takeovers.js",
+                             "application/javascript; charset=utf-8")
+        elif route == "/geo.js":
+            # Globe coastline/border geometry. Split out of index.html only
+            # for that file's sake -- still same-origin, so the dashboard
+            # keeps working with no external host reachable.
+            self._serve_file(_STATIC_DIR / "geo.js", "application/javascript; charset=utf-8")
         else:
             self.send_response(404)
             self.end_headers()
@@ -446,6 +498,16 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 logger.exception("ui: /interrupt failed")
             self._json_ok(b"{}")
+        elif route == "/proc_kill":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception:
+                body = {}
+            from nora import visuals
+            result = visuals.kill_process(body.get("pid", 0), bool(body.get("force")))
+            logger.info("ui: /proc_kill %s -> %s", body.get("pid"), result)
+            self._json_ok(json.dumps(result).encode())
         elif route == "/type_command":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -559,6 +621,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_processes(self) -> None:
+        """Live process table for the process-constellation takeover."""
+        from nora import visuals
+        self._json_ok(json.dumps(visuals.process_snapshot()).encode())
+
+    def _serve_memory_graph(self) -> None:
+        """Memory embeddings projected to a sphere, for the constellation.
+
+        Non-blocking by design: the cold build is a couple of seconds of
+        SVD and this server handles one request at a time, so a miss
+        returns {"building": true} and a daemon thread does the work.
+        """
+        from nora import visuals
+        self._json_ok(json.dumps(visuals.memory_graph_async()).encode())
 
     def _serve_history(self) -> None:
         try:
