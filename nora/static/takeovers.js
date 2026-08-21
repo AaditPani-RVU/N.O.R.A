@@ -897,6 +897,10 @@
     if (!ctxRef) return;
     if (active === kind) { arm(); return; }
     if (active) exitCurrent();
+    // The globe drives the same --globe-scale these do, at equal specificity.
+    // Leaving it up means two takeovers fighting over one transform and both
+    // canvases drawing at once, so whoever is asked for second wins outright.
+    if (ctxRef.hideGlobe) ctxRef.hideGlobe();
     active = kind;
     tk.enterAt = performance.now();
     tk.selected = null;

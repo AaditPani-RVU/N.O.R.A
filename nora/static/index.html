@@ -3120,6 +3120,9 @@ function fitGlobe() {
 }
 
 function showGlobeLocation({ name, country, lat, lon }) {
+  // The globe and the constellations drive the same --globe-scale at equal
+  // specificity, so only one of them may hold the orb at a time.
+  if (window.NORA_TAKEOVERS && NORA_TAKEOVERS.active()) NORA_TAKEOVERS.hide();
   globePin = { lat, lon, name, country };
   // Unwrap the target to within half a turn of where the globe currently is,
   // so it always spins the short way round to the place.
@@ -4114,6 +4117,7 @@ if (window.NORA_TAKEOVERS) {
     artCanvas:  document.getElementById('artc'),
     takeCanvas: document.getElementById('takec'),
     log:        (msg, ok) => addActivity(msg, ok),
+    hideGlobe:  () => { if (globeActive) shrinkGlobeBack(); },
   });
 
   // Esc already means "stop"; while a takeover is up it also means "put it
