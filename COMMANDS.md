@@ -94,6 +94,76 @@ _Annotated with status: ✅ exists | 🔨 in roadmap | 🆕 new from DELIVERABLE
 
 ---
 
+## Orb Takeovers (dashboard visuals)
+
+The dashboard's orb is a display surface, not a status light: on these commands
+it morphs into an instrument, holds, then shrinks back — the same pattern the
+globe uses for `show me <place>`. Everything is tappable, and the takeovers are
+built for a phone as well as a desktop.
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| `show processes` / `what's running` / `what's eating my CPU` | Orb becomes a live process constellation — tap a body to inspect it, terminate or force-kill from the card | 🆕 |
+| `show your memory` / `what do you remember` | Orb becomes a constellation of her memory: one star per memory, placed by meaning, so related memories sit together | 🆕 |
+| `show me what you know about <topic>` | Same constellation with the closest-matching stars lit up | 🆕 |
+| `close that` / `hide that` | Dismiss whatever the orb is showing, the remote included | 🆕 |
+
+---
+
+## Desktop Remote
+
+Not a takeover — its own overlay, because a control surface that auto-hides
+mid-press is a bug. `show my desktop` puts the focused window on the dashboard
+as a map of every control it exposes, drawn at the window's real geometry, and
+a tap presses the real thing. This is the case voice handles worst: an element
+you can point at but cannot name.
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| `show my desktop` / `remote control` / `put the window on screen` | Focused window becomes a tappable map — press buttons, toggle checkboxes, tap a field to type into it from your phone's keyboard | 🆕 |
+
+Interaction: tap a control to press it; tap a text field to open the type bar
+and send text into it; `REFRESH` re-reads the window, `CLOSE` or `Esc` dismisses.
+The view follows the window it mapped rather than whatever has focus, so
+touching the dashboard on the same machine doesn't make it map itself.
+
+Where a control exposes a real AT-SPI action NORA calls that — deterministic,
+Wayland-safe, and it doesn't steal your pointer. Synthetic clicks via ydotool
+are the fallback for controls that expose nothing.
+
+Requirements: Linux with AT-SPI2, and accessibility enabled for the session —
+`gsettings set org.gnome.desktop.interface toolkit-accessibility true`. Apps
+that report no widget geometry (GTK4's accessibility backend currently does
+not) fall back to a labelled list in tree order rather than a positional map.
+
+**Auth**: unlike the read-only dashboard routes, `/desktop` and `/desktop_act`
+require `NORA_API_TOKEN` when one is set — they drive your actual desktop.
+Open the dashboard with `?token=…` and the page passes it through.
+
+**Endpoints**: `GET /desktop[?follow=1]`, `POST /desktop_act`, `GET /remote.js`.
+
+---
+
+## Dashboard extras
+
+Also on the dashboard, with no command needed:
+
+- **Album art** — the cover fills the top of the Spotify card, square and
+  large, and lights the card with the sleeve's own dominant colour. The frame
+  breathes while the track is playing.
+- **Scrubbing** — drag the progress bar to move through the track, or click
+  anywhere on it. With the bar focused, ←/→ nudge by 5s, PgUp/PgDn by 30s,
+  Home/End jump to the ends. The seek goes out over MPRIS.
+
+Interaction: drag to spin a constellation, tap a node for its card, tap the
+dimmed area or press `Esc` to dismiss. Under 560px wide the detail card becomes
+a bottom sheet with thumb-sized buttons and the field lifts to make room.
+
+**Endpoints** (same-origin, no external host except the album-art CDN):
+`GET /processes`, `GET /memory_graph`, `POST /proc_kill`, `GET /takeovers.js`.
+
+---
+
 ## Monitoring & Anomaly Watchdog
 
 | Voice Command | Action | Status |

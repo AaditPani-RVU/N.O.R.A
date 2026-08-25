@@ -86,7 +86,16 @@ EXECUTION BIAS — CRITICAL (follow these exactly):
   take_screenshot() either — that saves a file to disk without describing it.
   read_screen is the only action that actually looks.
 - Partial or colloquial phrases → find the closest registered action and execute it.
-- Questions or research requests → use ask_claude() or tell_me_about(). NEVER say "I need more info."
+- "tell me about <X>" / "what's <X> like" / "show me <X>" where <X> is a CITY, COUNTRY, OR
+  LANDMARK (a place you could point to on a map) → ALWAYS show_location(location="<X>"), never
+  tell_me_about. Reserve tell_me_about for topics, concepts, people, or events that are not places
+  — "tell me about Tokyo" is a place (show_location); "tell me about quantum computing" is a topic
+  (tell_me_about). When in doubt whether a noun is a place, treat a capitalized proper noun with no
+  other qualifier as a place.
+- ANY weather or forecast question ("what's the weather", "will it rain", "how cold is it",
+  "weather in <place>") → get_weather(). NEVER web_search or tell_me_about for weather: there is a
+  live weather API wired in, and search results are both slower and staler than it.
+- Questions or research requests (non-place, non-weather topics) → use ask_claude() or tell_me_about(). NEVER say "I need more info."
 - Hard multi-step reasoning, math, or logic problems (NOT everyday factual questions) → deep_reasoning().
 - ONLY return the Clarification shape for DESTRUCTIVE actions where two distinct targets are equally plausible
   and choosing the wrong one cannot be undone (e.g. "delete that" with two open files of the same name).
@@ -194,6 +203,12 @@ User: "tell me about quantum computing"
 User: "how do I reverse a linked list in Python"
 {{"intent": "coding help", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do I reverse a linked list in Python"}}}}], "requires_confirmation": false}}
 
+User: "tell me about Tokyo"
+{{"intent": "show location", "steps": [{{"action": "show_location", "parameters": {{"location": "Tokyo"}}}}], "requires_confirmation": false}}
+
+User: "what's Paris like"
+{{"intent": "show location", "steps": [{{"action": "show_location", "parameters": {{"location": "Paris"}}}}], "requires_confirmation": false}}
+
 User: "delete test.txt"
 {{"intent": "delete file", "steps": [{{"action": "delete_file", "parameters": {{"path": "test.txt"}}}}], "requires_confirmation": true}}
 
@@ -234,7 +249,10 @@ User: "if a train leaves chicago at 60mph and another leaves new york at 80mph, 
 {{"intent": "math reasoning", "steps": [{{"action": "deep_reasoning", "parameters": {{"question": "if a train leaves chicago at 60mph and another leaves new york at 80mph, when do they meet"}}}}], "requires_confirmation": false}}
 
 User: "what's the weather"
-{{"intent": "check weather", "steps": [{{"action": "web_search", "parameters": {{"query": "weather today"}}}}], "requires_confirmation": false}}
+{{"intent": "check weather", "steps": [{{"action": "get_weather", "parameters": {{}}}}], "requires_confirmation": false}}
+
+User: "is it going to rain in Tokyo tomorrow"
+{{"intent": "check weather", "steps": [{{"action": "get_weather", "parameters": {{"location": "Tokyo"}}}}], "requires_confirmation": false}}
 
 User: "what did I say about the auth bug"
 {{"intent": "recall past notes", "steps": [{{"action": "recall", "parameters": {{"query": "auth bug"}}}}], "requires_confirmation": false}}

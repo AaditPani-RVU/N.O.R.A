@@ -36,6 +36,17 @@ class MprisError(RuntimeError):
     """Raised when no transport can reach the player."""
 
 
+class ObjectPath(str):
+    """A string that D-Bus must see as an object path, not a plain string.
+
+    SetPosition takes the track's object path as its first argument, and both
+    transports need to be told: python-dbus wants a dbus.ObjectPath instance,
+    gdbus wants the literal prefixed with ``objectpath``. Passing a bare str
+    gets it rejected as a signature mismatch by one and silently mistyped by
+    the other, so the intent is carried on the value itself.
+    """
+
+
 # ── Transport 1: python-dbus ──────────────────────────────────────────────────
 
 def _session_bus() -> Any:
@@ -313,7 +324,7 @@ def call(method: str, args: list[Any] | None = None,
         try:
             iface = _dbus_iface(service, interface)
             if iface is not None:
-                return True, _py(getattr(iface, method)(*args))
+                return True, _py(getattr(iface, method)(*_typed_args(args)))
         except Exception as exc:
             logger.debug("python-dbus %s failed (%s); trying gdbus", method, exc)
 
@@ -328,8 +339,21 @@ def call(method: str, args: list[Any] | None = None,
     return (True, _gv_parse(out)) if ok else (False, out)
 
 
+def _typed_args(args: list[Any]) -> list[Any]:
+    """Re-type the arguments python-dbus cannot infer. Currently object paths."""
+    if not any(isinstance(a, ObjectPath) for a in args):
+        return args
+    try:
+        import dbus  # type: ignore
+    except Exception:
+        return args
+    return [dbus.ObjectPath(a) if isinstance(a, ObjectPath) else a for a in args]
+
+
 def _gv_literal(value: Any) -> str:
     """Render a Python value as a gdbus command-line argument."""
+    if isinstance(value, ObjectPath):
+        return f"objectpath '{value}'"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
@@ -452,6 +476,61 @@ def now_playing(player: str = "spotify") -> dict[str, Any]:
         "length_sec": length_sec,
         "status": playback_status(player),
     }
+
+
+def position_sec(player: str = "spotify") -> float:
+    """Playback position in seconds, or 0.0 when the player will not say."""
+    pos = get_prop("Position", player)          # MPRIS reports microseconds
+    try:
+        return float(pos) / 1_000_000 if pos is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def seek_to(position_sec_target: float, player: str = "spotify") -> bool:
+    """Jump to an absolute position in the current track.
+
+    Two ways in, because players disagree about which one works. SetPosition
+    is the correct call and takes the track's object path, which guards it
+    against landing on the *next* track if the song changed mid-request.
+    Spotify's Linux client has shipped builds where it is a no-op, so the
+    position is read back and a relative Seek covers the gap when it is.
+
+    Returns True once the player is actually near the requested spot.
+    """
+    meta = metadata(player)
+    if not meta:
+        return False
+
+    try:
+        length_sec = float(meta.get("mpris:length") or 0) / 1_000_000
+    except (TypeError, ValueError):
+        length_sec = 0.0
+    target = max(0.0, float(position_sec_target))
+    # Stop a drag to the far end from tripping the track change: land just
+    # inside the track rather than exactly on its last microsecond.
+    if length_sec > 0:
+        target = min(target, max(0.0, length_sec - 1.0))
+
+    def landed() -> bool:
+        return abs(position_sec(player) - target) <= 2.0
+
+    trackid = str(meta.get("mpris:trackid") or "")
+    if trackid.startswith("/"):
+        ok, err = call("SetPosition", [ObjectPath(trackid), int(target * 1_000_000)],
+                       player=player)
+        if ok and landed():
+            return True
+        if not ok:
+            logger.debug("SetPosition failed on %s (%s); trying relative Seek",
+                         player, err)
+
+    offset = target - position_sec(player)
+    ok, err = call("Seek", [int(offset * 1_000_000)], player=player)
+    if not ok:
+        logger.warning("seek on %s failed: %s", player, err)
+        return False
+    return landed()
 
 
 # ── Launching ─────────────────────────────────────────────────────────────────

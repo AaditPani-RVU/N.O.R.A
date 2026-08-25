@@ -87,7 +87,9 @@ def main() -> None:
     # Launch NORA blob UI
     from nora import ui_server
     ui_url = ui_server.start()
-    logger.info(f"NORA UI: {ui_url}")
+    # The URL carries NORA_API_TOKEN when one is set, so the browser gets it
+    # but the log file does not.
+    logger.info(f"NORA UI: {ui_url.split('?')[0]}")
     webbrowser.open(ui_url)
 
     # Run the main async pipeline

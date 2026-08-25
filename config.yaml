@@ -571,6 +571,14 @@ web_search:
   max_sentences: 3          # spoken answer + one caveat sentence
   freshness_days: 7         # Brave freshness filter for "today"/"now"/"latest" queries
 
+weather:
+  # get_weather() reads the same keyless Open-Meteo API the dashboard widget
+  # polls, so the spoken answer and the on-screen widget can never disagree.
+  # Leave `home` blank to locate by IP (ipapi.co, then ipwho.is); set it to a
+  # city name if you're behind a VPN, where IP geolocation lands in the wrong
+  # country. An explicit "weather in <place>" always overrides this.
+  home: ""
+
 multimodal_context:
   # Pre-attach active window title + OCR screen snippet to ambiguous commands.
   # Only fires for commands containing deictic words ("this", "that", "here", etc.)

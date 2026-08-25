@@ -248,11 +248,19 @@
     }
 
     /* ── Orb ── */
-    .orb-wrap { position: relative; width: 340px; height: 340px; display: flex; align-items: center; justify-content: center; }
+    .orb-wrap {
+      position: relative; width: 340px; height: 340px; display: flex; align-items: center; justify-content: center;
+      transform: translateY(var(--globe-shift,0px)) scale(calc(var(--orb-scale,1) * var(--globe-scale,1)));
+    }
+    /* Scoped to when a globe morph is actually in flight — a permanent
+       transition here would also animate fitOrb()'s resize-driven
+       --orb-scale updates, turning a window drag into a laggy chase. */
+    .orb-wrap[data-globe] { transition: transform var(--t-slow) var(--ease-spring); }
     .ring {
       position: absolute; border-radius: 50%;
       top: 50%; left: 50%;
       will-change: transform; pointer-events: none;
+      transition: opacity var(--t-slow) var(--ease);
     }
     .r1 { width:338px;height:338px;margin:-169px 0 0 -169px;border:1px dashed rgba(var(--rgb),0.10);animation:cw 55s linear infinite; }
     .r2 { width:296px;height:296px;margin:-148px 0 0 -148px;border:1.5px solid transparent;border-top-color:rgba(var(--rgb),0.55);border-right-color:rgba(var(--rgb),0.35);animation:cw 9s linear infinite; }
@@ -273,13 +281,21 @@
       position: absolute; top:50%;left:50%;
       width:296px;height:296px;margin:-148px 0 0 -148px;
       will-change:transform;animation:cw 9s linear infinite;pointer-events:none;
+      transition:opacity var(--t-slow) var(--ease);
     }
     .tdot {
       position:absolute;width:7px;height:7px;border-radius:50%;
       background:var(--c);box-shadow:0 0 10px var(--c),0 0 3px #fff;
       transition:background var(--t-slow) var(--ease),box-shadow var(--t-slow) var(--ease);
     }
-    #orbc { position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);will-change:transform;pointer-events:none; }
+    #orbc { position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);will-change:transform;pointer-events:none;transition:opacity var(--t-slow) var(--ease); }
+    /* Fixed 340 CSS px; the backing store is oversampled in JS because
+       --globe-scale magnifies this element well past 1:1. */
+    #globec {
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      width:340px;height:340px;will-change:opacity;pointer-events:none;
+      opacity:0;transition:opacity var(--t-slow) var(--ease);
+    }
 
     /* Core orb glow — four states */
     .orb-core {
@@ -308,6 +324,232 @@
     .orb-core.s-listening{ background:radial-gradient(circle,#fff 0%,#aaeeff 45%,rgba(0,140,255,0) 100%); animation:pulse-listen 1.8s ease-in-out infinite; }
     .orb-core.s-thinking { background:radial-gradient(circle,#fff 0%,#e9d5ff 45%,rgba(120,0,220,0) 100%); animation:pulse-think  1.2s ease-in-out infinite; }
     .orb-core.s-speaking { background:radial-gradient(circle,#fff 0%,#afffee 45%,rgba(0,200,150,0) 100%); animation:pulse-speak  0.9s ease-in-out infinite; }
+
+    /* ── Globe morph ──────────────────────────────────────────────────────
+       A location mention swaps the orb's chrome for #globec without
+       replacing the orb: the rings, canvas orb and core all cross-fade out,
+       the wrap enlarges via --globe-scale composing with the existing
+       --orb-scale viewport fit, and everything uses the same --ease timing
+       already used throughout the file.
+
+       The core used to stay on as a shrunken ember behind the globe. It was
+       fine over a wireframe; over a lit sphere it reads as a hole punched
+       through the planet, so it now fades out with the rest and the pin
+       carries the voice-level feedback instead. */
+    .orb-wrap { --globe-scale: 1; --globe-shift: 0px; }
+    /* --globe-fit/-y are measured per viewport by fitGlobe(); the literals are
+       the fallback if it hasn't run. They are only read inside the [data-globe="in"]
+       rule so that dropping the attribute restores the plain orb even though the
+       inline custom properties stay on the element. */
+    .orb-wrap[data-globe="in"] {
+      --globe-scale: var(--globe-fit, 2.55);
+      --globe-shift: var(--globe-fit-y, 0px);
+      z-index: 50;
+    }
+    .orb-wrap[data-globe="in"] .ring,
+    .orb-wrap[data-globe="in"] .tri-ring,
+    .orb-wrap[data-globe="in"] .orb-halo,
+    .orb-wrap[data-globe="in"] .orb-glint,
+    .orb-wrap[data-globe="in"] #orbc { opacity: 0; }
+    .orb-wrap[data-globe="in"] #globec { opacity: 1; }
+    .orb-wrap[data-globe="in"] .orb-core,
+    .orb-wrap[data-globe="in"] .orb-bloom { opacity: 0; }
+    .orb-core, .orb-bloom, .orb-halo { transition: opacity var(--t-slow) var(--ease); }
+
+    .globe-label {
+      position:absolute; z-index:6; pointer-events:none;
+      left:50%; bottom:38px; transform:translateX(-50%);
+      display:flex; align-items:center; gap:9px;
+      font-family:var(--mono); font-size:10px; letter-spacing:4px;
+      /* Literal near-white rather than --txt: this one sits over the planet's
+         own glow and the dimmed chip bar, and --txt disappears into both. */
+      color:#e6f6ff; text-shadow:0 0 6px rgba(0,8,18,0.95), 0 0 18px rgba(var(--rgb),0.85);
+      white-space:nowrap; opacity:0;
+      transition:opacity var(--t-slow) var(--ease) 150ms;
+    }
+    /* Rules that grow out of the name, so the label reads as a callout off
+       the globe rather than a caption that happens to sit under it. */
+    .globe-label::before, .globe-label::after {
+      content:''; width:26px; height:1px; flex:0 0 auto;
+      background:linear-gradient(90deg, transparent, rgba(var(--rgb),0.7));
+    }
+    .globe-label::after { transform:scaleX(-1); }
+    .orb-wrap[data-globe="in"] .globe-label { opacity:1; }
+
+    .orb-wrap[data-globe="in"] ~ .jlabel,
+    .orb-wrap[data-globe="in"] ~ #stage-bar {
+      opacity:0.15; transition:opacity var(--t-slow) var(--ease);
+    }
+
+    /* The globe is bigger than the column it lives in, so it has to sit over
+       the panels. This pushes them back rather than letting the planet float
+       on top of a fully lit dashboard. z-index 45 lands between the panels
+       (auto) and the wrap's 50, inside #app's stacking context. */
+    .globe-veil {
+      position:fixed; inset:0; z-index:45; pointer-events:none;
+      opacity:0; transition:opacity var(--t-slow) var(--ease);
+      background:radial-gradient(ellipse at 50% 44%,
+                 rgba(0,6,16,0.44) 0%, rgba(0,4,11,0.78) 58%, rgba(0,3,8,0.88) 100%);
+    }
+    body[data-globe="in"] .globe-veil { opacity:1; }
+    /* Takeovers share the globe's veil: any of them being up should push
+       the panels back by the same amount, or the two morphs feel like they
+       belong to different applications. */
+    /* The veil is inert for the globe, but a takeover needs the dimmed area
+       around it to be a dismiss target. The wrap sits at z-index 50 and the
+       veil at 45, so the constellation still gets its own taps. */
+    body[data-takeover] .globe-veil { opacity:1; pointer-events:auto; }
+
+    /* ══════════════════════════════════════════════════════════════════
+       TAKEOVERS — process + memory constellations
+       Written against the globe's own vocabulary on purpose: the same
+       measured fit, the same veil, the same --ease timings. The scale is
+       driven through --globe-scale/--globe-shift rather than new terms,
+       so it composes with the --orb-scale viewport fit exactly the way
+       the globe already does and no transform declaration has to change.
+       ══════════════════════════════════════════════════════════════════ */
+
+    #takec {
+      position:absolute; z-index:5; top:50%; left:50%;
+      width:340px; height:340px; margin:-170px 0 0 -170px;
+      opacity:0; pointer-events:none;
+      transition:opacity var(--t-mid) var(--ease);
+      touch-action:none;          /* the canvas owns the drag, not the page */
+    }
+    .orb-wrap[data-takeover="processes"],
+    .orb-wrap[data-takeover="memory"] {
+      --globe-scale: var(--tk-fit, 2.4);
+      --globe-shift: var(--tk-fit-y, 0px);
+      z-index:50;
+    }
+    .orb-wrap[data-takeover="processes"] .ring,
+    .orb-wrap[data-takeover="memory"] .ring,
+    .orb-wrap[data-takeover="processes"] .tri-ring,
+    .orb-wrap[data-takeover="memory"] .tri-ring,
+    .orb-wrap[data-takeover="processes"] .orb-glint,
+    .orb-wrap[data-takeover="memory"] .orb-glint,
+    .orb-wrap[data-takeover="processes"] #orbc,
+    .orb-wrap[data-takeover="memory"] #orbc,
+    .orb-wrap[data-takeover="processes"] .orb-core,
+    .orb-wrap[data-takeover="memory"] .orb-core,
+    .orb-wrap[data-takeover="processes"] .orb-bloom,
+    .orb-wrap[data-takeover="memory"] .orb-bloom { opacity:0; }
+    .orb-wrap[data-takeover="processes"] #takec,
+    .orb-wrap[data-takeover="memory"] #takec { opacity:1; pointer-events:auto; }
+    /* The orb's own hit target would otherwise swallow every tap meant for
+       a star or a process body. */
+    .orb-wrap[data-takeover="processes"] .orb-hit,
+    .orb-wrap[data-takeover="memory"] .orb-hit { pointer-events:none; opacity:0; }
+
+    /* The globe is an opaque planet, so dimming the two labels beside it was
+       enough. A constellation is mostly empty space and everything behind it
+       reads straight through the gaps — the transcript frame, the waveform,
+       "AWAITING INPUT" — so the whole centre column goes back except the
+       command bar, which stays live so you can still type at her while a
+       takeover is up. */
+    body[data-takeover] #center .jlabel,
+    body[data-takeover] #stage-bar,
+    body[data-takeover] #convo,
+    body[data-takeover] #chips {
+      opacity:0.05; pointer-events:none;
+      transition:opacity var(--t-slow) var(--ease);
+    }
+
+    /* Label and card live OUTSIDE .orb-wrap deliberately: the wrap is what
+       gets scaled 2-4x, and text dragged along by that transform ends up
+       either enormous or blurry. Fixed positioning keeps both crisp at any
+       takeover scale. */
+    #tk-label {
+      position:fixed; z-index:60; left:50%; transform:translateX(-50%);
+      bottom:calc(var(--tk-label-bottom, 96px));
+      display:flex; align-items:center; gap:9px;
+      font-family:var(--mono); font-size:10px; letter-spacing:3px;
+      color:#e6f6ff; text-shadow:0 0 6px rgba(0,8,18,0.95), 0 0 18px rgba(var(--rgb),0.85);
+      white-space:nowrap; pointer-events:none;
+      opacity:0; transition:opacity var(--t-slow) var(--ease) 150ms;
+    }
+    #tk-label::before, #tk-label::after {
+      content:''; width:22px; height:1px; flex:0 0 auto;
+      background:linear-gradient(90deg, transparent, rgba(var(--rgb),0.7));
+    }
+    #tk-label::after { transform:scaleX(-1); }
+    body[data-takeover] #tk-label { opacity:1; }
+
+    #tk-card {
+      position:fixed; z-index:61; width:300px; max-width:calc(100vw - 32px);
+      right:28px; top:50%; transform:translateY(-50%) translateX(14px);
+      background:var(--cbg); border:1px solid var(--cg);
+      border-radius:3px; padding:14px 15px 13px;
+      backdrop-filter:blur(9px); -webkit-backdrop-filter:blur(9px);
+      box-shadow:0 18px 50px rgba(0,0,0,0.55), 0 0 0 1px rgba(var(--rgb),0.08);
+      opacity:0; pointer-events:none;
+      transition:opacity var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+    }
+    #tk-card.in { opacity:1; pointer-events:auto; transform:translateY(-50%) translateX(0); }
+    .tk-card-kicker {
+      font-family:var(--mono); font-size:8.5px; letter-spacing:2.6px;
+      color:var(--dim); margin-bottom:6px;
+    }
+    .tk-card-title {
+      font-family:var(--disp); font-size:17px; font-weight:600; letter-spacing:0.6px;
+      color:#e9f7ff; line-height:1.15; margin-bottom:10px;
+      overflow-wrap:anywhere;
+    }
+    .tk-card-note {
+      font-size:12.5px; line-height:1.5; color:var(--txt);
+      margin-bottom:10px; overflow-wrap:anywhere;
+    }
+    .tk-card-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px 12px; }
+    .tk-card-grid div { display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .tk-card-grid b {
+      font-family:var(--mono); font-size:8px; letter-spacing:2px;
+      color:var(--dim); font-weight:400;
+    }
+    .tk-card-grid span {
+      font-family:var(--mono); font-size:12px; color:#dff2ff;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .tk-card-actions { display:flex; gap:7px; margin-top:13px; }
+    .tk-btn {
+      flex:1; min-height:38px; cursor:pointer;
+      background:rgba(var(--rgb),0.09); border:1px solid var(--cg);
+      color:var(--txt); border-radius:2px;
+      font-family:var(--mono); font-size:9.5px; letter-spacing:2px;
+      transition:background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+    }
+    .tk-btn:hover { background:rgba(var(--rgb),0.2); }
+    .tk-btn.danger { border-color:rgba(255,86,86,0.5); color:#ffb3b3; }
+    .tk-btn.danger:hover { background:rgba(255,86,86,0.18); }
+
+    /* Under 560px the floating card would cover the field it describes, so
+       it becomes a bottom sheet and the constellation's fit reserves room
+       for it (see fit() in takeovers.js). Sized for a 1080x2424 phone,
+       which is ~360x808 CSS px at DPR 3. */
+    @media (max-width: 560px) {
+      #tk-card {
+        right:8px; left:8px; width:auto; max-width:none;
+        top:auto; bottom:8px;
+        transform:translateY(14px); padding:13px 14px;
+        border-radius:4px;
+      }
+      #tk-card.in { transform:translateY(0); }
+      #tk-label { bottom:auto; top:52px; font-size:9px; letter-spacing:2px; }
+      /* Thumb-sized, and safe-area aware so the sheet clears a gesture bar. */
+      .tk-btn { min-height:46px; font-size:10px; }
+      #tk-card { padding-bottom:calc(13px + env(safe-area-inset-bottom, 0px)); }
+      .tk-card-title { font-size:16px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .orb-wrap[data-takeover] { transition:none; }
+      #takec, #tk-card { transition:none; }
+    }
+
+
+    @media (prefers-reduced-motion: reduce) {
+      .orb-wrap[data-globe] { transition: none; }
+      .orb-wrap[data-globe="in"] { --globe-scale: 1.6; }
+    }
 
     /* ── Orb interaction layer ───────────────────────────────────────────
        The orb is the largest thing on screen and was, until now, the only
@@ -362,9 +604,9 @@
     /* Click feedback. Written against --orb-scale so the punch composes with
        the viewport fit instead of snapping the orb back to full size. */
     @keyframes orb-punch {
-      0%   { transform:scale(calc(var(--orb-scale,1) * 1)); }
-      32%  { transform:scale(calc(var(--orb-scale,1) * 1.045)); }
-      100% { transform:scale(calc(var(--orb-scale,1) * 1)); }
+      0%   { transform:translateY(var(--globe-shift,0px)) scale(calc(var(--orb-scale,1) * var(--globe-scale,1) * 1)); }
+      32%  { transform:translateY(var(--globe-shift,0px)) scale(calc(var(--orb-scale,1) * var(--globe-scale,1) * 1.045)); }
+      100% { transform:translateY(var(--globe-shift,0px)) scale(calc(var(--orb-scale,1) * var(--globe-scale,1) * 1)); }
     }
     .orb-wrap.punch { animation:orb-punch 430ms var(--ease-out); }
 
@@ -480,13 +722,93 @@
     /* ════ MUSIC ════ */
     .mus-src-pill { font-size:7px;letter-spacing:2px;border:1px solid var(--cd);padding:2px 6px;color:var(--c);text-transform:uppercase; }
     .mus-track { font-family:var(--disp);font-size:14px;font-weight:600;color:var(--c);letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 8px var(--cg); }
-    .mus-artist { font-size:9px;letter-spacing:2px;color:var(--dim);margin-top:1px;margin-bottom:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-    .mus-status { display:flex;align-items:center;gap:6px;font-size:8px;letter-spacing:2px;color:var(--dim);margin-bottom:10px; }
+    .mus-artist { font-size:9px;letter-spacing:2px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .mus-status {
+      position:absolute; z-index:3; left:7px; top:7px;
+      display:flex; align-items:center; gap:5px; padding:3px 7px;
+      background:rgba(0,6,14,0.72); border:1px solid rgba(var(--rgb),0.20);
+      font-size:7.5px; letter-spacing:2px; color:#cfe9ff;
+      text-shadow:0 0 6px rgba(0,6,14,0.9);
+    }
     .mus-status .dot { width:5px;height:5px;border-radius:50%;background:var(--dim);transition:background var(--t-mid) var(--ease),box-shadow var(--t-mid) var(--ease); }
     .mus-status.playing .dot { background:#00ff88;box-shadow:0 0 5px #00ff88;animation:blink 1.6s ease-in-out infinite; }
     .mus-status.paused  .dot { background:#ffaa00;box-shadow:0 0 5px #ffaa00; }
-    .mus-progress { height:3px;background:rgba(var(--rgb),0.07);position:relative;margin-bottom:10px; }
+
+    /* ── The cover ──────────────────────────────────────────────────────
+       The artwork used to be sphere-mapped onto the orb, where a square
+       sleeve had to be stretched over a ball to fit. It is square here and
+       stays square: the column width caps it, and --art-size is measured in
+       fitCover() so the sleeve takes the room the column can spare rather
+       than pushing the transport controls off the bottom of a laptop. The
+       vh fallback only has to hold until that first measurement. */
+    .mus-art {
+      position:relative; width:min(100%, var(--art-size, 30vh)); aspect-ratio:1/1;
+      margin:1px auto 9px; overflow:hidden;
+      border:1px solid rgba(var(--rgb),0.22);
+      background:linear-gradient(160deg, rgba(var(--rgb),0.09), rgba(var(--rgb),0.02));
+      box-shadow:inset 0 0 0 1px rgba(0,0,0,0.5),
+                 0 12px 30px -14px rgba(0,0,0,0.9),
+                 0 0 26px -8px rgba(var(--art-rgb, var(--rgb)),0.55);
+      transition:box-shadow var(--t-slow) var(--ease);
+    }
+    #mus-cover {
+      position:absolute; inset:0; width:100%; height:100%;
+      object-fit:cover;                  /* square in, square out — no stretch */
+      opacity:0; transition:opacity var(--t-slow) var(--ease);
+    }
+    .mus-art.has-art #mus-cover { opacity:1; }
+    /* Scanlines and a vignette over the sleeve, so it reads as artwork on a
+       display rather than a JPEG pasted onto the panel. */
+    .mus-art::after {
+      content:''; position:absolute; inset:0; z-index:2; pointer-events:none;
+      background:
+        repeating-linear-gradient(180deg, rgba(0,0,0,0.17) 0 1px, transparent 1px 3px),
+        radial-gradient(ellipse at 50% 40%, transparent 44%, rgba(0,4,10,0.55) 100%);
+      opacity:0.5;
+    }
+    /* A separate frame rather than animating the box-shadow list: the glow
+       belongs to the record (--art-rgb is the sleeve's own saturated
+       average) and only breathes while it is actually playing. */
+    .mus-art::before {
+      content:''; position:absolute; inset:0; z-index:2; pointer-events:none;
+      border:1px solid rgba(var(--art-rgb, var(--rgb)),0.5);
+      opacity:0; transition:opacity var(--t-slow) var(--ease);
+    }
+    .mus-art.playing::before { opacity:1; animation:art-breathe 3.6s ease-in-out infinite; }
+    @keyframes art-breathe { 0%,100% { opacity:0.3; } 50% { opacity:0.85; } }
+    .mus-art .cnr { z-index:3; }
+    .mus-art-none {
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      font-size:8px; letter-spacing:3px; color:var(--dim);
+      transition:opacity var(--t-mid) var(--ease);
+    }
+    .mus-art.has-art .mus-art-none { opacity:0; }
+
+    .mus-album { font-size:7.5px;letter-spacing:2px;color:var(--dim);opacity:0.62;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+
+    /* ── Scrub bar ──────────────────────────────────────────────────────
+       3px of ink, 16px of hit area: a 3px target is unusable with a thumb
+       and fiddly with a mouse, and this one is draggable now. */
+    .mus-seek { position:relative; padding:7px 0 6px; cursor:pointer; touch-action:none; }
+    .mus-seek.idle { cursor:default; }
+    .mus-seek:focus-visible { outline:1px solid rgba(var(--rgb),0.55); outline-offset:3px; }
+    .mus-progress { height:3px;background:rgba(var(--rgb),0.07);position:relative;transition:height var(--t-fast) var(--ease); }
+    .mus-seek:not(.idle):hover .mus-progress, .mus-seek.dragging .mus-progress { height:5px; }
     .mus-progress-fill { position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,#003888,var(--c));width:0%;transition:width 0.8s var(--ease-out); }
+    .mus-seek-head {
+      position:absolute; z-index:2; top:50%; left:0; width:10px; height:10px; margin:-5px 0 0 -5px;
+      border-radius:50%; background:var(--c); box-shadow:0 0 8px var(--cg);
+      opacity:0; transform:scale(0.55); pointer-events:none;
+      transition:left 0.8s var(--ease-out), opacity var(--t-fast) var(--ease),
+                 transform var(--t-fast) var(--ease);
+    }
+    .mus-seek:not(.idle):hover .mus-seek-head,
+    .mus-seek:focus-visible .mus-seek-head,
+    .mus-seek.dragging .mus-seek-head { opacity:1; transform:scale(1); }
+    /* A drag has to track the finger exactly, so the settle animation that
+       makes a poll update look smooth is wrong while one is in flight. */
+    .mus-seek.dragging .mus-progress-fill,
+    .mus-seek.dragging .mus-seek-head { transition:opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
     .mus-ctrls { display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px; }
     .mus-btn { background:rgba(var(--rgb),0.04);border:1px solid var(--cd);color:var(--c);font-family:var(--mono);font-size:10px;letter-spacing:2px;padding:7px 0;cursor:pointer;transition:background var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease); }
     .mus-btn:hover { background:rgba(var(--rgb),0.12);border-color:var(--c); }
@@ -681,6 +1003,158 @@
                   0 0 26px rgba(var(--rgb),0.06),
                   inset 0 0 22px rgba(var(--rgb),0.035);
     }
+    /* ════ DESKTOP REMOTE ════
+       The accessibility tree of the focused window, drawn to scale and made
+       tappable. Not an orb takeover: a takeover morphs, holds and shrinks
+       back on a timer, and a remote control that vanishes mid-press is a
+       bug. So this is its own overlay with an explicit close, sitting above
+       the panels (z 200) and below the boot sequence (z 300).
+
+       The window is rendered at its true aspect ratio with every control at
+       its true relative rect, because the whole point is that you press the
+       thing you can see on the other screen — matching geometry is what
+       makes the map legible without labels being readable. */
+    #remote {
+      position: fixed; inset: 0; z-index: 200;
+      /* stretch, not centre: the frame has to claim the full height or the
+         stage inside it collapses to its content and the window map renders
+         as a thumbnail. */
+      display: flex; align-items: stretch; justify-content: center;
+      padding: 20px;
+      background: rgba(0,4,9,0.82);
+      backdrop-filter: blur(6px);
+      opacity: 0; transition: opacity var(--t-mid) var(--ease);
+    }
+    #remote[hidden] { display: none; }
+    #remote.in { opacity: 1; }
+
+    .rm-frame {
+      position: relative;
+      width: min(1120px, 100%); height: 100%;
+      display: flex; flex-direction: column; gap: 10px;
+      padding: 14px;
+      background: var(--cbg);
+      border: 1px solid rgba(var(--rgb),0.30);
+      box-shadow: 0 0 40px rgba(var(--rgb),0.06), inset 0 0 24px rgba(var(--rgb),0.02);
+      transform: translateY(8px) scale(0.985);
+      transition: transform var(--t-mid) var(--ease-out);
+    }
+    #remote.in .rm-frame { transform: none; }
+    .rm-frame::before {
+      content: ''; position: absolute; top: 0; left: 0;
+      width: 13px; height: 13px;
+      border-top: 1.5px solid var(--c); border-left: 1.5px solid var(--c);
+    }
+
+    .rm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .rm-meta { display: flex; align-items: center; gap: 8px; }
+    .rm-stat { font-size: 8px; letter-spacing: 1.6px; color: var(--dim); white-space: nowrap; }
+    .rm-act {
+      background: transparent; border: 1px solid rgba(var(--rgb),0.28);
+      color: var(--c); font: inherit; font-size: 8px; letter-spacing: 1.6px;
+      padding: 4px 9px; cursor: pointer;
+      transition: background var(--t-mid) var(--ease), border-color var(--t-mid) var(--ease);
+    }
+    .rm-act:hover { background: rgba(var(--rgb),0.10); border-color: rgba(var(--rgb),0.55); }
+    .rm-title {
+      font-size: 9px; letter-spacing: 1.4px; color: var(--dim);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* The stage centres the window at whatever size fits; rm-window carries
+       the real aspect ratio so percentage-positioned targets land right. */
+    .rm-stage {
+      flex: 1; min-height: 0; display: flex;
+      align-items: center; justify-content: center;
+      overflow: auto;
+    }
+    .rm-window {
+      position: relative;
+      border: 1px solid rgba(var(--rgb),0.22);
+      background:
+        linear-gradient(rgba(var(--rgb),0.030) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(var(--rgb),0.030) 1px, transparent 1px),
+        rgba(var(--rgb),0.015);
+      background-size: 28px 28px, 28px 28px, auto;
+      flex: none;
+    }
+
+    /* Fallback layout for toolkits that report no geometry — see render()
+       in remote.js. Tree order in a grid: not a map, still a remote. */
+    .rm-window[data-flow="1"] {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 6px; padding: 10px; width: 100%; max-width: 900px;
+      background: none; border-color: rgba(var(--rgb),0.12);
+      /* A list reads from the top; only the scale map wants centring. */
+      align-self: start;
+    }
+    .rm-window[data-flow="1"] .rm-el {
+      position: static; min-height: 34px;
+    }
+
+    .rm-el {
+      position: absolute;
+      border: 1px solid rgba(var(--rgb),0.34);
+      background: rgba(var(--rgb),0.055);
+      color: var(--c);
+      font-size: 8px; letter-spacing: 0.8px; line-height: 1.1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 3px; overflow: hidden; text-align: center;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+      transition: background var(--t-fast, 140ms) var(--ease),
+                  border-color var(--t-fast, 140ms) var(--ease);
+    }
+    .rm-el:hover { background: rgba(var(--rgb),0.20); border-color: var(--c); }
+    .rm-el > span {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+    }
+    /* Kind carries meaning the label often cannot: an unnamed icon button and
+       an empty text field look identical as rectangles. */
+    .rm-el[data-kind="input"], .rm-el[data-kind="combo"] {
+      border-style: dashed; border-color: rgba(var(--rgb),0.5);
+      background: rgba(var(--rgb),0.020);
+      justify-content: flex-start; text-align: left;
+      color: var(--dim);
+    }
+    .rm-el[data-kind="text"] { border-color: rgba(var(--rgb),0.14); background: transparent; color: var(--dim); }
+    .rm-el[data-kind="link"] { border-color: transparent; background: transparent; text-decoration: underline; }
+    .rm-el[data-kind="tab"] { border-bottom-width: 2px; border-bottom-color: var(--c); }
+    .rm-el[data-kind="item"], .rm-el[data-kind="menu"] { border-color: rgba(var(--rgb),0.18); }
+    .rm-el[data-checked="1"] { background: rgba(var(--rgb),0.30); }
+    .rm-el[data-focused="1"] { box-shadow: 0 0 0 1px var(--c), 0 0 14px rgba(var(--rgb),0.25); }
+    .rm-el[data-enabled="0"] { opacity: 0.30; pointer-events: none; }
+    .rm-el.hit {
+      background: var(--c); color: var(--bg);
+      border-color: var(--c); box-shadow: 0 0 20px rgba(var(--rgb),0.45);
+      transition: none;
+    }
+    .rm-el.fail { border-color: #ff5f56; background: rgba(255,95,86,0.22); transition: none; }
+
+    .rm-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
+    .rm-hint { font-size: 8px; letter-spacing: 1.6px; color: var(--dim); }
+    .rm-hint.err { color: #ff8a80; }
+    .rm-type { display: flex; gap: 6px; flex: 1; max-width: 460px; }
+    .rm-type[hidden] { display: none; }
+    .rm-type input {
+      flex: 1; min-width: 0;
+      background: rgba(var(--rgb),0.05); border: 1px solid rgba(var(--rgb),0.30);
+      color: var(--c); font: inherit; font-size: 10px; letter-spacing: 1px; padding: 5px 8px;
+    }
+    .rm-type input:focus { outline: none; border-color: var(--c); }
+
+    .rm-empty {
+      padding: 40px 20px; text-align: center;
+      font-size: 9px; letter-spacing: 2px; color: var(--dim);
+    }
+
+    @media (max-width: 700px) {
+      #remote { padding: 8px; }
+      .rm-frame { padding: 10px; gap: 8px; }
+      .rm-el { font-size: 7px; }
+      .rm-foot { flex-direction: column; align-items: stretch; }
+      .rm-type { max-width: none; }
+    }
+
     .cnr { position: absolute; width: 13px; height: 13px; pointer-events: none; z-index: 5; }
     .cnr-tr { top: 0; right: 0; border-top: 1.5px solid rgba(var(--rgb),0.45); border-right: 1.5px solid rgba(var(--rgb),0.45); }
     .cnr-bl { bottom: 0; left: 0;  border-bottom: 1.5px solid rgba(var(--rgb),0.28); border-left: 1.5px solid rgba(var(--rgb),0.28); }
@@ -881,7 +1355,7 @@
        layout box that `scale` alone would leave behind at full 340px. */
     .orb-wrap {
       flex: 0 0 auto;
-      transform: scale(var(--orb-scale, 1));
+      transform: translateY(var(--globe-shift,0px)) scale(calc(var(--orb-scale, 1) * var(--globe-scale, 1)));
       margin: calc((var(--orb-scale, 1) - 1) * 170px) 0;
     }
     .jlabel::after { width: 132px; margin-top: 7px; }
@@ -1143,7 +1617,7 @@
 
     /* ════ MUSIC ════ */
     .mus-times {
-      display: flex; justify-content: space-between; margin: -6px 0 9px;
+      display: flex; justify-content: space-between; margin: 0 0 9px;
       font-size: 7.5px; letter-spacing: 1.5px; color: var(--dim);
       font-variant-numeric: tabular-nums;
     }
@@ -1190,7 +1664,7 @@
       #app { grid-template-rows: 44px minmax(0,1fr); }
       #main { overflow: hidden; padding: 8px; gap: 8px; }
       #center { height: 100%; gap: 7px; }
-      .orb-wrap { transform: scale(var(--orb-scale,1)); margin: calc((var(--orb-scale,1) - 1) * 170px) 0; }
+      .orb-wrap { transform: translateY(var(--globe-shift,0px)) scale(calc(var(--orb-scale,1) * var(--globe-scale,1))); margin: calc((var(--orb-scale,1) - 1) * 170px) 0; }
       .center-col { width: 100%; }
       #stage-bar { display: none; }
       #convo { min-height: 90px; }
@@ -1463,6 +1937,33 @@
     </div>
   </header>
 
+  <div class="globe-veil"></div>
+  <div id="tk-label"></div>
+  <div id="tk-card" hidden></div>
+
+  <div id="remote" hidden>
+    <div class="rm-frame">
+      <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
+      <div class="rm-head">
+        <div class="widget-title"><div class="sq"></div><span id="rm-app">DESKTOP</span></div>
+        <div class="rm-meta">
+          <span class="rm-stat" id="rm-count">—</span>
+          <button class="rm-act" id="rm-refresh" type="button">REFRESH</button>
+          <button class="rm-act" id="rm-close" type="button">CLOSE</button>
+        </div>
+      </div>
+      <div class="rm-title" id="rm-title"></div>
+      <div class="rm-stage" id="rm-stage"><div class="rm-window" id="rm-window"></div></div>
+      <div class="rm-foot">
+        <div class="rm-hint" id="rm-hint">TAP A CONTROL TO PRESS IT</div>
+        <form class="rm-type" id="rm-type" hidden>
+          <input id="rm-input" type="text" autocomplete="off" spellcheck="false" placeholder="TEXT TO TYPE" />
+          <button type="submit" class="rm-act">SEND</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <div id="main">
 
     <!-- LEFT -->
@@ -1537,10 +2038,13 @@
         <div class="ring r5"></div>
         <div class="tri-ring" id="tri-ring"></div>
         <canvas id="orbc" width="340" height="340"></canvas>
+        <canvas id="globec"></canvas>
+        <canvas id="takec"></canvas>
         <div class="orb-bloom" id="orb-bloom"></div>
         <div class="orb-core s-idle" id="orb-core"></div>
         <div class="orb-glint" id="orb-glint"></div>
         <div class="orb-cta" id="orb-cta">CLICK TO SPEAK</div>
+        <div class="globe-label" id="globe-label"></div>
         <button class="orb-hit" id="orb-hit" type="button" aria-label="Talk to NORA"></button>
       </div>
 
@@ -1651,10 +2155,23 @@
           <div class="widget-title"><div class="sq"></div>SPOTIFY</div>
           <div class="mus-src-pill" id="mus-src">—</div>
         </div>
+        <div class="mus-art" id="mus-art">
+          <img id="mus-cover" alt="" decoding="async">
+          <div class="mus-art-none">NO ARTWORK</div>
+          <div class="mus-status" id="mus-status"><div class="dot"></div><span id="mus-status-lbl">IDLE</span></div>
+          <i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
+        </div>
         <div class="mus-track" id="mus-track">NO TRACK</div>
         <div class="mus-artist" id="mus-artist">—</div>
-        <div class="mus-status" id="mus-status"><div class="dot"></div><span id="mus-status-lbl">IDLE</span></div>
-        <div class="mus-progress"><div class="mus-progress-fill" id="mus-prog"></div></div>
+        <div class="mus-album" id="mus-album"></div>
+        <div class="mus-seek idle" id="mus-seek" role="slider" tabindex="0"
+             aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"
+             aria-valuetext="0:00">
+          <div class="mus-progress">
+            <div class="mus-progress-fill" id="mus-prog"></div>
+            <div class="mus-seek-head" id="mus-seek-head"></div>
+          </div>
+        </div>
         <div class="mus-times"><span id="mus-elapsed">0:00</span><span id="mus-total">0:00</span></div>
         <div class="mus-ctrls">
           <button class="mus-btn" data-act="prev">«</button>
@@ -1708,6 +2225,12 @@
 <div id="ws-ind">HTTP</div>
 <button id="audio-unlock" hidden>TAP FOR AUDIO</button>
 
+<!-- Globe geometry (Natural Earth coastlines, borders, lakes). Same-origin,
+     loaded synchronously so the main script can precompute against it. If the
+     request fails the globe falls back to graticule-only rather than dying. -->
+<script src="/geo.js"></script>
+<script src="/takeovers.js"></script>
+<script src="/remote.js"></script>
 <script>
 'use strict';
 
@@ -2111,6 +2634,7 @@ function refreshOrbCta() {
   const held = document.getElementById('ptt').classList.contains('held');
   orbCtaEl.textContent = held            ? 'CLICK TO SEND'
                        : orbState === 'speaking' ? 'CLICK TO INTERRUPT'
+                       : globeActive     ? 'CLICK TO CLOSE MAP'
                        : 'CLICK TO SPEAK';
 }
 
@@ -2178,6 +2702,9 @@ orbHitEl.addEventListener('click', e => {
   orbWrapEl.classList.remove('punch');
   void orbWrapEl.offsetWidth;              // restart the animation
   orbWrapEl.classList.add('punch');
+  // While the globe is up, the orb is a dismiss button first — you should not
+  // have to wait out the hold to get your orb back.
+  if (globeActive && orbState !== 'speaking') { shrinkGlobeBack(); refreshOrbCta(); return; }
   // Mid-reply the orb cuts her off; otherwise it is the talk button.
   if (orbState === 'speaking' && !pttActive) interrupt();
   else pttSet(!pttActive);
@@ -2193,7 +2720,9 @@ orbHitEl.addEventListener('keydown', e => { if (e.key === ' ') e.preventDefault(
 let lastFrameT = 0;
 function drawOrb(ts) {
   requestAnimationFrame(drawOrb);
-  if (orbState === 'idle' && ts - lastFrameT < 33) return; // ~30fps in idle
+  // ~30fps at rest, but a rotating globe judders at that rate, so a live
+  // takeover buys the frame budget back.
+  if (orbState === 'idle' && ts - lastFrameT < (globeActive ? 20 : 33)) return;
   lastFrameT = ts;
   oc.clearRect(0, 0, W, H);
 
@@ -2310,6 +2839,7 @@ function drawOrb(ts) {
     oc.restore();
   }
   drawRipples();
+  if (globeActive) drawGlobe(ts);
 }
 requestAnimationFrame(drawOrb);
 
@@ -2354,6 +2884,531 @@ function stageToState(stage) {
 }
 
 // ═══════════════════════════════════════════════════
+//  GLOBE MORPH — orb takeover for "tell me about <place>"
+//  Hand-rolled Canvas2D, not a 3D library: rides the same rAF tick as
+//  drawOrb() (gated by globeActive so idle frames cost nothing) and shares
+//  the orb's STATE_RGB palette so it recolours with listening/thinking/
+//  speaking automatically instead of needing its own colour logic.
+//
+//  Geometry comes from /geo.js — real Natural Earth coastlines, country
+//  borders and lakes, ~12k points. Every point is converted to a unit-sphere
+//  vector once at load; a frame is then just a rotation and an orthographic
+//  drop, which is what makes that much geometry affordable at 60fps.
+// ═══════════════════════════════════════════════════
+const globec = document.getElementById('globec');
+const gc     = globec.getContext('2d');
+
+// Drawing happens in the element's own 340 CSS px. The backing store is
+// oversampled because --globe-scale then blows the whole wrap up ~2.5x on
+// top of the device pixel ratio — drawing 1:1 and letting the compositor
+// stretch the result was why the old globe read as soft.
+const GW = 340, GCX = 170, GCY = 170, GR = 116;
+const GPX = Math.min(4, Math.max(2.2, (devicePixelRatio || 1) * 2.6));
+globec.width = globec.height = Math.round(GW * GPX);
+gc.setTransform(GPX, 0, 0, GPX, 0, 0);
+
+const D2R = Math.PI / 180, TAU = Math.PI * 2;
+const GTILT_REST = 23 * D2R;
+
+// Fixed screen-space key light, upper-left. A real sun terminator was the
+// other option and it looked worse: it drifts, so half the time the place
+// you just asked about sits in the dark.
+const GLX = GCX - GR * 0.42, GLY = GCY - GR * 0.46;
+
+let globeActive = false;
+let globeRotY = 0, globeTargetRotY = 0, globePinRot = 0;
+let globeTilt = GTILT_REST, globeTargetTilt = GTILT_REST;
+let globePin = null, globeHideTimer = null, pinBounceStart = 0;
+
+// ── Geometry prep ──────────────────────────────────────────────────────────
+// Rings arrive flat ([lat,lon,lat,lon,…]) and leave as unit vectors plus a
+// bounding cap. The cap lets a whole ring be rejected with one dot product
+// when it is entirely behind the planet, which on any given frame is about
+// half of them.
+function _prepRings(src) {
+  const out = [];
+  if (!src) return out;
+  for (const flat of src) {
+    const n = flat.length >> 1;
+    if (n < 2) continue;
+    const xyz = new Float32Array(n * 3);
+    let ax = 0, ay = 0, az = 0;
+    for (let i = 0; i < n; i++) {
+      const lat = flat[i * 2] * D2R, lon = flat[i * 2 + 1] * D2R;
+      const cl = Math.cos(lat);
+      const x = cl * Math.sin(lon), y = Math.sin(lat), z = cl * Math.cos(lon);
+      xyz[i * 3] = x; xyz[i * 3 + 1] = y; xyz[i * 3 + 2] = z;
+      ax += x; ay += y; az += z;
+    }
+    const m = Math.hypot(ax, ay, az) || 1;
+    ax /= m; ay /= m; az /= m;
+    let minDot = 1;
+    for (let i = 0; i < n; i++) {
+      const d = ax * xyz[i * 3] + ay * xyz[i * 3 + 1] + az * xyz[i * 3 + 2];
+      if (d < minDot) minDot = d;
+    }
+    // sinRho = 1 for caps wider than a hemisphere, which disables the cull
+    // for them rather than letting the bound go wrong.
+    out.push({ xyz, n, ax, ay, az,
+               sinRho: minDot <= 0 ? 1 : Math.sqrt(1 - minDot * minDot) });
+  }
+  return out;
+}
+
+function _mesh(stepLat, stepLon, skipKey) {
+  const rings = [];
+  for (let lat = -75; lat <= 75; lat += stepLat) {
+    if (skipKey && lat === 0) continue;
+    const f = [];
+    for (let lon = -180; lon <= 180; lon += 4) f.push(lat, lon);
+    rings.push(f);
+  }
+  for (let lon = -180; lon < 180; lon += stepLon) {
+    if (skipKey && (lon === 0 || lon === -180)) continue;
+    const f = [];
+    for (let lat = -90; lat <= 90; lat += 4) f.push(lat, lon);
+    rings.push(f);
+  }
+  return rings;
+}
+
+function _keyLines() {
+  const eq = [], pm = [], am = [];
+  for (let lon = -180; lon <= 180; lon += 4) eq.push(0, lon);
+  for (let lat = -90; lat <= 90; lat += 4) { pm.push(lat, 0); am.push(lat, 180); }
+  return [eq, pm, am];
+}
+
+const GEO = {
+  land:    _prepRings(typeof GLOBE_LAND    !== 'undefined' ? GLOBE_LAND    : null),
+  borders: _prepRings(typeof GLOBE_BORDERS !== 'undefined' ? GLOBE_BORDERS : null),
+  lakes:   _prepRings(typeof GLOBE_LAKES   !== 'undefined' ? GLOBE_LAKES   : null),
+  mesh:    _prepRings(_mesh(15, 15, true)),
+  keys:    _prepRings(_keyLines()),
+};
+
+// Phones redraw the same 12k points into a third of the GPU budget, so they
+// get coastlines and mesh only — borders and the double-pass coast glow are
+// the two most expensive layers and the least visible at that size. Read live
+// off the query rather than latched at load, so rotating a tablet doesn't
+// leave it in the wrong tier.
+const GLOBE_LITE_MQ = matchMedia('(max-width: 768px)');
+
+// Seeded, so the sky is the same one every time the globe opens rather than a
+// new constellation per invocation — and baked into four prebuilt paths at
+// load. Stars never move, and drawing them as 170 individual arcs with a
+// freshly parsed fillStyle each was, measurably, the single most expensive
+// thing in the frame: four fills of a static path instead of 340 calls took
+// the whole render from ~32ms to ~2ms on a software rasteriser. Each layer
+// twinkles on its own period, which is what keeps them from pulsing in unison.
+const GSTAR_LAYERS = (() => {
+  let s = 20180329;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const layers = [];
+  for (let i = 0; i < 4; i++) {
+    layers.push({ path: new Path2D(), period: 2400 + i * 1300, phase: rnd() * TAU });
+  }
+  for (let i = 0; i < 180; i++) {
+    const x = rnd() * GW, y = rnd() * GW, r = 0.22 + rnd() * 0.8;
+    const p = layers[i & 3].path;
+    p.moveTo(x + r, y);          // without this each arc joins the previous one
+    p.arc(x, y, r, 0, TAU);
+  }
+  return layers;
+})();
+
+// ── Projection ─────────────────────────────────────────────────────────────
+// Spin about Y, tilt about X, orthographic drop. z is kept only to cull and
+// shade the far side, not to drive a real camera.
+let _sx = new Float32Array(0), _sy = new Float32Array(0), _sz = new Float32Array(0);
+
+function _projectRing(ring, cr, sr, ct, st) {
+  const { xyz, n } = ring;
+  if (_sx.length < n) {
+    _sx = new Float32Array(n); _sy = new Float32Array(n); _sz = new Float32Array(n);
+  }
+  for (let i = 0; i < n; i++) {
+    const x = xyz[i * 3], y = xyz[i * 3 + 1], z = xyz[i * 3 + 2];
+    const x1 = x * cr + z * sr;
+    const z1 = z * cr - x * sr;
+    const y2 = y * ct - z1 * st;
+    _sx[i] = GCX + x1 * GR;
+    _sy[i] = GCY - y2 * GR;
+    _sz[i] = y * st + z1 * ct;
+  }
+  return n;
+}
+
+function _proj(x, y, z, cr, sr, ct, st, k) {
+  const x1 = x * cr + z * sr;
+  const z1 = z * cr - x * sr;
+  const y2 = y * ct - z1 * st;
+  return { x: GCX + x1 * GR * k, y: GCY - y2 * GR * k, z: y * st + z1 * ct };
+}
+
+function _capHidden(ring, cr, sr, ct, st) {
+  const x = ring.ax, y = ring.ay, z = ring.az;
+  const z1 = z * cr - x * sr;
+  return (y * st + z1 * ct) <= -ring.sinRho;
+}
+
+// Every layer accumulates into ONE Path2D and is painted in a single call.
+// Stroking each of the four hundred coastline rings separately was the whole
+// frame budget in call overhead — same pixels, ~2000 draw calls instead of a
+// handful. Islands never overlap, so nonzero winding fills them correctly as
+// subpaths of a shared path.
+//
+// Fills pin back-facing vertices to the limb, so a landmass straddling the
+// horizon still closes along the edge of the disc instead of folding a false
+// wedge through the middle of the planet.
+function _addFill(p, n) {
+  for (let i = 0; i < n; i++) {
+    let x = _sx[i], y = _sy[i];
+    if (_sz[i] < 0) {
+      const dx = x - GCX, dy = y - GCY, m = Math.hypot(dx, dy) || 1;
+      x = GCX + dx / m * GR; y = GCY + dy / m * GR;
+    }
+    if (i === 0) p.moveTo(x, y); else p.lineTo(x, y);
+  }
+  p.closePath();
+}
+
+// Strokes get the opposite treatment: broken into genuinely visible runs, so
+// the limb-pinned vertices above don't paint a bright false coastline all the
+// way around the horizon.
+function _addStroke(p, n) {
+  let open = false;
+  for (let i = 0; i < n; i++) {
+    if (_sz[i] <= 0.004) { open = false; continue; }
+    if (open) p.lineTo(_sx[i], _sy[i]);
+    else { p.moveTo(_sx[i], _sy[i]); open = true; }
+  }
+}
+
+function _linePath(rings, cr, sr, ct, st) {
+  const p = new Path2D();
+  for (const ring of rings) {
+    if (_capHidden(ring, cr, sr, ct, st)) continue;
+    _addStroke(p, _projectRing(ring, cr, sr, ct, st));
+  }
+  return p;
+}
+
+// ── Frame ──────────────────────────────────────────────────────────────────
+function drawGlobe(ts) {
+  gc.clearRect(0, 0, GW, GW);
+
+  if (globePin) {
+    // Settled on a place: a slow sway keeps the planet alive without walking
+    // the pin off the centre of the disc.
+    globeTargetRotY = globePinRot + Math.sin(ts / 7000) * 0.085;
+  } else {
+    globeTargetRotY -= 0.0026;                 // idle drift before a place lands
+  }
+  globeRotY  += (globeTargetRotY - globeRotY) * 0.055;
+  globeTilt  += (globeTargetTilt - globeTilt) * 0.055;
+
+  const cr = Math.cos(globeRotY), sr = Math.sin(globeRotY);
+  const ct = Math.cos(globeTilt), st = Math.sin(globeTilt);
+
+  const [r, g, b] = STATE_RGB[orbState] || STATE_RGB.idle;
+  const lite = GLOBE_LITE_MQ.matches;
+  const acc  = a => `rgba(${r},${g},${b},${a})`;
+  // Ocean is the accent pulled most of the way down to deep navy: themed with
+  // the rest of the dashboard, but never a flat slab of the accent colour.
+  const sea = (f, a) => {
+    const t = f * 0.5;
+    return `rgba(${Math.round(4 + (r - 4) * t)},${Math.round(10 + (g - 10) * t)},` +
+           `${Math.round(22 + (b - 22) * t)},${a === undefined ? 1 : a})`;
+  };
+
+  // 1 ── star field
+  for (const L of GSTAR_LAYERS) {
+    const a = 0.09 + 0.2 * (0.5 + 0.5 * Math.sin(ts / L.period + L.phase));
+    gc.fillStyle = `rgba(198,226,255,${a.toFixed(3)})`;
+    gc.fill(L.path);
+  }
+
+  // 2 ── instrument ring: fixed graduations plus two slowly counter-rotating
+  //      arcs, so the chrome the orb's rings normally provide doesn't vanish
+  //      the moment the globe takes over.
+  const hudR = GR * 1.13;
+  gc.save(); gc.translate(GCX, GCY);
+  gc.strokeStyle = acc(0.17); gc.lineWidth = 0.7;
+  gc.beginPath();
+  for (let a = 0; a < 360; a += 5) {
+    const t = a * D2R, c = Math.cos(t), s = Math.sin(t), len = a % 30 === 0 ? 6 : 2.6;
+    gc.moveTo(c * hudR, s * hudR);
+    gc.lineTo(c * (hudR + len), s * (hudR + len));
+  }
+  gc.stroke();
+  gc.rotate(ts / 26000);
+  gc.strokeStyle = acc(0.38); gc.lineWidth = 1.2;
+  gc.beginPath(); gc.arc(0, 0, GR * 1.21, -0.46, 0.46); gc.stroke();
+  gc.beginPath(); gc.arc(0, 0, GR * 1.21, Math.PI - 0.46, Math.PI + 0.46); gc.stroke();
+  gc.restore();
+
+  // 3 ── atmosphere
+  const atmo = gc.createRadialGradient(GCX, GCY, GR * 0.9, GCX, GCY, GR * 1.3);
+  atmo.addColorStop(0, acc(0.05));
+  atmo.addColorStop(0.22, acc(0.28));
+  atmo.addColorStop(1, acc(0));
+  gc.fillStyle = atmo;
+  gc.beginPath(); gc.arc(GCX, GCY, GR * 1.3, 0, TAU); gc.fill();
+
+  // 4 ── ocean sphere, lit off-centre so it reads as a ball
+  const body = gc.createRadialGradient(GLX, GLY, GR * 0.04, GCX, GCY, GR * 1.06);
+  body.addColorStop(0, sea(1.05));
+  body.addColorStop(0.42, sea(0.66));
+  body.addColorStop(0.78, sea(0.34));
+  body.addColorStop(1, sea(0.14));
+  gc.fillStyle = body;
+  gc.beginPath(); gc.arc(GCX, GCY, GR, 0, TAU); gc.fill();
+
+  gc.save();
+  gc.beginPath(); gc.arc(GCX, GCY, GR, 0, TAU); gc.clip();
+
+  // 5 ── graticule
+  gc.lineWidth = 0.55; gc.strokeStyle = acc(0.13);
+  gc.stroke(_linePath(GEO.mesh, cr, sr, ct, st));
+  gc.lineWidth = 0.9; gc.strokeStyle = acc(0.3);
+  gc.stroke(_linePath(GEO.keys, cr, sr, ct, st));
+
+  // 6 ── land: one fill pass, then a soft wide stroke under a crisp thin one.
+  //      Two strokes beat shadowBlur here — the same halo without paying blur
+  //      costs, and both run off a single accumulated path.
+  const landFill = new Path2D(), landLine = new Path2D();
+  for (const ring of GEO.land) {
+    if (_capHidden(ring, cr, sr, ct, st)) continue;
+    const n = _projectRing(ring, cr, sr, ct, st);
+    _addFill(landFill, n);
+    _addStroke(landLine, n);
+  }
+  const landG = gc.createRadialGradient(GLX, GLY, GR * 0.04, GCX, GCY, GR * 1.08);
+  landG.addColorStop(0, acc(0.5));
+  landG.addColorStop(0.55, acc(0.31));
+  landG.addColorStop(1, acc(0.13));
+  gc.fillStyle = landG; gc.fill(landFill);
+  if (!lite) { gc.strokeStyle = acc(0.14); gc.lineWidth = 2.6; gc.stroke(landLine); }
+  gc.strokeStyle = acc(0.96); gc.lineWidth = 0.75; gc.stroke(landLine);
+
+  // 7 ── inland water, punched back out of the land
+  const lakePath = new Path2D();
+  for (const ring of GEO.lakes) {
+    if (_capHidden(ring, cr, sr, ct, st)) continue;
+    _addFill(lakePath, _projectRing(ring, cr, sr, ct, st));
+  }
+  gc.fillStyle = sea(0.42, 0.9); gc.fill(lakePath);
+
+  // 8 ── country borders
+  if (!lite) {
+    gc.lineWidth = 0.5; gc.strokeStyle = acc(0.36);
+    gc.stroke(_linePath(GEO.borders, cr, sr, ct, st));
+  }
+
+  // 9 ── lighting, applied over everything so land and sea fall into night
+  //      together. Radial falloff from the key light stands in for a Lambert
+  //      term: specular core, day sheen and night falloff are all centred on
+  //      the same point, so they collapse into one gradient rather than three
+  //      full-disc composites.
+  const lightG = gc.createRadialGradient(GLX, GLY, 0, GLX, GLY, GR * 2.05);
+  lightG.addColorStop(0, 'rgba(255,255,255,0.15)');
+  lightG.addColorStop(0.055, 'rgba(214,244,255,0.15)');
+  lightG.addColorStop(0.2, 'rgba(190,236,255,0.07)');
+  lightG.addColorStop(0.44, 'rgba(0,4,12,0.06)');
+  lightG.addColorStop(0.72, 'rgba(0,4,12,0.28)');
+  lightG.addColorStop(1, 'rgba(0,3,9,0.66)');
+  gc.fillStyle = lightG;
+  gc.beginPath(); gc.arc(GCX, GCY, GR, 0, TAU); gc.fill();
+  gc.restore();
+
+  // 10 ── rim: bright where the light grazes the limb, dark opposite
+  const rim = gc.createLinearGradient(GCX - GR, GCY - GR, GCX + GR, GCY + GR);
+  rim.addColorStop(0, `rgba(${Math.min(255, r + 120)},${Math.min(255, g + 60)},255,0.85)`);
+  rim.addColorStop(0.45, acc(0.3));
+  rim.addColorStop(1, acc(0.05));
+  // Three widening strokes rather than shadowBlur: a canvas shadow forces a
+  // full-surface blur pass every frame, and this is indistinguishable at the
+  // sizes involved.
+  gc.strokeStyle = acc(0.07); gc.lineWidth = 7;
+  gc.beginPath(); gc.arc(GCX, GCY, GR + 1.5, 0, TAU); gc.stroke();
+  gc.strokeStyle = acc(0.13); gc.lineWidth = 3;
+  gc.beginPath(); gc.arc(GCX, GCY, GR + 0.5, 0, TAU); gc.stroke();
+  gc.strokeStyle = rim; gc.lineWidth = 1.2;
+  gc.beginPath(); gc.arc(GCX, GCY, GR - 0.4, 0, TAU); gc.stroke();
+
+  // 11 ── an inclined orbit with something on it, purely to give the eye a
+  //       moving reference that isn't the planet's own rotation
+  gc.save(); gc.translate(GCX, GCY); gc.rotate(-0.32);
+  gc.strokeStyle = acc(0.16); gc.lineWidth = 0.7;
+  gc.beginPath(); gc.ellipse(0, 0, GR * 1.08, GR * 0.29, 0, 0, TAU); gc.stroke();
+  const oth = ts / 5400;
+  gc.fillStyle = acc(0.95);
+  gc.beginPath(); gc.arc(Math.cos(oth) * GR * 1.08, Math.sin(oth) * GR * 0.29, 1.9, 0, TAU); gc.fill();
+  gc.restore();
+
+  if (globePin) drawGlobePin(ts, cr, sr, ct, st, acc);
+}
+
+// ── Pin ────────────────────────────────────────────────────────────────────
+function drawGlobePin(ts, cr, sr, ct, st, acc) {
+  const lat = globePin.lat * D2R, lon = globePin.lon * D2R;
+  const cl = Math.cos(lat), sl = Math.sin(lat);
+  const px = cl * Math.sin(lon), py = sl, pz = cl * Math.cos(lon);
+  const surf = _proj(px, py, pz, cr, sr, ct, st, 1);
+  if (surf.z < -0.12) return;                    // rotated round the far side
+
+  const vis = Math.max(0, Math.min(1, (surf.z + 0.12) / 0.35));
+  const t = Math.min(1, (ts - pinBounceStart) / 620);
+  const drop = t < 1 ? (1 - t) * (1 - t) : 0;    // beam lands rather than appears
+
+  // Tangent basis at the pin, for drawing circles that lie ON the sphere
+  // rather than flat ellipses pasted over it.
+  const ex = Math.cos(lon), ez = -Math.sin(lon);
+  const nx = -sl * Math.sin(lon), ny = cl, nz = -sl * Math.cos(lon);
+
+  // Sonar rings, expanding across the surface
+  for (let i = 0; i < 3; i++) {
+    const ph = ((ts / 1700) + i / 3) % 1;
+    const rho = 0.035 + ph * 0.2, a = (1 - ph) * 0.45 * vis;
+    if (a <= 0.01) continue;
+    const cRho = Math.cos(rho), sRho = Math.sin(rho);
+    gc.beginPath();
+    let open = false;
+    for (let k = 0; k <= 40; k++) {
+      const th = k / 40 * TAU, cth = Math.cos(th) * sRho, sth = Math.sin(th) * sRho;
+      const q = _proj(px * cRho + ex * cth + nx * sth,
+                      py * cRho +      0    + ny * sth,
+                      pz * cRho + ez * cth + nz * sth, cr, sr, ct, st, 1.002);
+      if (q.z <= 0) { open = false; continue; }
+      if (open) gc.lineTo(q.x, q.y); else { gc.moveTo(q.x, q.y); open = true; }
+    }
+    gc.strokeStyle = `rgba(255,138,96,${a.toFixed(3)})`;
+    gc.lineWidth = 1; gc.stroke();
+  }
+
+  // Beam out along the surface normal, drawn by projecting the same vector at
+  // a larger radius — that keeps it foreshortened correctly near the limb.
+  const tipK = 1.055 + 0.16 * (1 - drop);
+  const tip = _proj(px, py, pz, cr, sr, ct, st, tipK);
+  const beam = gc.createLinearGradient(surf.x, surf.y, tip.x, tip.y);
+  beam.addColorStop(0, `rgba(255,120,80,${0.05 * vis})`);
+  beam.addColorStop(1, `rgba(255,190,150,${0.85 * vis})`);
+  gc.strokeStyle = beam; gc.lineWidth = 1.4;
+  gc.beginPath(); gc.moveTo(surf.x, surf.y); gc.lineTo(tip.x, tip.y); gc.stroke();
+
+  gc.save();
+  gc.shadowColor = 'rgba(255,90,60,0.95)'; gc.shadowBlur = 13;
+  const pulse = 1 + Math.sin(ts / 300) * 0.1 + voiceLvl * 0.3;
+  gc.fillStyle = `rgba(255,116,84,${vis})`;
+  gc.beginPath(); gc.arc(tip.x, tip.y, 3.1 * pulse, 0, TAU); gc.fill();
+  gc.restore();
+  gc.fillStyle = `rgba(255,232,214,${vis})`;
+  gc.beginPath(); gc.arc(tip.x, tip.y, 1.2, 0, TAU); gc.fill();
+
+  // Reticle + coordinate readout, flipped to whichever side has room
+  const left = tip.x > GCX;
+  const dir = left ? -1 : 1;
+  const lx = tip.x + dir * 16, ly = tip.y - 13;
+  gc.strokeStyle = `rgba(255,150,110,${0.55 * vis})`; gc.lineWidth = 0.8;
+  gc.beginPath();
+  gc.moveTo(tip.x + dir * 5, tip.y - 4);
+  gc.lineTo(lx, ly);
+  gc.lineTo(lx + dir * 46, ly);
+  gc.stroke();
+
+  const ns = globePin.lat >= 0 ? 'N' : 'S', ew = globePin.lon >= 0 ? 'E' : 'W';
+  gc.font = '600 6.4px ui-monospace, SFMono-Regular, Menlo, monospace';
+  gc.textAlign = left ? 'right' : 'left';
+  gc.textBaseline = 'bottom';
+  gc.fillStyle = `rgba(255,214,192,${0.92 * vis})`;
+  gc.fillText(`${Math.abs(globePin.lat).toFixed(2)}°${ns}  ${Math.abs(globePin.lon).toFixed(2)}°${ew}`,
+              lx + dir * 2, ly - 2.5);
+  gc.textAlign = 'left'; gc.textBaseline = 'alphabetic';
+}
+
+// ── Show / hide ────────────────────────────────────────────────────────────
+// The hold is armed here as well as on the idle transition, because the two
+// can arrive in either order (and in a single /state poll they arrive
+// together). Arming it only on the transition was why the globe could stay
+// up forever: if the pipeline had already gone idle by the time the location
+// reached the page, the edge that armed the timer had passed.
+const GLOBE_HOLD_MS = 25000;
+
+function armGlobeHide(ms) {
+  clearTimeout(globeHideTimer);
+  globeHideTimer = setTimeout(shrinkGlobeBack, ms);
+}
+
+// The orb sits in the upper third of the centre column, which is fine at orb
+// size and wrong at globe size — a fixed --globe-scale clipped the planet
+// against the header on short windows and dropped the label into the
+// transcript on tall ones. So the takeover measures instead: how far to slide
+// down to land in the middle of #main, and the largest scale that still keeps
+// the atmosphere inside it.
+const GLOBE_EXTENT = GR * 1.32 / 340;    // outer glow radius, as a fraction of the wrap
+function fitGlobe() {
+  const main = document.getElementById('main');
+  if (!main) return;
+  const box = main.getBoundingClientRect();
+  const r = orbWrap.getBoundingClientRect();
+  // scale() is about the centre, so the rect's centre is the layout centre
+  // plus whatever translate is live right now — which is the previous shift,
+  // and only while the takeover is actually applying it.
+  const applied = orbWrap.dataset.globe === 'in'
+    ? parseFloat(orbWrap.style.getPropertyValue('--globe-fit-y')) || 0 : 0;
+  const shift = (box.top + box.height / 2) - (r.top + r.height / 2) + applied;
+  const orbScale = parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--orb-scale')) || 1;
+  const half = Math.min(box.height, box.width) / 2 - 14;
+  const fit = Math.max(1.3, Math.min(4.2, half / (340 * GLOBE_EXTENT * orbScale)));
+  orbWrap.style.setProperty('--globe-fit', fit.toFixed(3));
+  orbWrap.style.setProperty('--globe-fit-y', Math.round(shift) + 'px');
+}
+
+function showGlobeLocation({ name, country, lat, lon }) {
+  // The globe and the constellations drive the same --globe-scale at equal
+  // specificity, so only one of them may hold the orb at a time.
+  if (window.NORA_TAKEOVERS && NORA_TAKEOVERS.active()) NORA_TAKEOVERS.hide();
+  globePin = { lat, lon, name, country };
+  // Unwrap the target to within half a turn of where the globe currently is,
+  // so it always spins the short way round to the place.
+  globePinRot = -lon * D2R;
+  while (globePinRot - globeRotY >  Math.PI) globePinRot -= TAU;
+  while (globePinRot - globeRotY < -Math.PI) globePinRot += TAU;
+  globeTargetRotY = globePinRot;
+  // Tilt toward the latitude so the place sits near the middle of the disc
+  // instead of clinging to the top or bottom edge; 0.9 keeps a little of the
+  // original lean so it still reads as a tilted planet.
+  globeTargetTilt = Math.max(-62, Math.min(62, lat)) * D2R * 0.9;
+  pinBounceStart = performance.now();
+  globeActive = true;
+  fitGlobe();                       // measure before the attribute lands, so the
+  orbWrap.dataset.globe = 'in';     // transform transitions to a finished value
+  document.body.dataset.globe = 'in';
+  const label = document.getElementById('globe-label');
+  if (label) label.textContent = name + (country ? ', ' + country : '');
+  refreshOrbCta();
+  armGlobeHide(GLOBE_HOLD_MS);
+}
+
+function shrinkGlobeBack() {
+  clearTimeout(globeHideTimer);
+  if (!globeActive) return;
+  orbWrap.dataset.globe = 'out';
+  delete document.body.dataset.globe;
+  globePin = null;
+  globeTargetTilt = GTILT_REST;
+  setTimeout(() => {
+    if (orbWrap.dataset.globe !== 'out') return;   // a new place arrived mid-fade
+    globeActive = false;
+    delete orbWrap.dataset.globe;  // drop it once settled so a later window
+    gc.clearRect(0, 0, GW, GW);    // resize doesn't inherit the morph transition
+    refreshOrbCta();
+  }, 780);
+}
+
+// ═══════════════════════════════════════════════════
 //  STAGE BAR
 // ═══════════════════════════════════════════════════
 const STAGE_IDS = ['listening','transcribing','guarding','thinking','acting','speaking'];
@@ -2370,6 +3425,11 @@ function setStage(stage) {
   const active = new Set(STAGE_SETS[stage] || []);
   STAGE_IDS.forEach(id => { const el = document.getElementById('stg-' + id); if (el) el.className = 'stg' + (active.has(id) ? ' active' : ''); });
   setOrbState(stageToState(stage));
+  // Restart the hold once she stops talking, so the countdown measures time
+  // spent looking at the globe rather than time spent listening to the blurb.
+  // showGlobeLocation() has already armed one, so a missed idle edge can no
+  // longer strand the globe on screen.
+  if (stage === 'idle' && globeActive) armGlobeHide(GLOBE_HOLD_MS);
 }
 
 // ═══════════════════════════════════════════════════
@@ -2602,21 +3662,37 @@ function addActivity(msg, ok = null) {
   _prependItem(entry);
 }
 
+// The empty placeholder lives inside #act-list, so nothing here may remove it
+// or clear the list wholesale: lose it once and every later addActivity()
+// throws on a null deref. Only .act-item nodes are ever added or trimmed.
+function _setEmpty(shown) {
+  const e = document.getElementById('act-empty');
+  if (e) e.style.display = shown ? '' : 'none';
+}
+
+function _clearItems(list) {
+  list.querySelectorAll('.act-item').forEach(n => n.remove());
+}
+
 function _prependItem(a) {
   const list = document.getElementById('act-list');
-  document.getElementById('act-empty').style.display = 'none';
+  if (!list) return;
+  _setEmpty(false);
   const dot = a.ok===false?'<div class="act-err"></div>':a.ok===true?'<div class="act-ok"></div>':'';
   const el = document.createElement('div'); el.className = 'act-item fresh';
   el.innerHTML = `<div class="act-time">${a.t}</div>${dot}<div>${a.msg}</div>`;
   list.insertBefore(el, list.firstChild);
-  while (list.children.length > 21) list.removeChild(list.lastChild);
+  let items = list.querySelectorAll('.act-item');
+  while (items.length > 20) { items[items.length - 1].remove(); items = list.querySelectorAll('.act-item'); }
   setTimeout(() => el.classList.remove('fresh'), 2500);
 }
 
 function _renderAll() {
-  const list = document.getElementById('act-list'); list.innerHTML = '';
-  if (!actLog.length) { document.getElementById('act-empty').style.display=''; return; }
-  document.getElementById('act-empty').style.display = 'none';
+  const list = document.getElementById('act-list');
+  if (!list) return;
+  _clearItems(list);
+  if (!actLog.length) { _setEmpty(true); return; }
+  _setEmpty(false);
   actLog.forEach(a => {
     const dot = a.ok===false?'<div class="act-err"></div>':a.ok===true?'<div class="act-ok"></div>':'';
     const el = document.createElement('div'); el.className = 'act-item';
@@ -2648,6 +3724,8 @@ const pttModePill = document.getElementById('ptt-mode-pill');
 const pttModeLbl  = document.getElementById('ptt-mode-lbl');
 let lastText      = '';
 let seqPrimed     = false;
+let lastLocationSeq = -1;
+let lastTakeoverSeq = -1;
 
 function applyState(d) {
   const stage = d.stage || (d.speaking ? 'speaking' : 'idle');
@@ -2664,10 +3742,48 @@ function applyState(d) {
     lastUserSeq  = d.user_seq  != null ? d.user_seq  : -1;
     lastReplySeq = d.reply_seq != null ? d.reply_seq : -1;
     lastText     = d.text || '';
+    lastLocationSeq = d.location_seq != null ? d.location_seq : -1;
+    lastTakeoverSeq = d.takeover_seq != null ? d.takeover_seq : -1;
     return;
   }
 
   if (d.user_text && d.user_seq != null) onUserTurn(d.user_text, d.user_seq);
+
+  // Rides the same state snapshot as everything else here — works whether this
+  // tab is on a live WebSocket or the HTTP polling fallback, unlike a bespoke
+  // WS-only message type would. Handled before the reply so the globe starts
+  // moving while the blurb is still being written into the transcript.
+  //
+  // Teardown deliberately is NOT driven off "a reply arrived without a place":
+  // over a WebSocket the place is pushed during `acting` and its own blurb
+  // lands one message later, so that rule would collapse the globe the instant
+  // it finished opening. The hold timer and the orb click are the two ways out.
+  if (d.location && d.location_seq != null && d.location_seq !== lastLocationSeq) {
+    lastLocationSeq = d.location_seq;
+    showGlobeLocation(d.location);
+  }
+
+  // Same contract as the place above — a kind plus a monotonic seq, so the
+  // takeover fires once per request and reaches this tab over either
+  // transport. "off" is a real kind: it lets a command dismiss whatever is
+  // up without waiting out the hold.
+  if (d.takeover && d.takeover_seq != null && d.takeover_seq !== lastTakeoverSeq) {
+    lastTakeoverSeq = d.takeover_seq;
+    const kind = d.takeover.kind;
+    // "desktop" is the odd one out: it is a control surface, not an orb
+    // takeover, so it rides the same channel but lands on its own overlay
+    // and never auto-hides. "off" still means everything goes away.
+    if (kind === 'desktop') {
+      if (window.NORA_TAKEOVERS) NORA_TAKEOVERS.hide();
+      if (window.NORA_REMOTE) NORA_REMOTE.show();
+    } else if (window.NORA_TAKEOVERS) {
+      if (window.NORA_REMOTE) NORA_REMOTE.hide();
+      if (kind === 'off') NORA_TAKEOVERS.hide();
+      else if (kind === 'memory' && d.takeover.focus) NORA_TAKEOVERS.focusMemories(d.takeover.focus);
+      else NORA_TAKEOVERS.show(kind);
+    }
+  }
+
   const fresh = d.reply_seq != null ? d.reply_seq !== lastReplySeq : d.text !== lastText;
   if (d.text && fresh) {
     if (d.reply_seq != null) lastReplySeq = d.reply_seq;
@@ -2753,6 +3869,19 @@ audioBtn.addEventListener('click', () => {
   playNextChunk();
 });
 
+function authToken() {
+  // Token travels in the query string so a remote device can authenticate
+  // when NORA_API_TOKEN is set: open the dashboard with ?token=…
+  // Read fresh on every call rather than captured once — a rejected token is
+  // cleared from storage, and a reconnect after that must not keep presenting
+  // the token the server just refused. The desktop remote calls this too, so
+  // the socket and the HTTP routes cannot drift apart.
+  const t = new URLSearchParams(location.search).get('token')
+         || localStorage.getItem('nora_token') || '';
+  if (t) localStorage.setItem('nora_token', t);
+  return t;
+}
+
 function connectWS() {
   let ws;
   // wss when the page itself is served over TLS (e.g. `tailscale serve`);
@@ -2761,9 +3890,7 @@ function connectWS() {
   const port   = location.protocol === 'https:' ? location.port || 443 : 8765;
   // Token travels in the query string so a remote device can authenticate
   // when NORA_API_TOKEN is set: open the dashboard with ?token=…
-  const token  = new URLSearchParams(location.search).get('token')
-              || localStorage.getItem('nora_token') || '';
-  if (token) localStorage.setItem('nora_token', token);
+  const token = authToken();
   const qs = token ? `?token=${encodeURIComponent(token)}` : '';
   const url = location.protocol === 'https:'
     ? `${scheme}://${location.hostname}:${port}/ws${qs}`
@@ -2834,12 +3961,17 @@ setInterval(pollMetrics, 3000); pollMetrics();
 //  MUSIC
 // ═══════════════════════════════════════════════════
 const musTrack=document.getElementById('mus-track'),musArtist=document.getElementById('mus-artist'),
-      musSrc=document.getElementById('mus-src'),musStatus=document.getElementById('mus-status'),
-      musStatLbl=document.getElementById('mus-status-lbl'),musProg=document.getElementById('mus-prog'),
+      musAlbum=document.getElementById('mus-album'),musSrc=document.getElementById('mus-src'),
+      musStatus=document.getElementById('mus-status'),musStatLbl=document.getElementById('mus-status-lbl'),
+      musProg=document.getElementById('mus-prog'),musSeek=document.getElementById('mus-seek'),
+      musSeekHead=document.getElementById('mus-seek-head'),musArt=document.getElementById('mus-art'),
+      musCover=document.getElementById('mus-cover'),
       musToggle=document.getElementById('mus-toggle'),musVol=document.getElementById('mus-vol'),
       musVolVal=document.getElementById('mus-vol-val'),musMute=document.getElementById('mus-mute'),
       musElapsed=document.getElementById('mus-elapsed'),musTotal=document.getElementById('mus-total');
 let volHeldUntil=0, isMuted=false;
+let coverUrl='', seekLen=0, seekPos=0, seekDrag=false, seekHeldUntil=0, seekTimer=null;
+let lastTrackSeen=null;
 function fmtDur(s) {
   s = Math.max(0, Math.round(s));
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -2856,12 +3988,29 @@ async function pollMusic() {
     musStatus.className   = 'mus-status'+(st==='playing'?' playing':st==='paused'?' paused':'');
     musStatLbl.textContent = st.toUpperCase();
     musToggle.textContent  = st==='playing'?'PAUSE':'PLAY';
+    // The album name only earns its line when it says something the title
+    // does not — singles are named after their own album constantly.
+    const album = d.album || '';
+    musAlbum.textContent = (album && album.toLowerCase() !== track.toLowerCase())
+                           ? album.toUpperCase() : '';
+    setCover(d.art_url || '');
+    musArt.classList.toggle('playing', st === 'playing');
+    // The album line comes and goes with the track, which changes how much
+    // room is left for the sleeve, so re-fit on a change rather than every
+    // poll — this reads layout.
+    if (track !== lastTrackSeen) { lastTrackSeen = track; fitCover(); }
+
     // Real MPRIS position, not a bar that crept forward on a timer and lied
     // the moment anything was seeked or paused outside NORA.
     const len = Number(d.length_sec) || 0, pos = Number(d.position_sec) || 0;
-    musProg.style.width = len > 0 ? Math.max(0, Math.min(100, pos / len * 100)) + '%' : '0%';
-    musElapsed.textContent = fmtDur(len > 0 ? pos : 0);
-    musTotal.textContent   = fmtDur(len);
+    seekLen = len;
+    musSeek.classList.toggle('idle', !(len > 0));
+    musSeek.setAttribute('aria-valuemax', Math.round(len));
+    musTotal.textContent = fmtDur(len);
+    // A drag in flight — or a seek the player has not caught up to yet —
+    // owns the bar. A poll landing in that window would snap it back to
+    // where the track was before the jump.
+    if (!seekDrag && performance.now() > seekHeldUntil) renderSeek(pos, len);
 
     // Don't yank the slider out from under a drag that is still in flight.
     if (d.volume != null && performance.now() > volHeldUntil) {
@@ -2894,6 +4043,153 @@ function setMuteUI(m) {
 musMute.addEventListener('click', () => {
   setMuteUI(!isMuted);
   musicCtl({ action: 'mute', muted: isMuted });
+});
+
+// ── Cover ──────────────────────────────────────────────────────────────
+// The sleeve used to be sphere-mapped onto the orb, where a square cover had
+// to be stretched over a ball. It is square here, and it lights its own card:
+// --art-rgb is the artwork's saturated average, so the glow belongs to the
+// record rather than to whatever accent the orb happens to be wearing.
+//
+// Two requests for one image, deliberately. The <img> is plain, so the cover
+// still shows if the CDN drops its CORS header; the second, CORS-flagged
+// load exists only so the pixels can be read for the colour. i.scdn.co sends
+// `access-control-allow-origin: *`, so in practice both come off one cache
+// entry and the colour is there.
+function setCover(url) {
+  if (url === coverUrl) return;
+  coverUrl = url;
+  if (!url) {
+    musArt.classList.remove('has-art');
+    musCover.removeAttribute('src');
+    musArt.style.removeProperty('--art-rgb');
+    return;
+  }
+  musCover.src = url;
+  musArt.classList.add('has-art');
+  const probe = new Image();
+  probe.crossOrigin = 'anonymous';
+  probe.onload = () => {
+    if (coverUrl !== url) return;              // track changed mid-flight
+    const rgb = dominantOf(probe);
+    if (rgb) musArt.style.setProperty('--art-rgb', rgb.join(','));
+    else musArt.style.removeProperty('--art-rgb');
+  };
+  probe.onerror = () => { if (coverUrl === url) musArt.style.removeProperty('--art-rgb'); };
+  probe.src = url;
+}
+
+// Average the saturated pixels only. A plain mean over an album cover is
+// reliably mud; what you want is the colour a person would name if you asked
+// them what colour the sleeve is.
+function dominantOf(img) {
+  try {
+    const N = 64, c = document.createElement('canvas');
+    c.width = c.height = N;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, N, N);
+    const d = g.getImageData(0, 0, N, N).data;
+    let r = 0, gr = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const R = d[i], G = d[i + 1], B = d[i + 2];
+      const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      if (mx < 40 || mx - mn < 28) continue;   // too dark or too grey to name
+      r += R; gr += G; b += B; n++;
+    }
+    if (!n) return null;
+    r /= n; gr /= n; b /= n;
+    // Lift toward the display's brightness range so it can hold a glow.
+    const mx = Math.max(r, gr, b) || 1, k = Math.min(255 / mx, 1.55);
+    return [Math.round(r * k), Math.round(gr * k), Math.round(b * k)];
+  } catch (_) {
+    return null;                               // tainted canvas: no CORS after all
+  }
+}
+
+// The sleeve takes whatever the column can spare. A fixed size is either a
+// postage stamp on a monitor or pushes the transport controls off the bottom
+// of a laptop panel — and the controls are the point of the card — so it is
+// measured, the same way the orb fits itself to #main.
+const musCard = document.getElementById('music-card');
+function fitCover() {
+  const panel = musCard.parentElement;
+  if (!panel || !panel.clientHeight || !musCard.offsetParent) return;
+  const card = musCard.getBoundingClientRect();
+  const rest = card.height - musArt.getBoundingClientRect().height;  // all but the sleeve
+  const room = panel.getBoundingClientRect().bottom - card.top - rest - 6;
+  // A floor, because on a short screen the honest answer is "no room at all"
+  // and a postage stamp is not what the card is for — the panel scrolls, and
+  // scrolling a little to reach the command log is the cheaper trade.
+  musArt.style.setProperty('--art-size', Math.round(Math.max(190, room)) + 'px');
+}
+addEventListener('resize', fitCover);
+fitCover();
+
+// ── Scrubbing ──────────────────────────────────────────────────────────
+// Drag, click or arrow-key the bar to move through the track. Everything
+// paints locally first and posts the seek after, because MPRIS keeps
+// reporting the old position for a beat and a UI that waits for it feels
+// broken.
+function renderSeek(pos, len) {
+  seekPos = Math.max(0, Math.min(len || 0, pos));
+  const pct = len > 0 ? seekPos / len * 100 : 0;
+  musProg.style.width = pct + '%';
+  musSeekHead.style.left = pct + '%';
+  musElapsed.textContent = fmtDur(len > 0 ? seekPos : 0);
+  musSeek.setAttribute('aria-valuenow', Math.round(seekPos));
+  musSeek.setAttribute('aria-valuetext', fmtDur(seekPos));
+}
+
+function commitSeek(pos) {
+  // Outlast the round trip plus one poll, or the bar snaps back to where the
+  // track was before the jump for a frame.
+  seekHeldUntil = performance.now() + 1800;
+  musicCtl({ action: 'seek', position: Math.round(pos) });
+}
+
+function seekPosAt(e) {
+  const r = musSeek.getBoundingClientRect();
+  if (!r.width) return 0;
+  return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * seekLen;
+}
+
+musSeek.addEventListener('pointerdown', e => {
+  if (!(seekLen > 0)) return;
+  seekDrag = true;
+  musSeek.classList.add('dragging');
+  // Capture keeps the drag alive once the pointer leaves a 3px-tall bar,
+  // which it does immediately.
+  try { musSeek.setPointerCapture(e.pointerId); } catch (_) {}
+  renderSeek(seekPosAt(e), seekLen);
+  e.preventDefault();
+});
+musSeek.addEventListener('pointermove', e => {
+  if (seekDrag) renderSeek(seekPosAt(e), seekLen);
+});
+function endSeekDrag() {
+  if (!seekDrag) return;
+  seekDrag = false;
+  musSeek.classList.remove('dragging');
+  commitSeek(seekPos);
+}
+musSeek.addEventListener('pointerup', endSeekDrag);
+musSeek.addEventListener('pointercancel', endSeekDrag);
+
+const SEEK_STEP = { ArrowRight: 5, ArrowLeft: -5, ArrowUp: 5, ArrowDown: -5,
+                    PageUp: 30, PageDown: -30 };
+musSeek.addEventListener('keydown', e => {
+  if (!(seekLen > 0)) return;
+  let target = null;
+  if (e.key in SEEK_STEP)   target = seekPos + SEEK_STEP[e.key];
+  else if (e.key === 'Home') target = 0;
+  else if (e.key === 'End')  target = seekLen - 5;
+  if (target === null) return;
+  e.preventDefault();
+  renderSeek(target, seekLen);
+  seekHeldUntil = performance.now() + 1800;
+  // One call per burst of arrow presses rather than one per press.
+  clearTimeout(seekTimer);
+  seekTimer = setTimeout(() => commitSeek(seekPos), 220);
 });
 
 // ═══════════════════════════════════════════════════
@@ -3094,6 +4390,8 @@ panelsToggle.addEventListener('click', () => {
   document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('mobile-visible',panelsOpen));
   panelsToggle.textContent=panelsOpen?'▲ HIDE PANELS':'▼ SHOW PANELS';
   panelsToggle.classList.toggle('open',panelsOpen);
+  // The cover can only be measured once the panel it lives in is on screen.
+  if (panelsOpen) fitCover();
 });
 
 // ═══════════════════════════════════════════════════
@@ -3104,6 +4402,11 @@ panelsToggle.addEventListener('click', () => {
 function fitOrb() {
   const target = Math.max(146, Math.min(innerHeight * 0.255, 300));
   document.documentElement.style.setProperty('--orb-scale', (target / 340).toFixed(3));
+  // The globe's own fit is measured against --orb-scale, so it has to be
+  // redone here rather than from a second resize listener that would read the
+  // value before this one wrote it.
+  if (globeActive) fitGlobe();
+  if (window.NORA_TAKEOVERS && NORA_TAKEOVERS.active()) NORA_TAKEOVERS.fit();
 }
 fitOrb();
 addEventListener('resize', fitOrb);
@@ -3113,7 +4416,8 @@ addEventListener('resize', fitOrb);
 // ═══════════════════════════════════════════════════
 const CHIPS = [
   "what's on my screen", 'read the screen', "what's the weather",
-  'play music', 'pause music', 'next track', 'focus mode on', 'what can you do',
+  'play music', 'pause music', 'next track', 'show processes', 'show your memory',
+  'focus mode on', 'what can you do',
 ];
 const chipsEl = document.getElementById('chips');
 CHIPS.forEach(c => {
@@ -3247,6 +4551,48 @@ document.getElementById('convo-copy').addEventListener('click', async () => {
   catch (_) { flashConvoAct('convo-copy', 'BLOCKED'); }
 });
 restoreTranscript();
+
+// ═══════════════════════════════════════════════════
+//  DESKTOP REMOTE
+//  The accessibility tree of the focused window, drawn to scale and made
+//  tappable. Its own overlay rather than an orb takeover — see remote.js.
+// ═══════════════════════════════════════════════════
+if (window.NORA_REMOTE) {
+  NORA_REMOTE.init({
+    token: authToken,
+    log:   (msg, ok) => addActivity(msg, ok),
+  });
+}
+
+// ═══════════════════════════════════════════════════
+//  TAKEOVERS
+//  The process and memory constellations live in /takeovers.js.
+//  Everything they need from this file is handed over once, here, rather
+//  than reached for globally — the globe stays the only thing in this file
+//  that knows how to draw into the orb.
+// ═══════════════════════════════════════════════════
+if (window.NORA_TAKEOVERS) {
+  NORA_TAKEOVERS.init({
+    orbWrap,
+    main:       document.getElementById('main'),
+    takeCanvas: document.getElementById('takec'),
+    log:        (msg, ok) => addActivity(msg, ok),
+    hideGlobe:  () => { if (globeActive) shrinkGlobeBack(); },
+  });
+
+  // Esc already means "stop"; while a takeover is up it also means "put it
+  // away", which is what you reach for before you reach for a timer.
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape' && NORA_TAKEOVERS.active()) NORA_TAKEOVERS.hide();
+  }, true);
+
+  // A takeover is bigger than the column it sits in and covers the panels,
+  // so a tap on the dimmed area around it should dismiss it — the same
+  // affordance the globe gives you by clicking the orb.
+  document.querySelector('.globe-veil').addEventListener('pointerdown', () => {
+    if (NORA_TAKEOVERS.active()) NORA_TAKEOVERS.hide();
+  });
+}
 </script>
 </body>
 </html>

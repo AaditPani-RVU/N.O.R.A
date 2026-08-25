@@ -233,6 +233,7 @@ class _FakeMpris:
         }
         self.calls = []
         self.props = {}
+        self.seek_ok = True
 
     def is_running(self, player="spotify"):
         return self.running
@@ -254,6 +255,10 @@ class _FakeMpris:
     def set_prop(self, name, value, signature, player="spotify", interface=None):
         self.props[name] = value
         return True
+
+    def seek_to(self, position_sec, player="spotify"):
+        self.calls.append(("seek_to", position_sec))
+        return self.seek_ok
 
     def methods(self):
         return [c[0] for c in self.calls]
@@ -328,6 +333,82 @@ class TestNowPlayingCommand(_SpotifyCommandTest):
     def test_handles_spotify_closed(self):
         self.fake.running = False
         self.assertEqual(sp.now_playing(), "Spotify isn't running.")
+
+
+class TestSeek(unittest.TestCase):
+    """Absolute seeking, and the fallback for players that ignore SetPosition."""
+
+    META = {
+        "mpris:trackid": "/com/spotify/track/xyz",
+        "mpris:length": 226_000_000,
+    }
+
+    def _seek(self, target, positions, meta=None, ok=True):
+        """Run seek_to with a scripted sequence of Position readings."""
+        reads = list(positions)
+        calls = []
+
+        def fake_call(method, args=None, player="spotify", interface=None):
+            calls.append((method, args))
+            return ok, None
+
+        with mock.patch.object(mpris, "metadata",
+                               return_value=self.META if meta is None else meta), \
+             mock.patch.object(mpris, "position_sec",
+                               side_effect=lambda player="spotify": reads.pop(0)), \
+             mock.patch.object(mpris, "call", fake_call):
+            result = mpris.seek_to(target)
+        return result, calls
+
+    def test_set_position_is_tried_first_with_the_track_path(self):
+        ok, calls = self._seek(90, [90.1])
+        self.assertTrue(ok)
+        self.assertEqual(calls[0][0], "SetPosition")
+        path, micros = calls[0][1]
+        self.assertIsInstance(path, mpris.ObjectPath)
+        self.assertEqual(path, "/com/spotify/track/xyz")
+        self.assertEqual(micros, 90_000_000)
+
+    def test_a_no_op_set_position_falls_back_to_a_relative_seek(self):
+        # Player claims success but never moves: verify, then Seek the delta.
+        ok, calls = self._seek(90, [12.0, 12.0, 89.6])
+        self.assertEqual([c[0] for c in calls], ["SetPosition", "Seek"])
+        self.assertEqual(calls[1][1], [78_000_000])
+        self.assertTrue(ok)
+
+    def test_a_track_without_an_object_path_seeks_relatively(self):
+        ok, calls = self._seek(30, [10.0, 30.2], meta={"mpris:length": 226_000_000,
+                                                       "mpris:trackid": "spotify:track:xyz"})
+        self.assertEqual([c[0] for c in calls], ["Seek"])
+        self.assertEqual(calls[0][1], [20_000_000])
+        self.assertTrue(ok)
+
+    def test_the_end_of_the_track_is_kept_just_inside_it(self):
+        # Landing on the last microsecond trips the track change, which is
+        # not what dragging the scrub bar to the end should do.
+        _, calls = self._seek(226, [225.0])
+        self.assertEqual(calls[0][1][1], 225_000_000)
+
+    def test_no_metadata_means_no_seek(self):
+        with mock.patch.object(mpris, "metadata", return_value={}), \
+             mock.patch.object(mpris, "call") as call:
+            self.assertFalse(mpris.seek_to(10))
+        call.assert_not_called()
+
+
+class TestSeekCommand(_SpotifyCommandTest):
+    def test_seek_reports_the_position_it_moved_to(self):
+        self.assertEqual(sp.seek_track(95), "Seeked to 1:35.")
+        self.assertIn(("seek_to", 95.0), self.fake.calls)
+
+    def test_seek_is_a_no_op_when_spotify_is_closed(self):
+        self.fake.running = False
+        self.assertEqual(sp.seek_track(95), "Nothing is playing.")
+        self.assertEqual(self.fake.calls, [])
+
+    def test_a_refused_seek_is_reported(self):
+        self.fake.seek_ok = False
+        self.assertEqual(sp.seek_track(95), "Spotify wouldn't seek.")
 
 
 class TestSettings(_SpotifyCommandTest):

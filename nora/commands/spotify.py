@@ -427,6 +427,21 @@ def previous_track() -> str:
     return f"Back to {spoken}." if spoken else "Previous track."
 
 
+def seek_track(position_sec: float) -> str:
+    """Jump to *position_sec* in the current track.
+
+    Not a registered action: this exists for the dashboard's scrub bar, where
+    the position comes from a drag rather than from a sentence. Spoken seeking
+    would need a time parser and nobody has asked for one.
+    """
+    m = _mpris()
+    if not m.is_running(PLAYER):
+        return "Nothing is playing."
+    if not m.seek_to(max(0.0, float(position_sec)), player=PLAYER):
+        return "Spotify wouldn't seek."
+    return f"Seeked to {int(position_sec) // 60}:{int(position_sec) % 60:02d}."
+
+
 # ── State + settings ──────────────────────────────────────────────────────────
 
 @register("now_playing", sig="now_playing()",

@@ -130,10 +130,14 @@ async def list_buttons_in_window() -> StepResult:
     loop = asyncio.get_event_loop()
     tree = _tree()
     widgets = await loop.run_in_executor(None, tree.get_focused_app_widgets)
+    # Role spellings differ by toolkit and at-spi2-core version — GTK3 reports
+    # "button" where this list said "push button" — so share the walker's
+    # vocabulary instead of keeping a second, staler copy here. With the
+    # hardcoded list, a desktop full of buttons reported none.
+    wanted = {"button", "toggle", "link", "menu", "tab"}
     buttons = [
         w for w in widgets
-        if w.role in ("push button", "toggle button", "link", "menu item", "tab")
-        and w.name
+        if tree.kind_of(w.role) in wanted and w.name
     ]
     if not buttons:
         return StepResult(action="list_buttons_in_window", success=False, message="No buttons found in the active window.")

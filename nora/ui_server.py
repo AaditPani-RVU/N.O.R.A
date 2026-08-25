@@ -5,11 +5,16 @@ from __future__ import annotations
 HTTP endpoints
 --------------
 GET  /           → index.html
+GET  /geo.js     → globe coastline/border geometry for the location takeover
 GET  /state      → {speaking, text, status, ptt_mode, user_text, user_seq, reply_seq}
 GET  /metrics    → system vitals
 GET  /music      → {track, artist, source, status}
+GET  /processes  → live process table for the process constellation
+GET  /memory_graph → memory embeddings projected to a sphere
+GET  /takeovers.js → process + memory constellation renderers
+POST /proc_kill  → terminate a pid picked out of the constellation
 POST /ptt        → push-to-talk button control
-POST /music_ctl  → dispatch playback controls from the UI (play/pause/next/prev/volume)
+POST /music_ctl  → dispatch playback controls from the UI (play/pause/next/prev/seek/volume)
 
 Authenticated WebSocket API (Sprint 5)
 ---------------------------------------
@@ -68,6 +73,8 @@ _state: dict = {
     "user_text": "",
     "user_seq": 0,
     "reply_seq": 0,
+    "location": None,
+    "location_seq": 0,
 }
 _lock = threading.Lock()
 
@@ -128,6 +135,36 @@ def notify_user(text: str) -> None:
     ws_push({"type": "user", "text": text, "seq": seq})
 
 
+def notify_location(name: str, country: str, lat: float, lon: float) -> None:
+    """Push a geocoded place for the dashboard's orb-to-globe morph.
+
+    Rides the same _state snapshot as notify()/the /state poll (rather than
+    a bespoke WS-only message type) so it reaches the dashboard whether the
+    client has a live WebSocket or has fallen back to HTTP polling — both
+    read applyState()/_serve_state() off the same dict.
+    """
+    with _lock:
+        _state["location"] = {"name": name, "country": country, "lat": lat, "lon": lon}
+        _state["location_seq"] = int(_state.get("location_seq", 0)) + 1
+        snapshot = {**_state, "ptt_mode": "on" if context.get_ptt_enabled() else "off"}
+    ws_push({"type": "state", "data": snapshot})
+
+
+def notify_takeover(kind: str, **extra: Any) -> None:
+    """Ask the dashboard to morph the orb into one of the takeovers.
+
+    *kind* is "processes", "memory", or "off" to dismiss whatever is up.
+    Rides the shared _state snapshot with its own monotonic seq for exactly
+    the reason notify_location() does: it then reaches the page over a live
+    WebSocket and over the HTTP polling fallback without a second code path.
+    """
+    with _lock:
+        _state["takeover"] = {"kind": kind, **extra}
+        _state["takeover_seq"] = int(_state.get("takeover_seq", 0)) + 1
+        snapshot = {**_state, "ptt_mode": "on" if context.get_ptt_enabled() else "off"}
+    ws_push({"type": "state", "data": snapshot})
+
+
 def notify_ptt_mode(enabled: bool) -> None:
     """Mirror PTT-mode changes to the dashboard immediately."""
     with _lock:
@@ -135,12 +172,26 @@ def notify_ptt_mode(enabled: bool) -> None:
 
 
 def start(port: int = 8766) -> str:
-    """Start the HTTP server in a daemon thread. Returns the URL."""
+    """Start the HTTP server in a daemon thread. Returns the URL.
+
+    The URL carries NORA_API_TOKEN when one is set. The routes that
+    drive the desktop demand it, and the tab we open here is the one
+    the operator actually uses — without the token it would be the only
+    client that cannot use them. It is also a distinct origin from the
+    LAN address a phone uses, so it gets no help from that tab having
+    authenticated: localStorage does not cross origins.
+    """
+    import os
+    import urllib.parse
+
     server = HTTPServer(("0.0.0.0", port), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="nora-ui")
     thread.start()
     url = f"http://localhost:{port}"
+    token = os.environ.get("NORA_API_TOKEN", "")
     logger.info("NORA UI server started at %s", url)
+    if token:
+        url += "/?token=" + urllib.parse.quote(token, safe="")
     return url
 
 
@@ -314,8 +365,7 @@ def _position_sec(player: str) -> float:
     """Playback position in seconds, or 0.0 when the player won't say."""
     try:
         from nora.platform.linux import mpris
-        pos = mpris.get_prop("Position", player=player)   # MPRIS reports microseconds
-        return float(pos) / 1_000_000 if pos is not None else 0.0
+        return mpris.position_sec(player)
     except Exception:
         return 0.0
 
@@ -402,8 +452,30 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_history()
         elif route == "/analytics":
             self._serve_analytics()
+        elif route == "/processes":
+            self._serve_processes()
+        elif route == "/memory_graph":
+            self._serve_memory_graph()
+        elif route == "/desktop":
+            self._serve_desktop()
         elif route in ("/", "/index.html"):
             self._serve_file(_STATIC_DIR / "index.html", "text/html; charset=utf-8")
+        elif route == "/takeovers.js":
+            # The process and memory constellations.
+            # Split out of index.html for the same reason geo.js is: that
+            # file is long enough already. Still same-origin.
+            self._serve_file(_STATIC_DIR / "takeovers.js",
+                             "application/javascript; charset=utf-8")
+        elif route == "/remote.js":
+            # The desktop remote's renderer. Split out for the same reason
+            # takeovers.js and geo.js are — index.html is long enough.
+            self._serve_file(_STATIC_DIR / "remote.js",
+                             "application/javascript; charset=utf-8")
+        elif route == "/geo.js":
+            # Globe coastline/border geometry. Split out of index.html only
+            # for that file's sake -- still same-origin, so the dashboard
+            # keeps working with no external host reachable.
+            self._serve_file(_STATIC_DIR / "geo.js", "application/javascript; charset=utf-8")
         else:
             self.send_response(404)
             self.end_headers()
@@ -446,6 +518,38 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 logger.exception("ui: /interrupt failed")
             self._json_ok(b"{}")
+        elif route == "/proc_kill":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception:
+                body = {}
+            from nora import visuals
+            result = visuals.kill_process(body.get("pid", 0), bool(body.get("force")))
+            logger.info("ui: /proc_kill %s -> %s", body.get("pid"), result)
+            self._json_ok(json.dumps(result).encode())
+        elif route == "/desktop_act":
+            # Drives the user's actual desktop, so unlike /proc_kill this one
+            # refuses to run without the token when one is configured.
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception:
+                body = {}
+            if not self._token_ok():
+                self._json_denied()
+                return
+            from nora import desktop
+            result = desktop.act(
+                str(body.get("snap") or ""),
+                body.get("id"),
+                str(body.get("action") or "click"),
+                str(body.get("text") or ""),
+            )
+            logger.info("ui: /desktop_act %s#%s %s -> %s",
+                        body.get("action"), body.get("id"),
+                        result.get("label", ""), result.get("ok"))
+            self._json_ok(json.dumps(result).encode())
         elif route == "/type_command":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -463,6 +567,34 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.send_header("Content-Length", "0")
             self.end_headers()
+
+    def _token_ok(self) -> bool:
+        """True when the caller carries NORA_API_TOKEN, or none is configured.
+
+        Same rule the WebSocket applies: unset means localhost-only trust,
+        set means every reachable client has to prove it. Accepts the token
+        on the query string (the form the dashboard is already opened with)
+        or as a bearer header for anything scripted.
+        """
+        import urllib.parse
+        from nora import security
+
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        provided = (params.get("token") or [""])[0]
+        if not provided:
+            auth = self.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                provided = auth[7:]
+        return security.check_api_token(provided)
+
+    def _json_denied(self) -> None:
+        payload = json.dumps({"ok": False, "error": "unauthorised"}).encode()
+        self.send_response(401)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _json_ok(self, payload: bytes) -> None:
         self.send_response(200)
@@ -491,6 +623,12 @@ class _Handler(BaseHTTPRequestHandler):
                     sp.next_track()
                 elif act == "prev":
                     sp.previous_track()
+                elif act == "seek":
+                    # Absolute seconds from the dashboard's scrub bar. The UI
+                    # already clamps to the track length; the player clamps
+                    # again, so a stale length can't overshoot into the next
+                    # track.
+                    sp.seek_track(float(body.get("position", 0)))
                 elif act == "volume":
                     # Drives the *system* sink, not Spotify's own volume. MPRIS
                     # volume is a fraction of the system level, so a slider
@@ -559,6 +697,37 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_processes(self) -> None:
+        """Live process table for the process-constellation takeover."""
+        from nora import visuals
+        self._json_ok(json.dumps(visuals.process_snapshot()).encode())
+
+    def _serve_desktop(self) -> None:
+        """The focused window as a map of pressable targets.
+
+        Token-gated even though it is a read: the map names every button in
+        whatever window happens to be focused, which on a machine reachable
+        from the network is a live description of what the user is doing.
+        """
+        from nora import desktop
+        if not self._token_ok():
+            self._json_denied()
+            return
+        import urllib.parse
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        follow = (params.get("follow") or ["0"])[0] == "1"
+        self._json_ok(json.dumps(desktop.window_map(follow=follow)).encode())
+
+    def _serve_memory_graph(self) -> None:
+        """Memory embeddings projected to a sphere, for the constellation.
+
+        Non-blocking by design: the cold build is a couple of seconds of
+        SVD and this server handles one request at a time, so a miss
+        returns {"building": true} and a daemon thread does the work.
+        """
+        from nora import visuals
+        self._json_ok(json.dumps(visuals.memory_graph_async()).encode())
 
     def _serve_history(self) -> None:
         try:
