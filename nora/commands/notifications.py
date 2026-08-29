@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 
+from nora import scheduler
 from nora.command_engine import register
 from nora.config import get_config
 
@@ -52,22 +53,25 @@ def notify_me(message: str) -> str:
 
 
 @register("remind_me", sig="remind_me(message: str, delay_minutes: float = 5.0)",
-           description="Timed voice + toast reminder", category="notification")
+           description="Timed voice + toast reminder, in N minutes from now", category="notification")
 def remind_me(message: str, delay_minutes: float = 5.0) -> str:
-    """Set a timed voice and desktop reminder."""
-    delay_sec = float(delay_minutes) * 60
+    """Set a timed voice and desktop reminder.
 
-    def _fire() -> None:
-        time.sleep(delay_sec)
-        from nora import speaker
-        reminder_text = f"Reminder, sir: {message}"
-        _toast("NORA Reminder", message)
-        speaker.speak(reminder_text)
+    Backed by `nora.scheduler` rather than a sleeping thread. The old version
+    was a `time.sleep` in a daemon thread, which meant every pending reminder
+    died silently the moment NORA restarted — and a reminder you are not told
+    about is worse than one you never set, because you stopped tracking it
+    yourself. Schedules are durable, so the reminder survives a restart.
 
-    thread = threading.Thread(target=_fire, daemon=True, name="nora-reminder")
-    thread.start()
+    Absolute and recurring times ("at 6pm", "every morning") go to
+    `schedule_task`; this stays the simple relative case.
+    """
+    minutes = float(delay_minutes)
+    sched = scheduler.add(f"in {minutes:g} minutes", f"remind: {message}")
+    if sched is None:  # unparseable delay — fall back to speaking now
+        return f"I couldn't set that reminder. {message}"
 
-    mins = int(delay_minutes)
+    mins = int(minutes)
     unit = "minute" if mins == 1 else "minutes"
     return f"I'll remind you about that in {mins} {unit}."
 

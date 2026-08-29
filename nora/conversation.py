@@ -601,6 +601,87 @@ def _generate(system: str, messages: list[dict], act: Act) -> str:
     return ""
 
 
+# ── Unbacked promises ────────────────────────────────────────────────────────
+
+# The conversation path has no tools. It cannot read the repo, call Claude, or
+# do anything after the sentence it is currently producing — so *any* offer to
+# follow up later is, on this path, structurally a lie. A 70B model asked
+# something hard makes that offer constantly, because it is what a person would
+# say. The old behaviour was to speak it and drop it on the floor.
+#
+# Rather than prompt the model out of a reasonable instinct, the promise is
+# taken at face value and made true: the question becomes a real `nora.jobs`
+# job, and NORA speaks the answer unprompted when it lands.
+_PROMISE_RE = re.compile(
+    r"\b(?:"
+    r"i(?:'ll|'m going to| will| am going to)\s+"
+    r"(?:get back|come back|circle back|look into|dig into|check|find out|"
+    r"research|investigate|let you know|report back)"
+    r"|let me\s+"
+    r"(?:get back|come back|look into|dig into|check on|find out|research|"
+    r"investigate|think about that|have a look|do some digging)"
+    r"|give me\s+(?:a bit|a minute|a moment|a sec|some time)"
+    r"|get back to you"
+    r"|back to you (?:on|in|about)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+# Signals the question is about the user's own code, which is what earns the
+# slower repo-reading path (Opus + read-only tools over the checkout) instead
+# of a plain model call.
+_REPO_HINT_RE = re.compile(
+    r"\b(my|our|this|the)\s+(code|codebase|repo|repository|project|script|"
+    r"function|module|test|tests|branch|commit|bug|error|traceback|stack ?trace)"
+    r"\b|\bnora\b|\bjarvis\b|\.py\b|\bpipeline\b|\bwhy (?:is|does|did) "
+    r"(?:my|it|this)\b",
+    re.IGNORECASE,
+)
+
+
+def mentions_repo(text: str) -> bool:
+    """Whether a question looks like it is about the user's own codebase."""
+    return bool(_REPO_HINT_RE.search(text or ""))
+
+
+# Only a question is worth going away to answer. A promise attached to small
+# talk ("let me think about that" after a joke) should stay a figure of speech.
+_MIN_PROMISE_WORDS = 4
+
+
+def promises_follow_up(reply: str) -> bool:
+    """Whether a spoken reply commits to work this path cannot perform."""
+    return bool(_PROMISE_RE.search(reply or ""))
+
+
+def _honour_promise(text: str, reply: str, act: Act) -> str:
+    """Turn an unbacked follow-up promise into a real background job.
+
+    Returns the reply to speak — unchanged when nothing was promised, and
+    otherwise the same commitment with the machinery now actually behind it.
+    """
+    if not promises_follow_up(reply):
+        return reply
+    if act not in (Act.QUESTION, Act.META, Act.UNKNOWN):
+        return reply
+    if len(text.split()) < _MIN_PROMISE_WORDS:
+        return reply
+
+    try:
+        from nora.commands.deferred import answer_later
+    except Exception as e:  # pragma: no cover - import guard
+        logger.debug("cannot honour promise: %s", e)
+        return reply
+
+    try:
+        answer_later(text, read_repo=mentions_repo(text))
+        logger.info("Honoured follow-up promise as a background job: %s", text[:80])
+    except Exception as e:
+        logger.warning("could not queue deferred answer: %s", e)
+        return reply
+    return reply
+
+
 def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None) -> str:
     """Produce a spoken reply for a conversational utterance.
 
@@ -643,6 +724,8 @@ def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None) -
     # consecutive same-role turns — so the model was shown a transcript in
     # which it repeated itself verbatim, while being instructed not to repeat
     # itself. Both callers in pipeline.py speak what they get back.
+    reply = _honour_promise(text, reply, act)
+
     logger.info("conversation: act=%s %.0fms — %s", act.value,
                 (time.monotonic() - started) * 1000, reply[:80])
     return reply
