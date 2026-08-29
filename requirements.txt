@@ -28,7 +28,19 @@ sentence-transformers>=3.0.0
 # NeuroSym-AI: neuro-symbolic guardrails (input injection + action policy)
 neurosym-ai>=0.2.0
 # Sprint 1 — Wakeword detection (optional; only needed if wakeword.enabled: true)
-# openwakeword>=0.6.0
+#
+# Install it deliberately, because plain `pip install openwakeword` gives you a
+# broken setup on Python 3.12+:
+#
+#   pip install --no-deps openwakeword==0.5.1
+#
+# 0.5.x declares a hard tflite-runtime dependency on Linux and tflite-runtime
+# has no wheel past 3.11, so the resolver silently walks back to 0.4.0 — which
+# has a different Model() signature and raises TypeError against nora/wakeword.py.
+# --no-deps skips only tflite; every real dependency (onnxruntime, scipy,
+# scikit-learn, tqdm) is already pinned above, and the detector asks for the
+# onnx backend anyway. All pretrained models ship inside the wheel.
+# openwakeword==0.5.1
 
 # ── Vision module (Phase 1: camera + face memory) ──────────────────────────
 # Only imported when vision.enabled: true in config.yaml — the rest of NORA

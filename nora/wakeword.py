@@ -16,6 +16,7 @@ import logging
 import queue
 import threading
 import time
+from typing import Callable
 
 import numpy as np
 
