@@ -45,6 +45,14 @@ was hit and fixed during a real run; each one costs an hour to diagnose cold.
 10. **The notebook's background-audio download 404s.** AudioSet moved from
     `data/bal_train09.tar` to `data/bal_train/NN.parquet`. `prepare_data.py`
     handles the current layout.
+11. **Augmentation silently skips when features already exist**, logging only
+    `WARNING: Openwakeword features already exist, skipping data augmentation`
+    and exiting 0. If your pilot used the same `model_name`, the full run then
+    trains on the *pilot's* clips and reports success. This is the most
+    dangerous item on the list, because nothing about the output looks wrong.
+    Pass `--overwrite` on the augment stage, or give the pilot its own
+    `model_name`. Sanity check: augmentation of 60k clips takes tens of
+    minutes, so a three-second augment stage means it did nothing.
 
 ## Setup
 
@@ -116,12 +124,17 @@ Three stages, in order. **Run the pilot first** — a wrong path surfaces at the
 
 ```sh
 cp /path/to/JARVIS/training/wakeword/hey_nora.yaml ./pilot.yaml
-sed -i 's/^n_samples: .*/n_samples: 500/; s/^n_samples_val: .*/n_samples_val: 500/; s/^steps: .*/steps: 5000/' pilot.yaml
+sed -i 's/^n_samples: .*/n_samples: 500/; s/^n_samples_val: .*/n_samples_val: 500/;
+        s/^steps: .*/steps: 5000/; s/^model_name: .*/model_name: "pilot"/' pilot.yaml
 
 for stage in generate_clips augment_clips train_model; do
   .venv/bin/python openWakeWord/openwakeword/train.py --training_config pilot.yaml --$stage
 done
 ```
+
+The `model_name` override is the important part — it keeps the pilot's clips and
+features in their own directory. Sharing one with the real run is how you end up
+training on 500 samples and never being told (item 11).
 
 A pilot ends with `Recall: 0.0` and an `onnx_tf` traceback. **Both are expected.**
 500 samples is far too few to learn anything — the pilot proves the plumbing, not
@@ -131,8 +144,18 @@ the model. Success is the file existing:
 ls output/hey_nora.onnx
 ```
 
-Then the real run, same three stages against `hey_nora.yaml`. Budget several
-hours; generation dominates.
+Then the real run against `hey_nora.yaml`. Pass `--overwrite` on the augment
+stage so a previous run's features cannot shadow this one:
+
+```sh
+P=openWakeWord/openwakeword/train.py
+.venv/bin/python $P --training_config hey_nora.yaml --generate_clips
+.venv/bin/python $P --training_config hey_nora.yaml --augment_clips --overwrite
+.venv/bin/python $P --training_config hey_nora.yaml --train_model
+```
+
+Budget several hours; generation dominates — 30,000 samples took ~62 minutes on
+a GTX 1650.
 
 ## Install the result
 
