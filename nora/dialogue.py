@@ -66,12 +66,28 @@ class Utterance:
 _turns: deque[Utterance] = deque(maxlen=_MAX_TURNS)
 
 
+def _index(text: str, role: str, kind: str) -> None:
+    """Mirror a turn into the FTS5 session index.
+
+    Hooked here rather than in the pipeline because this is already the one
+    place every spoken line on both sides passes through, and it costs a
+    single INSERT. Failures are swallowed: keyword recall going missing must
+    never take a turn down with it.
+    """
+    try:
+        from nora import session_index
+        session_index.record(text, role=role, source=kind)
+    except Exception:
+        pass
+
+
 def record_user(text: str, kind: str = "chat") -> None:
     """Append something the user said."""
     if not text or not text.strip():
         return
     with _lock:
         _turns.append(Utterance(speaker="user", text=text.strip(), kind=kind))
+    _index(text, "user", kind)
 
 
 def record_nora(text: str, kind: str = "chat") -> None:
@@ -85,6 +101,7 @@ def record_nora(text: str, kind: str = "chat") -> None:
         return
     with _lock:
         _turns.append(Utterance(speaker="nora", text=text.strip(), kind=kind))
+    _index(text, "nora", kind)
 
 
 def history(n: int = _MAX_TURNS) -> list[Utterance]:
