@@ -70,7 +70,15 @@ class TestQueryStringRouting(unittest.TestCase):
         req = urllib.request.Request(
             f"http://127.0.0.1:{PORT}/interrupt", data=b"{}",
             headers={"Content-Type": "application/json"}, method="POST")
-        self.assertEqual(urllib.request.urlopen(req, timeout=5).status, 200)
+        try:
+            self.assertEqual(urllib.request.urlopen(req, timeout=5).status, 200)
+        finally:
+            # The route really does cancel: it sets the process-wide event that
+            # command_engine.execute checks before every step. Leaving it set
+            # makes every later execute() in this process break on step one,
+            # which reads as unrelated tests failing.
+            from nora import context
+            context.clear_cancel()
 
 
 class TestTranscriptEcho(unittest.TestCase):
