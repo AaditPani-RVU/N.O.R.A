@@ -16,6 +16,7 @@ import logging
 import queue
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -42,6 +43,62 @@ def is_enabled() -> bool:
     return _enabled and _detector is not None
 
 
+def _display(model: str) -> str:
+    """The name to log for a model, whether it is a path or a pretrained id.
+
+    Not Path.stem: a pretrained id carries its version in what looks like a
+    suffix, so stem turns "hey_jarvis_v0.1" into "hey_jarvis_v0" and reports a
+    model nobody configured. Only a real model-file extension is stripped.
+    """
+    name = model.rsplit("/", 1)[-1]
+    for ext in (".onnx", ".tflite"):
+        if name.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
+def _resolve_models(spec) -> list[str]:
+    """Turn the `wakeword.model` config value into what openWakeWord accepts.
+
+    Two kinds of value are allowed and they are told apart by whether the
+    string looks like a path. A bare name ("hey_jarvis_v0.1") is a model that
+    ships inside the wheel and is handed through untouched; anything with a
+    separator or an .onnx suffix is a custom-trained model on disk.
+
+    Custom models have to be resolved here because openWakeWord does not do it:
+    it treats a path it cannot open as a *pretrained name*, so a `~/` that was
+    never expanded fails with "Could not find pretrained model for model name
+    '~/hey_nora.onnx'" — which points at the wrong problem entirely. Relative
+    paths resolve against the project root rather than the launch directory,
+    for the same reason claude_logs does it.
+
+    A list is accepted so several phrasings ("hey nora", "hi nora") can run
+    together; openWakeWord scores every loaded model on the same frame, so the
+    cost of a second one is a second small matmul, not a second mic stream.
+    """
+    specs = spec if isinstance(spec, (list, tuple)) else [spec]
+    root = Path(__file__).resolve().parent.parent
+    out: list[str] = []
+    for item in specs:
+        name = str(item).strip()
+        if not name:
+            continue
+        if "/" not in name and "\\" not in name and not name.endswith(".onnx"):
+            out.append(name)  # pretrained, shipped in the wheel
+            continue
+        path = Path(name).expanduser()
+        if not path.is_absolute():
+            path = root / path
+        if not path.is_file():
+            logger.error(
+                "Wakeword model not found: %s (from config wakeword.model=%r)",
+                path, item,
+            )
+            continue
+        out.append(str(path))
+    return out
+
+
 def start() -> None:
     """Start the wakeword detector if enabled in config. Call once at startup."""
     global _enabled, _detector
@@ -58,15 +115,22 @@ def start() -> None:
         )
         return
 
-    model = cfg.get("model", "hey_jarvis_v0.1")
+    models = _resolve_models(cfg.get("model", "hey_jarvis_v0.1"))
     sensitivity = float(cfg.get("sensitivity", 0.5))
     cooldown = float(cfg.get("cooldown_sec", 1.5))
 
+    if not models:
+        # Every configured model failed to resolve. Starting anyway would load
+        # openWakeWord's full pretrained set and wake on "alexa".
+        logger.error("No usable wakeword model — detection stays off.")
+        return
+
     try:
-        _detector = _WakewordDetector(model, sensitivity, cooldown)
+        _detector = _WakewordDetector(models, sensitivity, cooldown)
         _detector.start()
         _enabled = True
-        logger.info("Wakeword detector started (model=%s, sensitivity=%.2f)", model, sensitivity)
+        logger.info("Wakeword detector started (models=%s, sensitivity=%.2f)",
+                    ", ".join(_display(m) for m in models), sensitivity)
     except Exception as exc:
         logger.error("Failed to start wakeword detector: %s", exc)
 
@@ -86,8 +150,8 @@ def wait_for_trigger(timeout: float = 0.1) -> bool:
 
 
 class _WakewordDetector:
-    def __init__(self, model_name: str, sensitivity: float, cooldown: float) -> None:
-        self._model_name = model_name
+    def __init__(self, model_names: list[str], sensitivity: float, cooldown: float) -> None:
+        self._model_names = list(model_names)
         self._sensitivity = sensitivity
         self._cooldown = cooldown
         self._event = threading.Event()
@@ -113,9 +177,9 @@ class _WakewordDetector:
         import sounddevice as sd
         from openwakeword.model import Model
 
-        logger.debug("Loading wakeword model: %s", self._model_name)
+        logger.debug("Loading wakeword models: %s", self._model_names)
         try:
-            model = Model(wakeword_models=[self._model_name], inference_framework="onnx")
+            model = Model(wakeword_models=self._model_names, inference_framework="onnx")
         except Exception as exc:
             logger.error("openWakeWord model load failed: %s", exc)
             return
@@ -142,7 +206,8 @@ class _WakewordDetector:
                 blocksize=CHUNK,
                 callback=_mic_callback,
             ):
-                logger.info("Wakeword mic stream open — listening for %r", self._model_name)
+                logger.info("Wakeword mic stream open — listening for %s",
+                            ", ".join(_display(m) for m in self._model_names))
                 while self._running:
                     try:
                         chunk = self._audio_q.get(timeout=0.5)
@@ -158,12 +223,11 @@ class _WakewordDetector:
                         continue
 
                     now = time.monotonic()
-                    for score in prediction.values():
+                    for fired, score in prediction.items():
                         val = float(score) if not hasattr(score, "__iter__") else float(max(score))
                         if val >= self._sensitivity and (now - last_trigger) >= self._cooldown:
                             logger.info(
-                                "Wakeword triggered! score=%.3f model=%s",
-                                val, self._model_name,
+                                "Wakeword triggered! score=%.3f model=%s", val, fired,
                             )
                             last_trigger = now
                             self._event.set()

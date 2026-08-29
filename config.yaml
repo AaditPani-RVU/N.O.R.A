@@ -464,7 +464,20 @@ wakeword:
   # Always-on wakeword detection via openWakeWord.
   # Requires: pip install openwakeword
   # Primary activation mode — PTT key/button still works as a secondary fallback.
-  # model: "hey_jarvis_v0.1" is the closest pre-trained phrase.
+  #
+  # model: either a pretrained id that ships inside the openwakeword wheel
+  # (alexa_v0.1, hey_jarvis_v0.1, hey_mycroft_v0.1, hey_rhasspy_v0.1) or a path
+  # to a custom-trained .onnx. Paths may use ~ and may be relative to the
+  # project root. A list loads several at once — every model is scored on the
+  # same frame, so a second phrasing costs one more small matmul, not a second
+  # mic stream:
+  #
+  #   model:
+  #     - "models/wakeword/hey_nora.onnx"
+  #     - "models/wakeword/hi_nora.onnx"
+  #
+  # "hey_jarvis_v0.1" is the closest pretrained phrase and the stand-in until
+  # a "hey nora" model is trained.
   # sensitivity: 0.0–1.0 (lower = more sensitive, more false triggers).
   # cooldown_sec: minimum gap between consecutive triggers.
   enabled: true
