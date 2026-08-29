@@ -1,0 +1,105 @@
+# Training recipe for NORA's own wake word.
+#
+# Consumed by openWakeWord's train.py, which is NOT in the pip wheel — it only
+# exists in the GitHub repo. See README.md in this directory for the full
+# environment setup; the short version is that training runs in its own Python
+# 3.12 venv outside this repo. Not because 3.13 fails — every dependency here
+# does have a 3.13 wheel — but because this stack pins versions from 2023 and
+# there is no reason to make NORA's runtime venv carry a training toolchain it
+# never imports.
+#
+# Paths below are relative to the training directory (~/nora-wakeword-training),
+# not to this repo.
+
+model_name: "hey_nora"
+
+# One binary model that fires on either phrasing, rather than two models.
+# train.py trains a single classifier over every phrase listed here, so "hi
+# nora" costs nothing at inference — it is the same matmul.
+#
+# Both are three syllables on purpose. Bare "nora" was considered and rejected:
+# two-syllable wake words are where false triggers live, and this one has an
+# unusually crowded neighbourhood (see custom_negative_phrases below).
+target_phrase:
+  - "hey nora"
+  - "hi nora"
+
+# Phrases the model must NOT fire on, on top of the ones train.py derives
+# automatically from phoneme overlap.
+#
+# "nora" is a hard wake word precisely because it is a common name fragment and
+# sits inside ordinary English ("an aura", "explore a"). Every entry here is a
+# real collision rather than a guess: name neighbours, the article-plus-vowel
+# run-ons, and the greeting-prefixed versions of both, since the greeting is
+# what the model keys on first.
+custom_negative_phrases:
+  - "dora"
+  - "laura"
+  - "aurora"
+  - "norah jones"
+  - "an aura"
+  - "nor a"
+  - "explore a"
+  - "for a moment"
+  - "hey laura"
+  - "hi laura"
+  - "hey dora"
+  - "hi dora"
+  - "hey aurora"
+  - "hey there"
+  - "hi there"
+  - "hey now"
+  - "oh no"
+
+# Synthetic positives to generate. The upstream comment recommends 20,000 as a
+# minimum and 100,000+ as best, but generation is the slowest stage by a wide
+# margin and this box has a 4 GB GTX 1650 rather than a datacentre card.
+#
+# Run the pilot first (see README) to prove the pipeline end to end in minutes,
+# then run this full config overnight. Do not skip the pilot: a failure at the
+# training stage after eight hours of generation is a bad way to learn that a
+# path in this file is wrong.
+n_samples: 30000
+n_samples_val: 2000
+
+tts_batch_size: 50
+augmentation_batch_size: 16
+
+piper_sample_generator_path: "./piper-sample-generator"
+output_dir: "./output"
+
+rir_paths:
+  - "./data/mit_rirs"
+
+background_paths:
+  - "./data/audioset_16k"
+  - "./data/fma_16k"
+
+background_paths_duplication_rate:
+  - 1
+  - 1
+
+false_positive_validation_data_path: "./data/validation_set_features.npy"
+
+# Reusing each generated clip under fresh random augmentation is far cheaper
+# than generating more clips, and generation is the bottleneck here.
+augmentation_rounds: 2
+
+feature_data_files:
+  ACAV100M_sample: "./data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+
+batch_n_per_class:
+  ACAV100M_sample: 1024
+  adversarial_negative: 50
+  positive: 50
+
+model_type: "dnn"
+layer_size: 32
+
+steps: 50000
+max_negative_weight: 1500
+
+# The metric that actually matters for an always-on mic in a room you live in.
+# A wake word that fires while you are talking to someone else is worse than
+# one that occasionally needs saying twice, so this is deliberately strict.
+target_false_positives_per_hour: 0.2
