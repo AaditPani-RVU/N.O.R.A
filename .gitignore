@@ -76,6 +76,12 @@ nora_consolidation_state.json
 nora_daily_brief.json
 .agents/
 nora_tool_trust.json
+
+# Off-turn work and recall state (jobs / scheduler / FTS5 session index)
+nora_jobs.json
+nora_schedules.json
+nora_sessions.db
+
 nora_consent_log.json
 nora_reversible_log.json
 nora_user_preferences.json

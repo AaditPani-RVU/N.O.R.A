@@ -583,6 +583,86 @@ playlist` matches public and editorial playlists only.
 
 ---
 
+## Deferred Answers (ported from Hermes Agent)
+
+NORA no longer promises to get back to you and then doesn't. A question too
+slow for one turn goes to a background worker; NORA says so, the mic goes back
+to listening, and the answer is **spoken unprompted** when it lands.
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| *(any hard question)* | Handed off, answered later out loud | 🆕 Hermes port |
+| `what are you working on` | Lists background work still in flight | 🆕 Hermes port |
+| `what did you find out about X` | Retrieves a finished background answer | 🆕 Hermes port |
+
+Chat replies that promise a follow-up ("let me look into that") are detected and
+turned into real jobs, so the promise is kept rather than dropped.
+
+---
+
+## Scheduling (ported from Hermes Agent)
+
+Durable and restart-safe, unlike the old `remind_me` (a sleeping thread that
+died with the process). `remind_me` now runs on this too.
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| `remind me at 6 to call mum` | One-shot reminder at a clock time | 🆕 Hermes port |
+| `in 20 minutes, check the build` | Relative one-shot | 🆕 Hermes port |
+| `every day at 7am, brief me` | Daily recurring | 🆕 Hermes port |
+| `every Monday at 9, ...` | Weekly recurring | 🆕 Hermes port |
+| `every 30 minutes, ...` | Interval recurring | 🆕 Hermes port |
+| `what's scheduled` | Lists upcoming runs | 🆕 Hermes port |
+| `cancel the morning brief` | Cancels by description | 🆕 Hermes port |
+
+A schedule can carry *any* spoken command, not just reminders.
+
+---
+
+## Tool Scripts (ported from Hermes Agent)
+
+Multi-step requests cost **one** model round-trip instead of one per step —
+the latency win that matters most on a voice interface. The model emits a short
+Python script against the command table; loops, branching and feeding one
+command's output into the next all work.
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| `pause spotify, dim the screen and read my calendar` | Three actions, one inference | 🆕 Hermes port |
+
+Contained by construction: no imports, no filesystem, no `open`/`eval`, and
+every action inside a script faces the same security and confirmation gates as
+a normal step.
+
+---
+
+## Skills (ported from Hermes Agent)
+
+Procedures as Markdown (`SKILL.md`, agentskills.io format) instead of Python —
+the same format as `.agents/skills`, so a skill is shared with Claude Code.
+Only names and descriptions reach the prompt; bodies load on demand.
+
+| Voice Command | Action | Status |
+|---------------|--------|--------|
+| `wind down` *(or any skill name)* | Runs a saved procedure | 🆕 Hermes port |
+| `what skills do you have` | Lists saved skills | 🆕 Hermes port |
+| `save that as a skill called X` | Writes a new skill to `~/.nora/skills` | 🆕 Hermes port |
+| `forget the X skill` | Deletes one (confirms first) | 🆕 Hermes port |
+
+---
+
+## Telegram (ported from Hermes Agent)
+
+NORA reachable when you're not in the room. Text or a **voice memo** — memos go
+through the same Whisper model as the microphone. Off by default; see the
+`telegram` block in `config.yaml`.
+
+Anything the security policy wants confirmed is refused over Telegram and stays
+in the room, and `allowed_chat_ids` is a hard allowlist that refuses to start
+when empty.
+
+---
+
 ## Legend
 
 | Symbol | Meaning |

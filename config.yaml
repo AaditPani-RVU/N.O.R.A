@@ -672,3 +672,34 @@ persona:
   # Settings are stored in nora_persona.json and applied to every response.
   # Voice: "be more concise", "use a casual tone", "reset your persona"
   enabled: true
+
+# ── Ported from Hermes Agent (2026-08-29) ────────────────────────────────────
+
+skills:
+  # Procedural memory as Markdown (agentskills.io SKILL.md format). Only each
+  # skill's name and description reach the intent-parser prompt; the body is
+  # read off disk after the model picks one, so a large library costs a short
+  # list rather than a long one.
+  #
+  # `~/.nora/skills` is where `save_skill` writes. `.agents/skills` is shared
+  # with Claude Code — drop it from this list if its design/review skills are
+  # noise in the voice catalogue.
+  dirs:
+    - "~/.nora/skills"
+    - ".agents/skills"
+
+telegram:
+  # Reach NORA when you're not at the machine. Text or a voice memo — memos go
+  # through the same Whisper model as the microphone.
+  #
+  # Setup: talk to @BotFather to make a bot, put the token in .env as
+  # TELEGRAM_BOT_TOKEN, then message the bot once — it replies with the chat id
+  # to paste below.
+  #
+  # allowed_chat_ids is a hard allowlist and an empty one refuses to start:
+  # a bot token is a bearer credential, and the process behind it can drive
+  # the desktop. Anything the security policy wants confirmed is refused over
+  # Telegram regardless of this list — those stay in the room.
+  enabled: false
+  token_env: "TELEGRAM_BOT_TOKEN"
+  allowed_chat_ids: []
