@@ -27,10 +27,36 @@ def needs_confirmation(action: str) -> bool:
     return action in _destructive()
 
 
+def _script_actions(step) -> list[str]:
+    """Action names called inside a `run_script` step's code.
+
+    A tool script reaches the command table like any other step, so its
+    contents have to face the same two gates. Without this the step reads as a
+    single harmless `run_script` and everything it calls goes unchecked — which
+    would make "write a script that does it" a way around the security policy.
+    """
+    if getattr(step, "action", "") != "run_script":
+        return []
+    code = (getattr(step, "parameters", {}) or {}).get("code", "")
+    if not code:
+        return []
+    try:
+        from nora import toolscript
+        return toolscript.called_names(code)
+    except Exception:
+        # Unparseable code can't be cleared. Name the step itself so the
+        # caller treats it as needing confirmation rather than as empty.
+        return ["run_script"]
+
+
 def check_steps(steps) -> tuple[bool, bool]:
     """Return (has_blocked_action, needs_voice_confirmation) for a list of steps."""
-    blocked = any(is_blocked(s.action) for s in steps)
-    confirm = any(needs_confirmation(s.action) for s in steps)
+    names = []
+    for s in steps:
+        names.append(s.action)
+        names.extend(_script_actions(s))
+    blocked = any(is_blocked(n) for n in names)
+    confirm = any(needs_confirmation(n) for n in names)
     return blocked, confirm
 
 
