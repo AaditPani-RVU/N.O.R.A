@@ -352,6 +352,17 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
         action_signatures=native_sigs,
     )
 
+    # Skills contribute one line each — name and description only. The body
+    # stays on disk until `run_skill` picks it up, which is what keeps fifty
+    # saved procedures from costing fifty procedures' worth of prompt.
+    try:
+        from nora import skills
+        catalogue = skills.catalogue()
+        if catalogue:
+            prompt += "\n\n" + catalogue
+    except Exception as e:
+        logger.debug("skill catalogue unavailable: %s", e)
+
     if not memory_ctx:
         return prompt
 
