@@ -148,12 +148,18 @@ Open the dashboard with `?token=…` and the page passes it through.
 
 Also on the dashboard, with no command needed:
 
-- **Album art** — the cover fills the top of the Spotify card, square and
-  large, and lights the card with the sleeve's own dominant colour. The frame
-  breathes while the track is playing.
-- **Scrubbing** — drag the progress bar to move through the track, or click
-  anywhere on it. With the bar focused, ←/→ nudge by 5s, PgUp/PgDn by 30s,
-  Home/End jump to the ends. The seek goes out over MPRIS.
+- **Album art** — the sleeve is the head of the Spotify card: it bleeds to
+  the frame, and a blurred copy of it spills the record's own colour down
+  behind the track name and the transport. A read head sweeps the artwork
+  while it plays, the level bars run beside the status pill, and the colour
+  drains when you pause. On a mouse the cover tilts under the pointer with a
+  specular following it; a track change wipes across before the new sleeve
+  settles. The cover is sized to the room the column can spare — square when
+  there is height for it, cropped rather than squashed when there is not.
+- **Scrubbing** — the progress bar rides the artwork's bottom edge: drag it to
+  move through the track, or click anywhere on it. With the bar focused, ←/→
+  nudge by 5s, PgUp/PgDn by 30s, Home/End jump to the ends. The seek goes out
+  over MPRIS.
 
 Interaction: drag to spin a constellation, tap a node for its card, tap the
 dimmed area or press `Esc` to dismiss. Under 560px wide the detail card becomes

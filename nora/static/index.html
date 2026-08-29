@@ -734,70 +734,213 @@
     .mus-status.playing .dot { background:#00ff88;box-shadow:0 0 5px #00ff88;animation:blink 1.6s ease-in-out infinite; }
     .mus-status.paused  .dot { background:#ffaa00;box-shadow:0 0 5px #ffaa00; }
 
-    /* ── The cover ──────────────────────────────────────────────────────
+    /* ── The sleeve ─────────────────────────────────────────────────────
        The artwork used to be sphere-mapped onto the orb, where a square
-       sleeve had to be stretched over a ball to fit. It is square here and
-       stays square: the column width caps it, and --art-size is measured in
-       fitCover() so the sleeve takes the room the column can spare rather
-       than pushing the transport controls off the bottom of a laptop. The
-       vh fallback only has to hold until that first measurement. */
+       cover had to be stretched over a ball. Here it is not a picture the
+       card contains — it *is* the head of the card: it bleeds past the
+       widget padding to the frame, its colour spills down behind the
+       controls, and the scrub bar rides its bottom edge, so scrubbing
+       happens on the artwork rather than on a rule underneath it. */
+
+    /* Ambient spill. The same cover, blurred to a colour field, sitting
+       behind the card and masked away before it reaches the transport —
+       what shows is the light coming off the sleeve, not a second copy of
+       it. */
+    .mus-glow {
+      /* Starts at the sleeve's top edge, not the card's: the head row sits
+         above the artwork and a colour wash behind the title reads as a
+         bleed, not as light. */
+      position:absolute; z-index:0; left:-12%; right:-12%; top:28px;
+      height:calc(var(--art-size, 240px) + 180px);
+      overflow:hidden; opacity:0; pointer-events:none;
+      transition:opacity var(--t-slow) var(--ease);
+      /* Solid where the sleeve hides it, then gone before it reaches the
+         transport — enough colour to feel lit, not enough to fight the type. */
+      -webkit-mask-image:linear-gradient(180deg, #000 58%, transparent 88%);
+              mask-image:linear-gradient(180deg, #000 58%, transparent 88%);
+    }
+    #music-card.has-art .mus-glow { opacity:0.72; }
+    #mus-bloom {
+      width:100%; height:100%; object-fit:cover;
+      filter:blur(30px) saturate(1.8); transform:scale(1.3); will-change:transform;
+      /* The ambient light drifts. Nothing else in the card moves this
+         slowly, and it is what keeps a paused screen from looking frozen. */
+      animation:bloom-drift 26s ease-in-out infinite alternate;
+    }
+    @keyframes bloom-drift {
+      from { transform:scale(1.3)  translate3d(-2%, -1%, 0); }
+      to   { transform:scale(1.46) translate3d(2%, 2%, 0); }
+    }
+    /* The static children have to be positioned to sit above the spill —
+       an unpositioned box paints under any positioned sibling. */
+    #music-card > .widget-head, #music-card .mus-stage,
+    #music-card .mus-meta, #music-card .mus-ctrls,
+    #music-card .mus-vol-row, #music-card .mus-vol-note { position:relative; z-index:1; }
+    #music-card.has-art {
+      border-color:rgba(var(--art-rgb, var(--rgb)),0.30);
+      box-shadow:0 0 34px -20px rgba(var(--art-rgb, var(--rgb)),0.95),
+                 inset 0 0 26px -14px rgba(var(--art-rgb, var(--rgb)),0.55);
+    }
+
+    /* Cancels the widget's own padding so the sleeve reaches the frame. */
+    .mus-stage { margin:0 -14px 11px; }
+
     .mus-art {
-      position:relative; width:min(100%, var(--art-size, 30vh)); aspect-ratio:1/1;
-      margin:1px auto 9px; overflow:hidden;
-      border:1px solid rgba(var(--rgb),0.22);
-      background:linear-gradient(160deg, rgba(var(--rgb),0.09), rgba(var(--rgb),0.02));
-      box-shadow:inset 0 0 0 1px rgba(0,0,0,0.5),
-                 0 12px 30px -14px rgba(0,0,0,0.9),
-                 0 0 26px -8px rgba(var(--art-rgb, var(--rgb)),0.55);
-      transition:box-shadow var(--t-slow) var(--ease);
+      position:relative; width:100%; height:var(--art-size, 30vh);
+      overflow:hidden; perspective:900px;
+      border-top:1px solid rgba(var(--rgb),0.16);
+      border-bottom:1px solid rgba(var(--art-rgb, var(--rgb)),0.30);
+      background:linear-gradient(160deg, rgba(var(--rgb),0.10), rgba(var(--rgb),0.02));
+      transition:border-color var(--t-slow) var(--ease);
     }
     #mus-cover {
       position:absolute; inset:0; width:100%; height:100%;
-      object-fit:cover;                  /* square in, square out — no stretch */
-      opacity:0; transition:opacity var(--t-slow) var(--ease);
+      object-fit:cover;                  /* cropped at most — never stretched */
+      opacity:0;
+      /* The scale leaves room for the tilt to swing without exposing an
+         edge, and makes the parallax read as depth rather than a wobble. */
+      transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(1.06);
+      transition:opacity var(--t-slow) var(--ease), transform 420ms var(--ease-out),
+                 filter var(--t-slow) var(--ease);
     }
+    .mus-art.tilting #mus-cover { transition:opacity var(--t-slow) var(--ease), transform 90ms linear; }
     .mus-art.has-art #mus-cover { opacity:1; }
-    /* Scanlines and a vignette over the sleeve, so it reads as artwork on a
-       display rather than a JPEG pasted onto the panel. */
+    /* Paused is a state you should be able to feel without reading the pill:
+       the colour drains a little and the sweep stops. */
+    .mus-art:not(.playing) #mus-cover { filter:saturate(0.72) brightness(0.86); }
+
+    /* Scanlines and a vignette, so the sleeve reads as artwork on a display
+       rather than a JPEG pasted onto the panel. */
     .mus-art::after {
       content:''; position:absolute; inset:0; z-index:2; pointer-events:none;
       background:
         repeating-linear-gradient(180deg, rgba(0,0,0,0.17) 0 1px, transparent 1px 3px),
-        radial-gradient(ellipse at 50% 40%, transparent 44%, rgba(0,4,10,0.55) 100%);
+        radial-gradient(ellipse at 50% 38%, transparent 46%, rgba(0,4,10,0.6) 100%);
       opacity:0.5;
     }
-    /* A separate frame rather than animating the box-shadow list: the glow
-       belongs to the record (--art-rgb is the sleeve's own saturated
-       average) and only breathes while it is actually playing. */
-    .mus-art::before {
-      content:''; position:absolute; inset:0; z-index:2; pointer-events:none;
-      border:1px solid rgba(var(--art-rgb, var(--rgb)),0.5);
-      opacity:0; transition:opacity var(--t-slow) var(--ease);
+
+    /* Specular that follows the pointer — the sleeve under glass. */
+    .mus-sheen {
+      position:absolute; inset:0; z-index:2; pointer-events:none; opacity:0;
+      background:radial-gradient(200px circle at var(--sx,50%) var(--sy,40%),
+                 rgba(255,255,255,0.16), transparent 62%);
+      mix-blend-mode:screen; transition:opacity var(--t-mid) var(--ease);
     }
-    .mus-art.playing::before { opacity:1; animation:art-breathe 3.6s ease-in-out infinite; }
-    @keyframes art-breathe { 0%,100% { opacity:0.3; } 50% { opacity:0.85; } }
-    .mus-art .cnr { z-index:3; }
+    .mus-art.tilting .mus-sheen { opacity:1; }
+
+    /* A read head crossing the artwork every few seconds while it plays —
+       the same gesture the header's sweep makes, at the sleeve's colour. */
+    .mus-sweep { position:absolute; inset:0; z-index:2; overflow:hidden; pointer-events:none; }
+    .mus-sweep::after {
+      content:''; position:absolute; left:0; right:0; top:0; height:32%;
+      background:linear-gradient(180deg, transparent,
+                 rgba(var(--art-rgb, var(--rgb)),0.16) 62%,
+                 rgba(255,255,255,0.13) 84%, transparent);
+      transform:translateY(-130%);
+    }
+    .mus-art.playing .mus-sweep::after { animation:art-scan 7s linear infinite; }
+    @keyframes art-scan {
+      0%   { transform:translateY(-130%); }
+      100% { transform:translateY(330%); }
+    }
+
+    /* Track change: a bright band wipes down and the new sleeve settles in,
+       so a skip reads as the card re-tuning rather than an image swap. */
+    .mus-wipe { position:absolute; inset:0; z-index:3; overflow:hidden; pointer-events:none; opacity:0; }
+    .mus-wipe::after {
+      content:''; position:absolute; left:0; right:0; top:0; height:26%;
+      background:linear-gradient(180deg, transparent,
+                 rgba(var(--art-rgb, var(--rgb)),0.55), rgba(255,255,255,0.5), transparent);
+    }
+    .mus-art.swap .mus-wipe { animation:art-wipe 620ms var(--ease-out); }
+    @keyframes art-wipe {
+      0%   { opacity:0; transform:translateY(-100%); }
+      18%  { opacity:1; }
+      100% { opacity:0; transform:translateY(330%); }
+    }
+    .mus-art.swap #mus-cover { animation:art-settle 620ms var(--ease-out); }
+    @keyframes art-settle {
+      0%   { opacity:0; filter:brightness(1.7) saturate(0.4); }
+      100% { opacity:1; filter:none; }
+    }
+
+    /* Readability floor for everything riding the artwork's lower edge. */
+    .mus-scrim {
+      position:absolute; left:0; right:0; bottom:0; height:52%; z-index:2; pointer-events:none;
+      background:linear-gradient(180deg, transparent, rgba(0,5,12,0.45) 42%, rgba(0,4,10,0.93));
+    }
+    /* The widget's own brackets are accent-on-dark; over a bright sleeve
+       they vanish, so this pair is light. */
+    .mus-art .cnr { z-index:4; }
+    .mus-art .cnr-tr { border-top-color:rgba(233,246,255,0.75); border-right-color:rgba(233,246,255,0.75); }
+    .mus-art .cnr-bl { border-bottom-color:rgba(233,246,255,0.45); border-left-color:rgba(233,246,255,0.45); }
+
+    /* Level meter beside the status pill. Not wired to the audio — nothing
+       exposes the stream — so it reads as a "running" light in the same
+       language as the transcript's idle bars, and stops dead when paused. */
+    .mus-eq { position:absolute; z-index:4; right:10px; top:9px; display:flex; align-items:flex-end; gap:2px; height:15px; opacity:0; transition:opacity var(--t-mid) var(--ease); }
+    .mus-eq i {
+      width:3px; height:100%; transform-origin:bottom; transform:scaleY(0.3);
+      background:linear-gradient(180deg, #ffffff, rgba(207,233,255,0.55));
+      box-shadow:0 0 7px rgba(255,255,255,0.55);
+    }
+    .mus-art.playing .mus-eq { opacity:0.9; }
+    .mus-art.playing .mus-eq i { animation:ce-pulse 1.5s var(--ease) infinite; }
+    .mus-eq i:nth-child(2) { animation-delay:180ms; }
+    .mus-eq i:nth-child(3) { animation-delay:360ms; }
+    .mus-eq i:nth-child(4) { animation-delay:90ms; }
+
     .mus-art-none {
-      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center;
       font-size:8px; letter-spacing:3px; color:var(--dim);
+      background:
+        repeating-linear-gradient(90deg, rgba(var(--rgb),0.06) 0 1px, transparent 1px 22px),
+        repeating-linear-gradient(180deg, rgba(var(--rgb),0.06) 0 1px, transparent 1px 22px);
       transition:opacity var(--t-mid) var(--ease);
     }
     .mus-art.has-art .mus-art-none { opacity:0; }
 
+    /* ── Track identity ─────────────────────────────────────────────── */
+    .mus-meta { margin-bottom:10px; }
+    #music-card.has-art .mus-track { text-shadow:0 0 12px rgba(var(--art-rgb, var(--rgb)),0.55); }
+    #music-card.has-art .mus-btn:hover { border-color:rgba(var(--art-rgb, var(--rgb)),0.75); }
+    /* The data-flow line every widget carries, run at the sleeve's colour
+       while the track is actually moving. */
+    #music-card.playing .widget-flow::after {
+      opacity:0.6;
+      background:linear-gradient(90deg, transparent, rgb(var(--art-rgb, var(--rgb))), transparent);
+    }
     .mus-album { font-size:7.5px;letter-spacing:2px;color:var(--dim);opacity:0.62;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 
     /* ── Scrub bar ──────────────────────────────────────────────────────
-       3px of ink, 16px of hit area: a 3px target is unusable with a thumb
-       and fiddly with a mouse, and this one is draggable now. */
-    .mus-seek { position:relative; padding:7px 0 6px; cursor:pointer; touch-action:none; }
+       It sits on the sleeve's bottom edge: 3px of ink, 15px of hit area,
+       because a 3px target is unusable with a thumb and this one is
+       draggable now. */
+    .mus-times {
+      position:absolute; z-index:4; left:11px; right:11px; bottom:15px;
+      display:flex; justify-content:space-between; margin:0;
+      font-size:7.5px; letter-spacing:1.5px; color:#bfdcf5;
+      font-variant-numeric:tabular-nums; text-shadow:0 0 8px rgba(0,4,10,0.95);
+      pointer-events:none;
+    }
+    .mus-seek {
+      position:absolute; z-index:4; left:0; right:0; bottom:0;
+      padding:7px 0 5px; cursor:pointer; touch-action:none;
+    }
     .mus-seek.idle { cursor:default; }
-    .mus-seek:focus-visible { outline:1px solid rgba(var(--rgb),0.55); outline-offset:3px; }
-    .mus-progress { height:3px;background:rgba(var(--rgb),0.07);position:relative;transition:height var(--t-fast) var(--ease); }
+    .mus-seek:focus-visible { outline:1px solid rgba(var(--rgb),0.55); outline-offset:-3px; }
+    .mus-progress { height:3px;background:rgba(0,4,10,0.55);position:relative;transition:height var(--t-fast) var(--ease); }
     .mus-seek:not(.idle):hover .mus-progress, .mus-seek.dragging .mus-progress { height:5px; }
-    .mus-progress-fill { position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,#003888,var(--c));width:0%;transition:width 0.8s var(--ease-out); }
+    .mus-progress-fill { position:absolute;left:0;top:0;bottom:0;width:0%;transition:width 0.8s var(--ease-out); }
+    /* Wins over the shared .sbar/.ana-bar gradient further down the sheet:
+       this one is read against the artwork, so it carries its own glow. */
+    .mus-seek .mus-progress-fill {
+      background:linear-gradient(90deg, rgba(var(--rgb),0.55), rgb(var(--rgb)));
+      box-shadow:0 0 10px rgba(var(--rgb),0.75);
+    }
     .mus-seek-head {
       position:absolute; z-index:2; top:50%; left:0; width:10px; height:10px; margin:-5px 0 0 -5px;
-      border-radius:50%; background:var(--c); box-shadow:0 0 8px var(--cg);
+      border-radius:50%; background:#eaf6ff; box-shadow:0 0 10px var(--c), 0 0 3px #fff;
       opacity:0; transform:scale(0.55); pointer-events:none;
       transition:left 0.8s var(--ease-out), opacity var(--t-fast) var(--ease),
                  transform var(--t-fast) var(--ease);
@@ -1615,12 +1758,9 @@
       mask-image: linear-gradient(90deg, #000 calc(100% - 56px), transparent);
     }
 
-    /* ════ MUSIC ════ */
-    .mus-times {
-      display: flex; justify-content: space-between; margin: 0 0 9px;
-      font-size: 7.5px; letter-spacing: 1.5px; color: var(--dim);
-      font-variant-numeric: tabular-nums;
-    }
+    /* ════ MUSIC ════
+       The times moved onto the artwork with the scrub bar; their rule lives
+       with the rest of the sleeve above. */
     .mus-mute {
       flex: 0 0 auto; width: 36px; padding: 4px 0; border-radius: 2px; cursor: pointer;
       border: 1px solid var(--cd); background: rgba(var(--rgb),0.04); color: var(--dim);
@@ -2151,28 +2291,38 @@
 
       <div class="widget" id="music-card">
         <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
+        <div class="mus-glow"><img id="mus-bloom" alt="" aria-hidden="true"></div>
         <div class="widget-head">
           <div class="widget-title"><div class="sq"></div>SPOTIFY</div>
           <div class="mus-src-pill" id="mus-src">—</div>
         </div>
-        <div class="mus-art" id="mus-art">
-          <img id="mus-cover" alt="" decoding="async">
-          <div class="mus-art-none">NO ARTWORK</div>
-          <div class="mus-status" id="mus-status"><div class="dot"></div><span id="mus-status-lbl">IDLE</span></div>
-          <i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
-        </div>
-        <div class="mus-track" id="mus-track">NO TRACK</div>
-        <div class="mus-artist" id="mus-artist">—</div>
-        <div class="mus-album" id="mus-album"></div>
-        <div class="mus-seek idle" id="mus-seek" role="slider" tabindex="0"
-             aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"
-             aria-valuetext="0:00">
-          <div class="mus-progress">
-            <div class="mus-progress-fill" id="mus-prog"></div>
-            <div class="mus-seek-head" id="mus-seek-head"></div>
+        <div class="mus-stage">
+          <div class="mus-art" id="mus-art">
+            <img id="mus-cover" alt="" decoding="async">
+            <div class="mus-art-none">NO ARTWORK</div>
+            <div class="mus-sheen"></div>
+            <div class="mus-sweep"></div>
+            <div class="mus-wipe"></div>
+            <div class="mus-scrim"></div>
+            <div class="mus-status" id="mus-status"><div class="dot"></div><span id="mus-status-lbl">IDLE</span></div>
+            <div class="mus-eq"><i></i><i></i><i></i><i></i></div>
+            <i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
+            <div class="mus-times"><span id="mus-elapsed">0:00</span><span id="mus-total">0:00</span></div>
+            <div class="mus-seek idle" id="mus-seek" role="slider" tabindex="0"
+                 aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"
+                 aria-valuetext="0:00">
+              <div class="mus-progress">
+                <div class="mus-progress-fill" id="mus-prog"></div>
+                <div class="mus-seek-head" id="mus-seek-head"></div>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="mus-times"><span id="mus-elapsed">0:00</span><span id="mus-total">0:00</span></div>
+        <div class="mus-meta">
+          <div class="mus-track" id="mus-track">NO TRACK</div>
+          <div class="mus-artist" id="mus-artist">—</div>
+          <div class="mus-album" id="mus-album"></div>
+        </div>
         <div class="mus-ctrls">
           <button class="mus-btn" data-act="prev">«</button>
           <button class="mus-btn primary" data-act="toggle" id="mus-toggle">PLAY</button>
@@ -3965,7 +4115,8 @@ const musTrack=document.getElementById('mus-track'),musArtist=document.getElemen
       musStatus=document.getElementById('mus-status'),musStatLbl=document.getElementById('mus-status-lbl'),
       musProg=document.getElementById('mus-prog'),musSeek=document.getElementById('mus-seek'),
       musSeekHead=document.getElementById('mus-seek-head'),musArt=document.getElementById('mus-art'),
-      musCover=document.getElementById('mus-cover'),
+      musCover=document.getElementById('mus-cover'),musBloom=document.getElementById('mus-bloom'),
+      musCard=document.getElementById('music-card'),
       musToggle=document.getElementById('mus-toggle'),musVol=document.getElementById('mus-vol'),
       musVolVal=document.getElementById('mus-vol-val'),musMute=document.getElementById('mus-mute'),
       musElapsed=document.getElementById('mus-elapsed'),musTotal=document.getElementById('mus-total');
@@ -3995,6 +4146,7 @@ async function pollMusic() {
                            ? album.toUpperCase() : '';
     setCover(d.art_url || '');
     musArt.classList.toggle('playing', st === 'playing');
+    musCard.classList.toggle('playing', st === 'playing');
     // The album line comes and goes with the track, which changes how much
     // room is left for the sleeve, so re-fit on a change rather than every
     // poll — this reads layout.
@@ -4058,25 +4210,71 @@ musMute.addEventListener('click', () => {
 // entry and the colour is there.
 function setCover(url) {
   if (url === coverUrl) return;
+  const had = !!coverUrl;
   coverUrl = url;
   if (!url) {
     musArt.classList.remove('has-art');
+    musCard.classList.remove('has-art');
     musCover.removeAttribute('src');
-    musArt.style.removeProperty('--art-rgb');
+    musBloom.removeAttribute('src');
+    musCard.style.removeProperty('--art-rgb');
     return;
   }
   musCover.src = url;
+  musBloom.src = url;
   musArt.classList.add('has-art');
+  musCard.classList.add('has-art');
+  // Only wipe when one sleeve replaces another. The first cover of the
+  // session arriving is not a track change, and flashing on page load reads
+  // as a glitch rather than as a transition.
+  if (had) {
+    musArt.classList.remove('swap');
+    void musArt.offsetWidth;                   // restart the animation
+    musArt.classList.add('swap');
+    setTimeout(() => musArt.classList.remove('swap'), 700);
+  }
   const probe = new Image();
   probe.crossOrigin = 'anonymous';
   probe.onload = () => {
     if (coverUrl !== url) return;              // track changed mid-flight
     const rgb = dominantOf(probe);
-    if (rgb) musArt.style.setProperty('--art-rgb', rgb.join(','));
-    else musArt.style.removeProperty('--art-rgb');
+    // On the card, not the artwork: the border, the spill and the sweep all
+    // read from it, and they live on either side of the sleeve.
+    if (rgb) musCard.style.setProperty('--art-rgb', rgb.join(','));
+    else musCard.style.removeProperty('--art-rgb');
   };
-  probe.onerror = () => { if (coverUrl === url) musArt.style.removeProperty('--art-rgb'); };
+  probe.onerror = () => { if (coverUrl === url) musCard.style.removeProperty('--art-rgb'); };
   probe.src = url;
+}
+
+// Pointer parallax. The sleeve tilts under the cursor and the specular
+// follows it, which is what makes it read as a lit object rather than a
+// rectangle of pixels. Coarse pointers get nothing — there is no hover on a
+// phone, and a tilt that only fires mid-tap is noise.
+const musTiltOK = matchMedia('(hover: hover) and (pointer: fine)').matches && !CALM.matches;
+if (musTiltOK) {
+  let tiltRaf = 0, tiltEv = null;
+  musArt.addEventListener('pointermove', e => {
+    if (seekDrag) return;                      // a scrub is not a look-around
+    tiltEv = e;
+    if (tiltRaf) return;                       // one layout read per frame
+    tiltRaf = requestAnimationFrame(() => {
+      tiltRaf = 0;
+      const r = musArt.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const x = (tiltEv.clientX - r.left) / r.width, y = (tiltEv.clientY - r.top) / r.height;
+      musArt.classList.add('tilting');
+      musArt.style.setProperty('--ry', ((x - 0.5) * 9).toFixed(2) + 'deg');
+      musArt.style.setProperty('--rx', ((0.5 - y) * 7).toFixed(2) + 'deg');
+      musArt.style.setProperty('--sx', (x * 100).toFixed(1) + '%');
+      musArt.style.setProperty('--sy', (y * 100).toFixed(1) + '%');
+    });
+  });
+  musArt.addEventListener('pointerleave', () => {
+    musArt.classList.remove('tilting');        // the slow transition takes it home
+    musArt.style.setProperty('--rx', '0deg');
+    musArt.style.setProperty('--ry', '0deg');
+  });
 }
 
 // Average the saturated pixels only. A plain mean over an album cover is
@@ -4110,17 +4308,20 @@ function dominantOf(img) {
 // postage stamp on a monitor or pushes the transport controls off the bottom
 // of a laptop panel — and the controls are the point of the card — so it is
 // measured, the same way the orb fits itself to #main.
-const musCard = document.getElementById('music-card');
 function fitCover() {
   const panel = musCard.parentElement;
   if (!panel || !panel.clientHeight || !musCard.offsetParent) return;
   const card = musCard.getBoundingClientRect();
   const rest = card.height - musArt.getBoundingClientRect().height;  // all but the sleeve
   const room = panel.getBoundingClientRect().bottom - card.top - rest - 6;
-  // A floor, because on a short screen the honest answer is "no room at all"
-  // and a postage stamp is not what the card is for — the panel scrolls, and
-  // scrolling a little to reach the command log is the cheaper trade.
-  musArt.style.setProperty('--art-size', Math.round(Math.max(190, room)) + 'px');
+  // Square is the ceiling: the sleeve spans the card either way, so any more
+  // height than its width would be letterboxing a square source. Below that
+  // it crops top and bottom rather than squashing, and 190px is the floor —
+  // on a short screen the honest answer is "no room", and a postage stamp is
+  // not what the card is for. The panel scrolls; reaching the command log
+  // with a scroll is the cheaper trade.
+  const size = Math.min(musCard.clientWidth, Math.max(190, room));
+  musCard.style.setProperty('--art-size', Math.round(size) + 'px');
 }
 addEventListener('resize', fitCover);
 fitCover();
