@@ -71,12 +71,18 @@ output_dir: "./output"
 rir_paths:
   - "./data/mit_rirs"
 
+# AudioSet only. The upstream notebook pairs it with the Free Music Archive to
+# cover music, but AudioSet's balanced split is label-balanced across all 527
+# classes and its music classes are among the largest, so the coverage is
+# already there for another 1.4 GB of download.
+#
+# Music background matters more for NORA than for a generic wake word: she
+# controls Spotify, so music is playing in the room precisely when someone is
+# most likely to say her name.
 background_paths:
   - "./data/audioset_16k"
-  - "./data/fma_16k"
 
 background_paths_duplication_rate:
-  - 1
   - 1
 
 false_positive_validation_data_path: "./data/validation_set_features.npy"

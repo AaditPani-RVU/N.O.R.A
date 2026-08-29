@@ -88,6 +88,12 @@ def fetch_audioset(out: Path, shards: int, per_shard: int) -> None:
 
     written = have
     for rfile in names:
+        # Skip a shard already decoded. Without this, raising --shards to widen
+        # the background set re-downloads every earlier shard — 688 MB apiece —
+        # only to find every wav it would write is already on disk.
+        if list(out.glob(f"{Path(rfile).stem}_*.wav")):
+            print(f"[audioset] {Path(rfile).name}: already decoded, skipping")
+            continue
         local = cache / Path(rfile).name
         if err := _download(AUDIOSET_REPO, rfile, local):
             print("  !", err)
