@@ -476,14 +476,44 @@ wakeword:
   #     - "models/wakeword/hey_nora.onnx"
   #     - "models/wakeword/hi_nora.onnx"
   #
-  # "hey_jarvis_v0.1" is the closest pretrained phrase and the stand-in until
-  # a "hey nora" model is trained.
-  # sensitivity: 0.0–1.0 (lower = more sensitive, more false triggers).
+  # models/wakeword/hey_nora.onnx is trained here (see training/wakeword/) and
+  # covers both "hey nora" and "hi nora" — one model, both phrasings, so the
+  # list form above is not needed.
+  #
+  # sensitivity: 0.0–1.0. This is the raw score a frame must reach, so lower
+  # is more sensitive and more false triggers. 0.9 is not a timid setting here:
+  # on 152 clips across 8 accents it wakes on 91.7% of real utterances while
+  # firing on 1.6% of the near-misses that used to break this ("hey dora",
+  # "hey laura", "aurora"). Dropping to 0.5 buys no extra wakes and multiplies
+  # the collisions — raise it, do not lower it, if she wakes to the wrong name.
+  # A bare "nora" mid-sentence stays below 0.9 by design.
   # cooldown_sec: minimum gap between consecutive triggers.
+  #
+  # input_device: which microphone to listen on. Unset means the system default.
+  # That is usually right and was not right here — this machine's default source
+  # is an ACP digital mic emitting a DC-offset rumble with no energy above 4 kHz
+  # (measured: 99.9% of its energy below 150 Hz), so the detector ran for hours
+  # and could not have fired once.
+  #
+  # Setting this is the second choice, not the first. It takes a sounddevice
+  # index or a case-insensitive substring of the name sounddevice reports, NOT
+  # the name `wpctl status` prints — and on a PipeWire desktop the only devices
+  # with distinct names are the raw ALSA ones, which run at the card's rate and
+  # may refuse the 16 kHz the detector opens. That is the case on this machine:
+  # hw:2,0 matches `ALC245` and then fails to open, so there is no value here
+  # that reaches the good microphone. A device that cannot capture 16 kHz mono
+  # is rejected at startup with a logged reason and the default is used instead.
+  #
+  # The fix that works here is to move PipeWire's default instead, which also
+  # fixes every other app rather than just this one:
+  #
+  #     training/wakeword/mic_probe.py --scan     # names the mic that hears you
+  #     wpctl set-default <id>                    # point everything at it
   enabled: true
-  model: "hey_jarvis_v0.1"
-  sensitivity: 0.5
+  model: "models/wakeword/hey_nora.onnx"
+  sensitivity: 0.9
   cooldown_sec: 1.5
+  input_device: null
 
 # ── Sprint 2: Know (Durable Cognition) ────────────────────────────────────────
 

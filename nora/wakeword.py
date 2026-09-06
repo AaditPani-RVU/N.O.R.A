@@ -99,6 +99,75 @@ def _resolve_models(spec) -> list[str]:
     return out
 
 
+def _resolve_device(spec) -> int | None:
+    """Turn `wakeword.input_device` into a sounddevice index, or None for default.
+
+    Worth a config knob because the system default is not always the microphone
+    that can hear you. This machine has two internal inputs and the default one
+    delivers a clipping DC offset with no energy above 4 kHz — the wake word ran
+    for hours against it and could not have fired once. `mic_probe.py --scan`
+    names the input that hears speech; this is what accepts that name.
+
+    An int is used as-is. A string is matched case-insensitively as a substring
+    of the device name — but note these are the names *sounddevice* reports
+    ("HD-Audio Generic: ALC245 Analog (hw:2,0)"), not the friendlier ones from
+    `wpctl status`, which PortAudio cannot see. A PipeWire node name will not
+    match anything here; use `wpctl set-default` for those, or an index.
+
+    Whatever comes out is then checked against the format the detector actually
+    opens — 16 kHz mono float32. That check is the point of this function as
+    much as the lookup is: a raw ALSA device can match by name and still refuse
+    16 kHz (hw:2,0 on this machine does), and without the check that lands as a
+    stream error on the detector thread, which kills the wake word outright. A
+    device we cannot open is worth less than the default, so we say why and fall
+    back rather than take the configured value on faith.
+    """
+    if spec is None or spec == "":
+        return None
+
+    try:
+        import sounddevice as sd
+    except Exception as exc:
+        logger.error("Could not load sounddevice (%s) — using the default input.", exc)
+        return None
+
+    if isinstance(spec, int):
+        index = spec
+    else:
+        try:
+            want = str(spec).lower()
+            matches = [
+                i for i, d in enumerate(sd.query_devices())
+                if d["max_input_channels"] > 0 and want in d["name"].lower()
+            ]
+        except Exception as exc:
+            logger.error("Could not enumerate input devices (%s) — using the default.", exc)
+            return None
+        if not matches:
+            # Falling back to the default is right: a typo should cost the tuned
+            # device, not the wake word entirely.
+            logger.error("No input device matches %r — falling back to the system default.", spec)
+            return None
+        if len(matches) > 1:
+            logger.warning("input_device %r matches %d devices; using the first.", spec, len(matches))
+        index = matches[0]
+
+    try:
+        sd.check_input_settings(
+            device=index, samplerate=16000, channels=1, dtype="float32",
+        )
+    except Exception as exc:
+        logger.error(
+            "Input device %r (index %d) cannot capture 16 kHz mono (%s) — falling back "
+            "to the system default. If that default is the wrong microphone, point "
+            "PipeWire at the right one with `wpctl set-default <id>` instead; see "
+            "training/wakeword/mic_probe.py --scan.",
+            spec, index, exc,
+        )
+        return None
+    return index
+
+
 def start() -> None:
     """Start the wakeword detector if enabled in config. Call once at startup."""
     global _enabled, _detector
@@ -118,6 +187,7 @@ def start() -> None:
     models = _resolve_models(cfg.get("model", "hey_jarvis_v0.1"))
     sensitivity = float(cfg.get("sensitivity", 0.5))
     cooldown = float(cfg.get("cooldown_sec", 1.5))
+    device = _resolve_device(cfg.get("input_device"))
 
     if not models:
         # Every configured model failed to resolve. Starting anyway would load
@@ -126,11 +196,12 @@ def start() -> None:
         return
 
     try:
-        _detector = _WakewordDetector(models, sensitivity, cooldown)
+        _detector = _WakewordDetector(models, sensitivity, cooldown, device)
         _detector.start()
         _enabled = True
-        logger.info("Wakeword detector started (models=%s, sensitivity=%.2f)",
-                    ", ".join(_display(m) for m in models), sensitivity)
+        logger.info("Wakeword detector started (models=%s, sensitivity=%.2f, device=%s)",
+                    ", ".join(_display(m) for m in models), sensitivity,
+                    "default" if device is None else device)
     except Exception as exc:
         logger.error("Failed to start wakeword detector: %s", exc)
 
@@ -150,10 +221,12 @@ def wait_for_trigger(timeout: float = 0.1) -> bool:
 
 
 class _WakewordDetector:
-    def __init__(self, model_names: list[str], sensitivity: float, cooldown: float) -> None:
+    def __init__(self, model_names: list[str], sensitivity: float, cooldown: float,
+                 device: int | None = None) -> None:
         self._model_names = list(model_names)
         self._sensitivity = sensitivity
         self._cooldown = cooldown
+        self._device = device
         self._event = threading.Event()
         self._running = False
         self._thread: threading.Thread | None = None
@@ -204,6 +277,7 @@ class _WakewordDetector:
                 channels=1,
                 dtype="float32",
                 blocksize=CHUNK,
+                device=self._device,
                 callback=_mic_callback,
             ):
                 logger.info("Wakeword mic stream open — listening for %s",

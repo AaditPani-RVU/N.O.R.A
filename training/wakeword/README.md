@@ -170,8 +170,15 @@ Point `config.yaml` at it — paths may be relative to the project root:
 wakeword:
   enabled: true
   model: "models/wakeword/hey_nora.onnx"
-  sensitivity: 0.5
+  sensitivity: 0.9
 ```
+
+The model shipped in `models/wakeword/` is variant G: hard negatives plus
+`max_negative_weight: 100`. Scored by `benchmark_voices.py` over 152 clips in 8
+accents it wakes on 91.7% of real utterances at 0.90 and fires on 1.6% of the
+rime collisions — five variants were trained and this one has the widest
+margin. The hard negatives, not the negative weighting, did that work: the same
+recipe at weight 1500 and without collision clips (variant B) collides 18.8%.
 
 Tune `sensitivity` against your own room rather than trusting the default.
 Higher means fewer false triggers and more repeated wake words; the number that
