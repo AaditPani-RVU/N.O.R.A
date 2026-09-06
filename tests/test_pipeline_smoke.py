@@ -292,6 +292,11 @@ SUBSYSTEM_STARTS = [
     "nora.anomaly_watchdog.start", "nora.mcp_bridge.load_all",
     "nora.ui_server.start_ws", "nora.pipeline._warm_lazy_singletons",
     "nora.wiring._start_linux_hooks",
+    # Stubbed because the real one binds a socket: unstubbed, this test fails
+    # with "Address already in use" whenever NORA is actually running, which is
+    # exactly when someone would run the suite. Listing it here keeps the
+    # assertion that the remote mic gets started while leaving the port alone.
+    "nora.remote_mic.start",
 ]
 
 SUBSYSTEM_STOPS = [
