@@ -168,9 +168,18 @@ def scan() -> int:
 
     print("It is NOT the system default — which is why the wake word never fired.")
     print()
-    print("Fix it system-wide (recommended — it fixes every app, not just NORA):")
+    print("Fix it system-wide (fixes every app, not just NORA):")
     print()
     print(f"    wpctl set-default {best[0]}")
+    print()
+    print("Then re-run this scan to confirm the * moved. It does not always take:")
+    print("WirePlumber can keep handing out a different source than the configured")
+    print("default (a device with api.acp.auto-port = false will do this). If the *")
+    print("has not moved, pin NORA alone instead — this routes only NORA and leaves")
+    print("every other app on the system default:")
+    print()
+    print("    audio:")
+    print(f"      pipewire_node: {best[0]}        # in config.yaml")
     print()
 
     # PortAudio does not expose PipeWire node names, so `input_device` cannot be

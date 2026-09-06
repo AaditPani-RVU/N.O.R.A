@@ -22,7 +22,7 @@ import webbrowser
 
 from pathlib import Path
 
-from nora.config import load_config
+from nora.config import get_config, load_config
 from nora.logger import setup_logger
 
 
@@ -36,6 +36,32 @@ def _load_dotenv() -> None:
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
+
+
+def _pin_audio_node() -> None:
+    """Pin every capture this process opens to one PipeWire node, if configured.
+
+    The documented way to choose a microphone is `wpctl set-default`, and on
+    this machine it does not stick: the configured default is already the analog
+    input, and WirePlumber hands out the ACP digital mic anyway — the one that
+    emits a DC rumble with nothing above 4 kHz. `wakeword.input_device` cannot
+    rescue it either, because the only PortAudio device with a distinct name is
+    the raw ALSA one and it runs at 48 kHz only.
+
+    PIPEWIRE_NODE is the escape hatch: PipeWire reads it when a client connects a
+    stream, so setting it before any audio starts routes NORA — wake word,
+    push-to-talk, ambient — to the node named, and leaves every other app on the
+    system default. Set it here, before the first import that might open a
+    stream. `training/wakeword/mic_probe.py --scan` prints the node ids.
+    """
+    import os
+    node = get_config().get("audio", {}).get("pipewire_node")
+    if node in (None, ""):
+        return
+    # An explicit environment variable is a deliberate override and outranks
+    # the config file, the same way it does for everything in .env.
+    os.environ.setdefault("PIPEWIRE_NODE", str(node))
+    logging.getLogger("nora.startup").info("Audio pinned to PipeWire node %s", node)
 
 
 def check_prerequisites() -> bool:
@@ -76,6 +102,9 @@ def main() -> None:
     # Setup logging
     logger = setup_logger()
     logger.info("Starting Nora...")
+
+    # Before anything opens a microphone.
+    _pin_audio_node()
 
     # Check prerequisites
     if not check_prerequisites():

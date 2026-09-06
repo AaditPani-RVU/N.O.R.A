@@ -326,6 +326,30 @@ commands:
     - "shutdown"
     - "close_all_apps"
 
+# ── Audio input ───────────────────────────────────────────────────────────────
+audio:
+  # pipewire_node pins every capture NORA opens — wake word, push-to-talk,
+  # ambient — to one PipeWire node, leaving every other app on the system
+  # default. Unset means "use the default", which is right on most machines.
+  #
+  # It exists because the two documented ways to pick a microphone both fail on
+  # this hardware. `wpctl set-default 68` does not stick: the configured default
+  # is already the analog input and WirePlumber hands out the ACP digital mic
+  # regardless (that device has api.acp.auto-port = false). And
+  # wakeword.input_device cannot reach it either — the only PortAudio device
+  # with a distinct name is the raw ALSA one, which runs at 48 kHz only, while
+  # the detector needs 16 kHz.
+  #
+  # Measured on this machine, 3 s of a silent room:
+  #   node 68 (Stereo Microphone) rms 0.000095, peak 0.0006  — a real noise floor
+  #   node 69 (Digital Microphone) rms 0.011,   peak 0.203, 99.9% below 150 Hz
+  # 69 is the runtime default and is the broken one.
+  #
+  # Find the ids with:  training/wakeword/mic_probe.py --scan
+  # Node ids are not stable across reboots or replugs — if the wake word goes
+  # deaf after a reboot, re-run the scan before assuming the model regressed.
+  pipewire_node: 68
+
 logging:
   # max_bytes / backup_count cap the log at max_bytes * (backup_count + 1) —
   # 60 MB here. Without them this file grew to 177 MB, because nothing in a
