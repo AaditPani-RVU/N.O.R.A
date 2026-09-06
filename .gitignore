@@ -93,3 +93,10 @@ TELEMACHUS_PORT_PLAN.md
 # a repo: the token grants calendar + gmail.modify until it is revoked.
 credentials.json
 google_token.json
+# Google names the download client_secret_<id>.apps.googleusercontent.com.json.
+# Matching only "credentials.json" left the file people actually get untracked
+# but not ignored — one `git add -A` from being committed.
+client_secret*.json
+
+# Rotated logs: *.log above does not cover nora.log.1 and friends.
+*.log.[0-9]

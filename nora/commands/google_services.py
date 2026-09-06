@@ -3,8 +3,11 @@
 Setup (one-time):
   1. Go to https://console.cloud.google.com → New Project
   2. Enable "Google Calendar API" and "Gmail API"
-  3. Create OAuth2 credentials → Desktop app → Download as credentials.json
-  4. Place credentials.json in the project root
+  3. Create OAuth2 credentials → **Desktop app** → download the JSON
+     (a "Web application" client will not work: it cannot complete a local
+     consent flow without pre-registered redirect URIs)
+  4. Drop it in the project root under the name it downloaded with —
+     client_secret_<id>.apps.googleusercontent.com.json is expected
   5. Run NORA and issue any calendar command — browser OAuth flow runs once,
      token is saved to google_token.json for future runs.
 """
@@ -25,8 +28,31 @@ logger = logging.getLogger("nora.commands.google_services")
 # following the instructions produced "Google credentials not found" with the
 # file sitting exactly where it was asked for.
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_CREDS_FILE = _ROOT / "credentials.json"
 _TOKEN_FILE = _ROOT / "google_token.json"
+
+
+def _find_client_secrets() -> Path | None:
+    """Locate the OAuth client secrets file, whatever Google called it.
+
+    The console hands you `client_secret_<id>.apps.googleusercontent.com.json`,
+    never `credentials.json`, so requiring that exact name means every setup
+    starts with an undocumented rename — and failing it produces "credentials
+    not found" while the file sits in the directory being searched.
+
+    `credentials.json` still wins if present, so an existing setup keeps
+    working. Otherwise the newest matching download is used: re-downloading
+    after recreating the client is the common repair, and the newest file is
+    the one that repair produced.
+    """
+    named = _ROOT / "credentials.json"
+    if named.exists():
+        return named
+    found = sorted(
+        _ROOT.glob("client_secret*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return found[0] if found else None
 _SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify",
@@ -45,10 +71,30 @@ def _get_creds():
             "Run: pip install google-api-python-client google-auth-oauthlib google-auth-httplib2"
         )
 
-    if not _CREDS_FILE.exists():
+    creds_file = _find_client_secrets()
+    if creds_file is None:
         raise RuntimeError(
-            "Google credentials not found. Download credentials.json from "
-            "Google Cloud Console (OAuth2 Desktop app) and place it in the project root."
+            "Google credentials not found. In Google Cloud Console create an "
+            "OAuth client of type 'Desktop app', download the JSON, and drop it "
+            f"in {_ROOT} — the client_secret_*.json name it arrives with is fine."
+        )
+
+    # A "Desktop app" client is the one this flow can complete. A "Web
+    # application" client parses and then fails at consent with
+    # redirect_uri_mismatch, because run_local_server redirects to a
+    # localhost port that a web client would have to have registered in
+    # advance. Saying so here beats debugging it in a browser.
+    try:
+        import json
+        kind = next(iter(json.loads(creds_file.read_text())))
+    except Exception:
+        kind = "installed"
+    if kind == "web":
+        raise RuntimeError(
+            f"{creds_file.name} is a 'Web application' OAuth client; this needs a "
+            "'Desktop app' one. Create a new client of that type in Google Cloud "
+            "Console and download it — the web client cannot complete a local "
+            "consent flow without pre-registered redirect URIs."
         )
 
     creds = None
@@ -59,7 +105,7 @@ def _get_creds():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(_CREDS_FILE), _SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), _SCOPES)
             creds = flow.run_local_server(port=0)
         _TOKEN_FILE.write_text(creds.to_json())
 
