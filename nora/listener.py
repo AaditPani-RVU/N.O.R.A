@@ -374,6 +374,15 @@ class Listener:
         if not frames:
             return None
 
+        if not speech_detected:
+            # Nothing above the speech threshold for the whole recording. Under
+            # PTT this used to be returned anyway, and a clip of room tone sent
+            # to Whisper comes back as "Thank you." — which NORA then answers,
+            # which starts another turn, which records more silence. Wakeword
+            # mode already bailed here; PTT never did.
+            logger.info("No speech in recording -- discarding.")
+            return None
+
         audio = np.concatenate(frames, axis=0).flatten()
         duration = len(audio) / self.sample_rate
         logger.info(f"Recorded {duration:.1f}s of audio.")

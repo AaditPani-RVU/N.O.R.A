@@ -71,16 +71,58 @@ def _transcribe_remote(audio: np.ndarray, cfg: dict) -> str:
     return (resp.text or "").strip()
 
 
+def has_speech(audio: np.ndarray, sample_rate: int = 16000) -> bool:
+    """True when the clip holds enough loud audio to be worth transcribing.
+
+    Whisper does not return nothing for silence — it returns its training
+    priors. Fed a near-silent clip it emits "Thank you.", "Thanks for
+    watching!", "Bye." and similar, confidently and with no marker that they
+    were invented. NORA then answers the hallucination, and because answering
+    starts the next turn, the pair loops: five "Thank you."s in fifteen seconds
+    with nobody in the room.
+
+    The local path never showed this because faster-whisper runs with
+    vad_filter=True. The remote endpoint has no such filter, so the gate has to
+    live on this side of the call — which also means silence stops costing an
+    API round trip.
+
+    Total RMS is the wrong measure: a clip that is one loud word and two seconds
+    of room tone averages down to nothing. So this asks how *much* of the clip
+    is loud, frame by frame, and wants at least MIN_SPEECH_SEC of it. The
+    threshold is the recorder's own speech threshold, deliberately — the two
+    must agree about what silence is, or audio stops being recorded for a reason
+    this function then disagrees with.
+    """
+    FRAME = int(0.03 * sample_rate)          # 30 ms, the usual VAD frame
+    THRESHOLD = 0.01                         # matches listener._record
+    MIN_SPEECH_SEC = 0.15                    # ~one syllable
+
+    if audio.size < FRAME:
+        return False
+    usable = audio[:audio.size - (audio.size % FRAME)]
+    frames = usable.reshape(-1, FRAME)
+    loud = np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=1)) >= THRESHOLD
+    return bool(loud.sum() * 0.03 >= MIN_SPEECH_SEC)
+
+
 def transcribe(audio: np.ndarray) -> str:
     """Transcribe a float32 numpy audio array to text.
 
     Uses the remote endpoint when ``transcriber.backend`` is "remote", falling
     back to the local model on any failure — a flaky network degrades the turn
     to a slower one rather than a lost one.
+
+    Returns "" for a clip with no speech in it rather than asking a model what
+    it thinks the silence said. See `has_speech`.
     """
     # faster-whisper expects float32 numpy array
     if audio.dtype != np.float32:
         audio = audio.astype(np.float32)
+
+    if not has_speech(audio):
+        logger.debug("No speech in %.1fs of audio — not transcribing.",
+                     audio.size / 16000)
+        return ""
 
     cfg = get_config().get("transcriber", {})
     if cfg.get("backend", "local") == "remote":

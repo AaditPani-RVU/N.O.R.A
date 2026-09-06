@@ -51,7 +51,12 @@ def _warm_lazy_singletons() -> None:
             logger.warning("warm-up: %s failed (%s) — first use will pay the load", label, e)
 
     _warm("cognitive memory", lambda: cognitive_memory.get_context_for_prompt("warm up", n=1))
-    _warm("whisper", lambda: transcriber.transcribe(np.zeros(16000, dtype=np.float32)))
+    # Noise, not zeros: transcribe() now returns "" for a silent clip without
+    # loading anything, so warming it with silence would warm nothing and leave
+    # the model load on the first real turn. Amplitude sits above the speech
+    # gate so the whole path runs, which is the point of a warm-up.
+    _warm("whisper", lambda: transcriber.transcribe(
+        (np.random.default_rng(0).standard_normal(16000) * 0.05).astype(np.float32)))
 
     def _warm_tts() -> None:
         import tempfile
