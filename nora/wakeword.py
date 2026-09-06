@@ -103,10 +103,12 @@ def _resolve_device(spec) -> int | None:
     """Turn `wakeword.input_device` into a sounddevice index, or None for default.
 
     Worth a config knob because the system default is not always the microphone
-    that can hear you. This machine has two internal inputs and the default one
-    delivers a clipping DC offset with no energy above 4 kHz — the wake word ran
-    for hours against it and could not have fired once. `mic_probe.py --scan`
-    names the input that hears speech; this is what accepts that name.
+    that can hear you, and does not stay put. This machine has two internal
+    inputs; the one that is currently default delivers a clipping DC offset with
+    no energy above 4 kHz, while the log shows 41 real triggers from back when
+    the other one held the default. Nothing in the program noticed the move.
+    `mic_probe.py --scan` names the input that hears speech today; this is what
+    accepts that name.
 
     An int is used as-is. A string is matched case-insensitively as a substring
     of the device name — but note these are the names *sounddevice* reports

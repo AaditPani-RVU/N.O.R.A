@@ -1,7 +1,21 @@
 listener:
   push_to_talk_key: "ctrl+`"
   sample_rate: 16000
+  # silence_timeout_sec applies while PTT is held: the key release is the real
+  # end-of-turn signal, so this is only a backstop and can be short.
+  #
+  # wakeword_silence_timeout_sec is the one that matters after "hey nora", where
+  # there is no key and silence IS the signal. At the PTT value of 0.7 it hangs
+  # up during the pause between "remind me to" and whatever you were about to
+  # remember. Long enough to outlast a thinking pause, short enough not to feel
+  # like a hang: 3 s. Raise it if she cuts you off, lower it if she lingers.
+  #
+  # wakeword_speech_start_sec is how long you get to begin talking after the ack
+  # sound before the turn is dropped. The ack is not instant, so this has to
+  # cover hearing it plus drawing breath.
   silence_timeout_sec: 0.7
+  wakeword_silence_timeout_sec: 3.0
+  wakeword_speech_start_sec: 4.0
   max_record_sec: 15
   clap_detection:
     threshold: 0.08        # Audio peak level to count as a clap (lower = more sensitive)
@@ -497,10 +511,11 @@ wakeword:
   # cooldown_sec: minimum gap between consecutive triggers.
   #
   # input_device: which microphone to listen on. Unset means the system default.
-  # That is usually right and was not right here — this machine's default source
+  # That is usually right and is not right here *now*: the current default source
   # is an ACP digital mic emitting a DC-offset rumble with no energy above 4 kHz
-  # (measured: 99.9% of its energy below 150 Hz), so the detector ran for hours
-  # and could not have fired once.
+  # (measured: 99.9% of its energy below 150 Hz). It was not always the default —
+  # the log has 41 real triggers from earlier runs — so the failure is that the
+  # default moved to this mic, not that the machine never had a working one.
   #
   # Setting this is the second choice, not the first. It takes a sounddevice
   # index or a case-insensitive substring of the name sounddevice reports, NOT

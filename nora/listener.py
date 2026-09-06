@@ -21,6 +21,18 @@ class Listener:
         self.silence_timeout = cfg.get("silence_timeout_sec", 1.5)
         self.max_duration = cfg.get("max_record_sec", 15)
 
+        # The wake word gets its own, longer gap. Under PTT the key release is
+        # the real end-of-turn signal and silence is only a backstop, so 0.7 s
+        # costs nothing. After a wake word there is no key: silence *is* the
+        # signal, and 0.7 s cuts you off on the pause between "remind me to" and
+        # whatever you were about to remember. A gap has to be longer than a
+        # thinking pause and shorter than patience.
+        self.wakeword_silence_timeout = cfg.get("wakeword_silence_timeout_sec", 3.0)
+        # Time to start talking after the ack sound before the turn is dropped.
+        # Measured against the ack itself: it is not instant, and a timeout that
+        # starts before the user can hear it is a turn thrown away.
+        self.wakeword_speech_start = cfg.get("wakeword_speech_start_sec", 4.0)
+
         self._text_interrupted = False
 
         # Clap detection settings
@@ -292,7 +304,12 @@ class Listener:
         frames: list[np.ndarray] = []
         silence_start: float | None = None
         speech_detected = False
-        speech_start_timeout = 2.0  # bail if silent for first 2s in wakeword mode
+        # Both gaps depend on which mode we are in: see __init__ for why they
+        # differ. PTT keeps the tight one because the key already said "done".
+        speech_start_timeout = self.wakeword_speech_start
+        silence_timeout = (
+            self.silence_timeout if ptt_mode else self.wakeword_silence_timeout
+        )
         start_time = time.time()
         rms_threshold = 0.01
 
@@ -346,7 +363,7 @@ class Listener:
                             else:
                                 if silence_start is None:
                                     silence_start = time.time()
-                                elif time.time() - silence_start >= self.silence_timeout:
+                                elif time.time() - silence_start >= silence_timeout:
                                     logger.info("Silence detected, stopping recording.")
                                     break
 
