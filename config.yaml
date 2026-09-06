@@ -313,8 +313,15 @@ commands:
     - "close_all_apps"
 
 logging:
+  # max_bytes / backup_count cap the log at max_bytes * (backup_count + 1) —
+  # 60 MB here. Without them this file grew to 177 MB, because nothing in a
+  # login-session daemon ever truncates it. Prefer raising backup_count over
+  # max_bytes: grep reads across rotated files happily, and a single file big
+  # enough to matter is one no editor will open.
   level: "DEBUG"
   file: "nora.log"
+  max_bytes: 10485760   # 10 MB per file
+  backup_count: 5
 
 ambient:
   # Set to true to run a background mic loop that captures everything you say
