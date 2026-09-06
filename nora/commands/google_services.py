@@ -19,7 +19,12 @@ from nora.command_engine import register
 
 logger = logging.getLogger("nora.commands.google_services")
 
-_ROOT = Path(__file__).parent.parent
+# parent x3, not x2: this file is nora/commands/, so two levels reaches the
+# `nora` package and three reaches the project root. The setup notes above have
+# always said "project root", and the code looked one directory above it — so
+# following the instructions produced "Google credentials not found" with the
+# file sitting exactly where it was asked for.
+_ROOT = Path(__file__).resolve().parent.parent.parent
 _CREDS_FILE = _ROOT / "credentials.json"
 _TOKEN_FILE = _ROOT / "google_token.json"
 _SCOPES = [
