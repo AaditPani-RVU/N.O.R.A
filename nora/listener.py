@@ -206,6 +206,10 @@ class Listener:
 
         logger.info("Wakeword triggered -- acknowledging and recording command")
         _ack.speak_ack(force=True)
+        # Let the cue finish before opening the microphone. Recording over it
+        # meant the recorder heard NORA, counted it as speech, and ran the
+        # end-of-turn timer against her own voice.
+        _ack.wait_until_finished(timeout=2.0)
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._record, False)

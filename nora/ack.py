@@ -223,3 +223,32 @@ def cancel_ack() -> None:
             _ack_channel.stop()  # type: ignore[attr-defined]
     except Exception:
         pass
+
+
+def wait_until_finished(timeout: float = 2.0) -> None:
+    """Block until the ack has stopped playing, or `timeout` elapses.
+
+    The ack goes out through pygame, which does not block, so the wake-word path
+    opened the microphone while its own cue was still sounding. Two things went
+    wrong with that. The cue is audible to the microphone, so the recorder saw
+    energy, called it speech, and started its end-of-turn timer against NORA's
+    own voice — then transcribed the result, which is silence-adjacent audio and
+    decodes to whatever Whisper's priors say. And the time the cue occupies came
+    out of the window the user has to start talking.
+
+    Waiting is the whole fix: it costs the length of one short token and makes
+    "she played the sound and then did nothing" stop happening.
+
+    The timeout is a guard, not a target — a wedged mixer must not strand the
+    turn, so a cue that never reports finishing is abandoned rather than waited
+    on forever.
+    """
+    if _ack_channel is None:
+        return
+    deadline = time.monotonic() + max(0.0, timeout)
+    try:
+        while _ack_channel.get_busy() and time.monotonic() < deadline:  # type: ignore[attr-defined]
+            time.sleep(0.02)
+    except Exception:
+        # A mixer that cannot be asked is a mixer we do not wait on.
+        pass
