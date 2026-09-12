@@ -31,6 +31,25 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 _TOKEN_FILE = _ROOT / "google_token.json"
 
 
+def _client_kind(path: Path) -> str:
+    """Which OAuth client type `path` holds: "installed", "web" or "unknown".
+
+    The type is the single top-level key Google writes. "unknown" covers a file
+    that will not parse, and callers treat it as possibly-usable rather than
+    refusing it — a malformed file should fail with Google's own error, which
+    describes the actual problem, not with a guess made here.
+    """
+    import json
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return "unknown"
+    for kind in ("installed", "web"):
+        if kind in data:
+            return kind
+    return "unknown"
+
+
 def _find_client_secrets() -> Path | None:
     """Locate the OAuth client secrets file, whatever Google called it.
 
@@ -39,20 +58,34 @@ def _find_client_secrets() -> Path | None:
     starts with an undocumented rename — and failing it produces "credentials
     not found" while the file sits in the directory being searched.
 
-    `credentials.json` still wins if present, so an existing setup keeps
-    working. Otherwise the newest matching download is used: re-downloading
-    after recreating the client is the common repair, and the newest file is
-    the one that repair produced.
+    `credentials.json` is preferred, so an existing setup keeps working, then
+    the newest download: re-downloading after recreating the client is the
+    common repair, and the newest file is the one that repair produced.
+
+    Type outranks all of that. A "Web application" client cannot complete this
+    flow at all, so a Desktop client is chosen over one wherever it sits in the
+    order — otherwise the fix for a web client (download a Desktop one) leaves
+    two files in the directory and works only for as long as the good one
+    happens to be the newer, which is not a property anyone can see or maintain.
+    The old file can simply stay where it is.
     """
+    candidates: list[Path] = []
     named = _ROOT / "credentials.json"
     if named.exists():
-        return named
-    found = sorted(
+        candidates.append(named)
+    candidates.extend(sorted(
         _ROOT.glob("client_secret*.json"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
-    )
-    return found[0] if found else None
+    ))
+    if not candidates:
+        return None
+    for path in candidates:
+        if _client_kind(path) != "web":
+            return path
+    # Every candidate is a web client. Return one anyway so the caller can
+    # explain the type problem against a real filename.
+    return candidates[0]
 _SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify",
@@ -84,17 +117,14 @@ def _get_creds():
     # redirect_uri_mismatch, because run_local_server redirects to a
     # localhost port that a web client would have to have registered in
     # advance. Saying so here beats debugging it in a browser.
-    try:
-        import json
-        kind = next(iter(json.loads(creds_file.read_text())))
-    except Exception:
-        kind = "installed"
-    if kind == "web":
+    if _client_kind(creds_file) == "web":
         raise RuntimeError(
             f"{creds_file.name} is a 'Web application' OAuth client; this needs a "
-            "'Desktop app' one. Create a new client of that type in Google Cloud "
-            "Console and download it — the web client cannot complete a local "
-            "consent flow without pre-registered redirect URIs."
+            "'Desktop app' one. In Google Cloud Console create a second client of "
+            "type 'Desktop app' and drop the download in "
+            f"{_ROOT} — you can leave this file where it is, the Desktop one is "
+            "preferred automatically. A web client cannot complete a local consent "
+            "flow without pre-registered redirect URIs."
         )
 
     creds = None

@@ -70,6 +70,42 @@ class CredentialDiscoveryTest(unittest.TestCase):
         new = self._write("client_secret_new.apps.googleusercontent.com.json", DESKTOP)
         self.assertEqual(gs._find_client_secrets(), new)
 
+    def test_a_desktop_client_beats_a_newer_web_one(self):
+        # The documented fix for a web client is to download a Desktop client,
+        # which leaves both files in the directory. Choosing by date alone
+        # makes that fix hold only while the good file stays the newer of the
+        # two — so type has to outrank date.
+        import os
+        good = self._write("client_secret_desktop.apps.googleusercontent.com.json",
+                           DESKTOP)
+        os.utime(good, (time.time() - 600, time.time() - 600))
+        self._write("client_secret_web.apps.googleusercontent.com.json", WEB)
+        self.assertEqual(gs._find_client_secrets(), good)
+
+    def test_a_desktop_client_beats_a_web_credentials_json(self):
+        # credentials.json is preferred by name, but not when it is the one
+        # type that cannot finish the flow.
+        self._write("credentials.json", WEB)
+        good = self._write("client_secret_desktop.apps.googleusercontent.com.json",
+                           DESKTOP)
+        self.assertEqual(gs._find_client_secrets(), good)
+
+    def test_all_web_still_returns_one_to_complain_about(self):
+        # With nothing usable present the type error still has to name a real
+        # file, rather than degrading into "credentials not found".
+        self._write("client_secret_web.apps.googleusercontent.com.json", WEB)
+        found = gs._find_client_secrets()
+        self.assertIsNotNone(found)
+        self.assertEqual(gs._client_kind(found), "web")
+
+    def test_an_unparseable_file_is_not_treated_as_a_web_client(self):
+        # A corrupt file should fail with Google's own error, which says what
+        # is actually wrong, not be silently refused as the wrong type.
+        bad = self.tmp / "client_secret_bad.apps.googleusercontent.com.json"
+        bad.write_text("{not json")
+        self.assertEqual(gs._client_kind(bad), "unknown")
+        self.assertEqual(gs._find_client_secrets(), bad)
+
 
 class ClientTypeTest(unittest.TestCase):
     def setUp(self):
