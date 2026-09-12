@@ -1,8 +1,13 @@
 listener:
   push_to_talk_key: "ctrl+`"
   sample_rate: 16000
-  # silence_timeout_sec applies while PTT is held: the key release is the real
-  # end-of-turn signal, so this is only a backstop and can be short.
+  # silence_timeout_sec is RETIRED and no longer read. Silence does not end a
+  # push-to-talk turn at all now: releasing the key does, and max_record_sec
+  # bounds it. As a "backstop" it was what made PTT unusable — any sound in the
+  # room that wasn't you (NORA's own acknowledgement cue, the click of the key
+  # you just pressed) counted as the start of your turn, and this timer then
+  # expired while you were still drawing breath. Push-to-talk ends when you let
+  # go. The value is kept only so an old config does not fail to load.
   #
   # wakeword_silence_timeout_sec is the one that matters after "hey nora", where
   # there is no key and silence IS the signal. At the PTT value of 0.7 it hangs
@@ -17,6 +22,28 @@ listener:
   wakeword_silence_timeout_sec: 3.0
   wakeword_speech_start_sec: 4.0
   max_record_sec: 15
+  # What counts as speech, measured as RMS in the 300 Hz-4 kHz speech band
+  # after the DC offset is removed (nora/dsp.py explains why both).
+  #
+  # Unset means "derive it from the noise floor this microphone is delivering",
+  # which is what you want: a fixed number cannot serve both inputs on this
+  # machine. The working capture idles around 0.03, so the old hardcoded 0.01
+  # scored silence as speech and no wake-word turn ever ended; the dead input
+  # idles at 0.00003, so nothing reached 0.01 and every turn was discarded with
+  # "No speech in recording". The derived threshold is
+  #     max(noise_floor * speech_over_floor, speech_floor_min)
+  # recomputed as the floor is observed during the recording.
+  #
+  # If NORA discards turns you know you spoke, the log line for the discard
+  # prints the floor, the loudest block and what was needed — lower
+  # speech_over_floor toward 1.5. If she never stops listening, raise it.
+  # Measured in the speech band on this machine's working microphone:
+  #   silent room, per 64 ms block : 0.0072 - 0.0122
+  #   a tone played into the room  : 0.50
+  # speech_floor_min sits above the first and far below the second.
+  speech_rms_threshold: null   # a number pins it; null derives it
+  speech_over_floor: 2.5       # how far above the measured noise floor
+  speech_floor_min: 0.02       # and never below this, whatever the floor says
   clap_detection:
     threshold: 0.08        # Audio peak level to count as a clap (lower = more sensitive)
     min_gap_sec: 0.1       # Minimum time between two claps
@@ -269,16 +296,21 @@ conversation:
   # max_tokens: 240     # omit to use the per-dialogue-act budget
 
 ack:
-  # Acknowledgement tokens ("Mm-hm.", "One sec.") — the filler that covers the
-  # gap between you finishing and NORA answering (nora/ack.py).
+  # Acknowledgement tokens ("Mm-hm.", "One sec.") — OFF, and nothing calls them.
   #
-  # These used to synthesize at "+40%" on top of the speaker's "+20%", which
-  # compounded to a clipped, chipmunky delivery, and they fired on *every*
-  # utterance. Both are fixed: acks are now slower than normal speech (that's
-  # how people actually say them) and are deferred — scheduled `delay_sec` out
-  # and cancelled the instant real speech starts. On a fast command you hear
-  # nothing but the answer. Set enabled:false to drop them entirely.
-  enabled: true
+  # They broke both ways of talking to NORA. The speakers and the microphone are
+  # inches apart, so the cue NORA played on a wake word or a key press came
+  # straight back into the recording that cue was announcing. The recorder
+  # counted it as the user starting to speak, ran the end-of-turn timer against
+  # it, and closed the turn ~0.7 s later holding a clip of NORA saying "Okay." —
+  # which was then transcribed and answered. Whatever you actually said arrived
+  # after the microphone had already closed.
+  #
+  # Turning this back on is not enough to bring the bug back (silence no longer
+  # ends a push-to-talk turn — see listener.silence_timeout_sec below), but it
+  # will still put NORA's voice inside your recording. nora/ack.py has the full
+  # note and what a safe cue would have to do instead.
+  enabled: false
   rate: "-10%"        # relative to TTS baseline — negative on purpose
   volume: 0.55        # quieter than the main voice
   delay_sec: 0.55     # only heard when the response is genuinely slow
@@ -332,23 +364,39 @@ audio:
   # ambient — to one PipeWire node, leaving every other app on the system
   # default. Unset means "use the default", which is right on most machines.
   #
-  # It exists because the two documented ways to pick a microphone both fail on
-  # this hardware. `wpctl set-default 68` does not stick: the configured default
-  # is already the analog input and WirePlumber hands out the ACP digital mic
-  # regardless (that device has api.acp.auto-port = false). And
-  # wakeword.input_device cannot reach it either — the only PortAudio device
-  # with a distinct name is the raw ALSA one, which runs at 48 kHz only, while
-  # the detector needs 16 kHz.
+  # It exists because wakeword.input_device cannot reach a specific node: the
+  # only PortAudio device with a distinct name is the raw ALSA one, which runs
+  # at 48 kHz only, while the detector needs 16 kHz.
   #
-  # Measured on this machine, 3 s of a silent room:
-  #   node 68 (Stereo Microphone) rms 0.000095, peak 0.0006  — a real noise floor
-  #   node 69 (Digital Microphone) rms 0.011,   peak 0.203, 99.9% below 150 Hz
-  # 69 is the runtime default and is the broken one.
+  # Name it, do not number it. This was set to the node *id* 69 and that is
+  # why NORA went deaf again: ids are handed out in graph order and they move.
+  # A reboot with the headset connected renumbered every node on this machine
+  # by one, so 69 — which had been the working Digital Microphone — became the
+  # Stereo Microphone, the dead input. Nothing in the logs said "wrong device";
+  # every turn just came back "No speech in recording" at a noise floor of
+  # 0.00002. node.name is derived from the PCI address and the ALSA profile, so
+  # it survives reboots and replugs.
   #
-  # Find the ids with:  training/wakeword/mic_probe.py --scan
-  # Node ids are not stable across reboots or replugs — if the wake word goes
-  # deaf after a reboot, re-run the scan before assuming the model regressed.
-  pipewire_node: 68
+  # An unresolvable name is a safe failure: PipeWire falls back to the system
+  # default rather than handing over a silent stream, so a renamed device
+  # degrades to "probably still works" instead of to silence.
+  #
+  # Measured on this machine, ~3 s of a silent room, per 1024-sample block,
+  # speech-band RMS (300 Hz-4 kHz, DC removed — nora/dsp.py explains both):
+  #   HiFi__Mic2__source (Stereo Microphone)  median 0.000018, peak 0.000021,
+  #     and no response at all to Mic Boost across its full 0 to +30 dB range
+  #     — a dead input, not a quiet one.
+  #   HiFi__Mic1__source (Digital Microphone) median 0.025, peak 0.13, under a
+  #     constant +0.16 DC offset. This is the microphone that works, and it is
+  #     also the configured system default.
+  #
+  # The offset is removed in software on every capture path (nora/dsp.py), so
+  # what reaches Whisper and openWakeWord is unbiased.
+  #
+  # Find the name with:  training/wakeword/mic_probe.py --scan
+  # To check what NORA is actually capturing from while she runs:
+  #     wpctl status   # under Streams, the port her client is linked to
+  pipewire_node: "alsa_input.pci-0000_07_00.6.HiFi__Mic1__source"
 
 logging:
   # max_bytes / backup_count cap the log at max_bytes * (backup_count + 1) —

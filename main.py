@@ -52,16 +52,32 @@ def _pin_audio_node() -> None:
     stream, so setting it before any audio starts routes NORA — wake word,
     push-to-talk, ambient — to the node named, and leaves every other app on the
     system default. Set it here, before the first import that might open a
-    stream. `training/wakeword/mic_probe.py --scan` prints the node ids.
+    stream. `training/wakeword/mic_probe.py --scan` prints the node names.
+
+    A name, not a number. PIPEWIRE_NODE takes either, and the number is a trap:
+    node ids are assigned in graph order, so connecting a headset before boot
+    renumbers the internal microphones and the id in the config silently comes
+    to mean a different device. That has already happened here once — every turn
+    returned "No speech in recording" because the pinned id had drifted onto a
+    dead input. A node.name is derived from the PCI address and ALSA profile and
+    does not move, so a bare number gets a warning rather than quiet obedience.
     """
     import os
     node = get_config().get("audio", {}).get("pipewire_node")
     if node in (None, ""):
         return
+    logger = logging.getLogger("nora.startup")
+    if str(node).strip().isdigit():
+        logger.warning(
+            "audio.pipewire_node is the numeric id %s. Node ids are reassigned "
+            "on reboot and replug, so this can silently come to mean a "
+            "different microphone. Prefer the node name — run "
+            "training/wakeword/mic_probe.py --scan to get it.", node,
+        )
     # An explicit environment variable is a deliberate override and outranks
     # the config file, the same way it does for everything in .env.
     os.environ.setdefault("PIPEWIRE_NODE", str(node))
-    logging.getLogger("nora.startup").info("Audio pinned to PipeWire node %s", node)
+    logger.info("Audio pinned to PipeWire node %s", node)
 
 
 def check_prerequisites() -> bool:

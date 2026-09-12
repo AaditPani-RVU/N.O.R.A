@@ -1,4 +1,26 @@
-"""Acknowledgement tokens — the "mm-hm" that says NORA heard you.
+"""Acknowledgement tokens — the "mm-hm" that said NORA heard you. Off by default.
+
+**This is disabled, and no capture path calls it any more.** Read this before
+switching it back on, because the reason is not "it sounded bad".
+
+NORA's speakers and NORA's microphone are inches apart, and the recorder has no
+way to tell her voice from yours. Every ack played into a turn that was about
+to be recorded, so the ack *became* the turn: `listener._record` scored it as
+the start of your speech, started the end-of-turn timer against it, and hung up
+0.7 s later — before the user had said a word. What got transcribed was NORA
+saying "Okay.", and what she answered was herself. Push-to-talk and the wake
+word were both unusable for exactly as long as this was on.
+
+The structural half of that is fixed in `listener._record` (silence no longer
+ends a push-to-talk turn), so re-enabling this cannot resurrect the same bug in
+the same way. It can still put NORA's voice into your recording. If you do turn
+it back on, it must not play into an open microphone: cue *after* the recorder
+has closed, or not at all.
+
+What follows is the original note on how the tokens were tuned, kept because it
+is still what governs them when `ack.enabled` is true.
+
+Acknowledgement tokens — the "mm-hm" that says NORA heard you.
 
 The point of an ack is to fill the gap between "you stopped talking" and "NORA
 starts answering".  Done well it's the difference between a assistant that
@@ -99,8 +121,8 @@ def preload(voice: str = "en-GB-SoniaNeural", rate: str | None = None) -> None:
     import pygame
 
     cfg = _cfg()
-    if not cfg.get("enabled", True):
-        logger.info("Ack tokens disabled by config")
+    if not cfg.get("enabled", False):
+        logger.info("Ack tokens disabled (see module docstring)")
         return
 
     rate = rate or cfg.get("rate", _ACK_RATE)
@@ -187,7 +209,7 @@ def speak_ack(delay: float | None = None, force: bool = False) -> None:
         return
 
     cfg = _cfg()
-    if not cfg.get("enabled", True):
+    if not cfg.get("enabled", False):
         return
 
     delay = 0.0 if force else float(

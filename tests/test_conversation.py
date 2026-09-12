@@ -574,6 +574,18 @@ class ConversationRespondTest(unittest.TestCase):
 
 
 class AckTest(unittest.TestCase):
+    """How the tokens behave *when switched on*. They ship off.
+
+    Acknowledgement tokens are disabled in config.yaml and no capture path
+    calls them any more: played into an open microphone they were recorded as
+    the user's own speech and ended the turn (nora/ack.py has the full note;
+    tests/test_ptt_turns.py guards the removal). These cover the tuning that
+    still governs them for anyone who turns `ack.enabled` back on, so they
+    enable it explicitly rather than inheriting the shipped default.
+    """
+
+    ENABLED = {"enabled": True}
+
     def setUp(self) -> None:
         ack._loaded.clear()
         ack._ack_sounds.clear()
@@ -588,7 +600,8 @@ class AckTest(unittest.TestCase):
         # real response arriving first cancels it unheard.
         ack._loaded.set()
         ack._ack_sounds["Mm-hm."] = object()
-        with mock.patch.object(ack, "_play_now") as play:
+        with mock.patch.object(ack, "_cfg", return_value=self.ENABLED), \
+             mock.patch.object(ack, "_play_now") as play:
             ack.speak_ack()
             self.assertIsNotNone(ack._pending_timer)
             play.assert_not_called()
@@ -596,10 +609,12 @@ class AckTest(unittest.TestCase):
         self.assertIsNone(ack._pending_timer)
 
     def test_force_plays_immediately(self) -> None:
-        # The wake cue is a real signal the user is waiting on.
+        # `force` skips the defer-and-cancel dance. Nothing uses it now that the
+        # wake path is silent, but it is the switch a safe cue would need.
         ack._loaded.set()
         ack._ack_sounds["Mm-hm."] = object()
-        with mock.patch.object(ack, "_play_now") as play:
+        with mock.patch.object(ack, "_cfg", return_value=self.ENABLED), \
+             mock.patch.object(ack, "_play_now") as play:
             ack.speak_ack(force=True)
             play.assert_called_once_with(force=True)
 

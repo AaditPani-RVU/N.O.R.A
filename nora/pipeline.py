@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from nora import ambient, audit_log, autonomy, cognitive_memory, command_engine, confidence, consent_memory, context, conversation, dialogue, focus, intent_parser, memory, neurosym_guard, phrasing, post_action_cards, proactive, reversible, risk, security, session_briefing, speaker, text_input, tool_trust, transcriber
-from nora import ack as _ack
 from nora import wiring
 from nora.config import get_config
 from nora.commands.greetings import daddys_home
@@ -576,10 +575,6 @@ async def _next_utterance(listener: Listener, deps: TurnDeps) -> tuple[str, floa
         return None
 
     rms = float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
-
-    # Play ack immediately in PTT mode (wakeword mode acks inside listen_wakeword)
-    if context.get_ptt_enabled():
-        _ack.speak_ack()
 
     ui_server.notify_stage("transcribing")
     loop = asyncio.get_running_loop()

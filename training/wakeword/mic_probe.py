@@ -41,20 +41,50 @@ CHUNK = 1280  # 80 ms at 16 kHz — openwakeword's required frame size
 def _speech_share(x: np.ndarray, sr: int) -> tuple[float, float, float]:
     """Fraction of energy in the speech band, plus rumble share and level.
 
-    The band matters more than the level here. A dead or mis-clocked capture is
-    loud — the broken ACP mic on this machine sits at rms 0.2 — so "is it loud"
-    says nothing. What separates a working microphone from a broken one is
-    whether the energy lands where voices live (300 Hz-4 kHz) or piles up below
-    150 Hz with nothing above 4 kHz.
+    The band matters more than the level here. A dead or mis-clocked capture can
+    be loud — "is it loud" says nothing on its own. What separates a working
+    microphone from a broken one is whether the energy lands where voices live
+    (300 Hz-4 kHz) or piles up below 150 Hz with nothing above 4 kHz.
+
+    The mean comes off first, and that line is the difference between this
+    function working and this function lying. A DC offset is a spike in the zero
+    bin, and the zero bin is inside "below 150 Hz": the ACP digital microphone
+    on this machine sits at a constant +0.16, which alone reads as 96% rumble
+    and buries a perfectly good speech band under 4%. On that reading the probe
+    told us the only working input in the machine was broken, and the config
+    pinned NORA to a dead one for it. `level` was always DC-free -- it is a
+    standard deviation -- which is why a dead input still showed 0.0000 there
+    while its share of nothing looked healthy. Both columns have to be read
+    together, and the verdict below does that.
     """
     if len(x) < sr // 4:
         return 0.0, 0.0, 0.0
+    x = x - np.mean(x)
     S = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2
     f = np.fft.rfftfreq(len(x), 1 / sr)
     total = float(np.sum(S)) or 1e-20
     speech = float(np.sum(S[(f >= 300) & (f < 4000)])) / total
     rumble = float(np.sum(S[f < 150])) / total
     return speech, rumble, float(x.std())
+
+
+def _speech_level(x: np.ndarray, sr: int) -> float:
+    """Absolute RMS of just the 300 Hz-4 kHz band.
+
+    The share of energy in that band answers "what is this microphone mostly
+    hearing", which is the wrong question for a microphone that hears a voice
+    and a lot of low-frequency noise at the same time -- the share stays small
+    however clearly you are picked up. This asks "how much voice is there", in
+    units that compare across inputs, and it is the number the verdict turns on.
+    A dead input scores near zero here no matter how clean its spectrum looks.
+    """
+    if len(x) < sr // 4:
+        return 0.0
+    x = x - np.mean(x)
+    X = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / sr)
+    X[(f < 300) | (f >= 4000)] = 0
+    return float(np.sqrt(np.mean(np.fft.irfft(X, n=len(x)) ** 2)))
 
 
 def _read_f32_wav(path: Path) -> np.ndarray:
@@ -64,6 +94,38 @@ def _read_f32_wav(path: Path) -> np.ndarray:
         return np.zeros(0)
     n = int.from_bytes(b[i + 4:i + 8], "little")
     return np.frombuffer(b[i + 8:i + 8 + n], dtype=np.float32).astype(np.float64)
+
+
+def _node_names() -> dict[str, str]:
+    """Map PipeWire node id -> node.name, for every node pw-dump reports.
+
+    The ids are what pw-record targets and what wpctl prints, but they are
+    assigned in graph order and move whenever the graph changes — plug in a
+    headset before boot and every internal microphone is renumbered. Pinning
+    NORA to an id that has drifted is indistinguishable, from the logs, from a
+    broken microphone, so the scan recommends the name and this is where it
+    comes from. Empty dict if pw-dump is unavailable; the caller falls back to
+    recommending the id with a caveat.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    if not shutil.which("pw-dump"):
+        return {}
+    try:
+        out = subprocess.run(["pw-dump"], capture_output=True, text=True,
+                             timeout=10).stdout
+        names = {}
+        for obj in json.loads(out):
+            if obj.get("type") != "PipeWire:Interface:Node":
+                continue
+            name = (obj.get("info", {}).get("props", {}) or {}).get("node.name")
+            if name:
+                names[str(obj["id"])] = name
+        return names
+    except Exception:
+        return {}
 
 
 def scan() -> int:
@@ -125,43 +187,54 @@ def scan() -> int:
         time.sleep(seconds)
         proc.terminate()
         proc.wait(timeout=5)
-        speech, rumble, level = _speech_share(_read_f32_wav(wav), 16000)
-        results.append((nid, name, default, speech, rumble, level))
-        print(f"speech band {speech:5.1%}")
+        audio = _read_f32_wav(wav)
+        speech, rumble, level = _speech_share(audio, 16000)
+        voice = _speech_level(audio, 16000)
+        results.append((nid, name, default, speech, rumble, level, voice))
+        print(f"voice level {voice:.4f}")
 
     print()
-    print("   id   speech  rumble   level   microphone")
-    print("   ───  ──────  ──────  ──────   ──────────")
-    for nid, name, default, speech, rumble, level in sorted(
-            results, key=lambda r: r[3], reverse=True):
+    print("   id    voice  speech  rumble   level   microphone")
+    print("   ───  ──────  ──────  ──────  ──────   ──────────")
+    for nid, name, default, speech, rumble, level, voice in sorted(
+            results, key=lambda r: r[6], reverse=True):
         flag = " *" if default else "  "
-        print(f"  {nid:>4}{flag} {speech:5.1%}  {rumble:5.1%}  {level:.4f}   {name}")
-    print("   (* = current system default)")
+        print(f"  {nid:>4}{flag} {voice:.4f}  {speech:5.1%}  {rumble:5.1%}  {level:.4f}   {name}")
+    print("   (* = current system default; voice = RMS in the 300 Hz-4 kHz band)")
     print()
 
-    # Both tests have to pass, and neither is enough alone. A silent input has a
-    # flat noise floor that scores well on speech share while carrying no voice
-    # at all — that is how a muted microphone wins a scan it should lose. A loud
-    # input can be pure rumble, which is exactly the broken one here.
+    # The verdict turns on absolute voice level, not on share of energy.
+    #
+    # It used to require a high speech *share*, and that reading is what pointed
+    # this project at a dead microphone for weeks. Two ways it goes wrong, and
+    # this machine has one of each. A silent input carries no voice but has a
+    # flat noise floor, so its share looks excellent -- that is how an input
+    # reading level 0.0000 wins a scan it should lose. And an input with a real
+    # voice on it plus strong low-frequency noise has a poor share however
+    # clearly it hears you, so the one microphone that works gets condemned.
+    #
+    # Band-limited RMS answers the question being asked: how much voice is on
+    # this input. `level` is kept as a second gate so a dead input cannot pass
+    # on band noise alone.
     AUDIBLE = 0.005
-    SPEECHY = 0.25
-    heard = [r for r in results if r[5] >= AUDIBLE and r[3] >= SPEECHY]
+    VOICE = 0.002
+    heard = [r for r in results if r[5] >= AUDIBLE and r[6] >= VOICE]
     if not heard:
         loud = [r for r in results if r[5] >= AUDIBLE]
         print("VERDICT: no source heard you clearly.")
         if loud:
-            print(f"[{loud[0][0]}] {loud[0][1]} is loud ({loud[0][5]:.3f}) but "
-                  f"{loud[0][4]:.0%} of it is sub-150 Hz rumble — that capture is broken,")
-            print("not quiet. The rest are at the noise floor, i.e. muted or not picking up.")
+            print(f"[{loud[0][0]}] {loud[0][1]} has signal ({loud[0][5]:.3f}) but almost "
+                  f"none of it is voice ({loud[0][6]:.4f} in the 300 Hz-4 kHz band).")
+            print("The rest are at the noise floor, i.e. muted or not picking up.")
         else:
             print("Every input is at the noise floor. Check the mic is unmuted in your")
             print("desktop sound settings, and that you were speaking during the scan.")
         return 0
 
-    best = max(heard, key=lambda r: r[3])
+    best = max(heard, key=lambda r: r[6])
 
     print(f"VERDICT: [{best[0]}] {best[1]} is the one that hears you "
-          f"({best[3]:.0%} of its energy is speech).")
+          f"(voice level {best[6]:.4f}).")
     if best[2]:
         print("It is already the system default, so NORA is on the right microphone.")
         return 0
@@ -178,8 +251,21 @@ def scan() -> int:
     print("has not moved, pin NORA alone instead — this routes only NORA and leaves")
     print("every other app on the system default:")
     print()
+    node_name = _node_names().get(best[0])
     print("    audio:")
-    print(f"      pipewire_node: {best[0]}        # in config.yaml")
+    if node_name:
+        print(f'      pipewire_node: "{node_name}"')
+        print()
+        print("Use that name, not the id. Ids are assigned in graph order and are")
+        print("reassigned on reboot or replug — an id that drifts onto another input")
+        print("looks exactly like a dead microphone in the logs. The name is derived")
+        print("from the PCI address and ALSA profile and stays put.")
+    else:
+        print(f"      pipewire_node: {best[0]}        # in config.yaml")
+        print()
+        print("pw-dump was unavailable, so this is the node id — which is reassigned on")
+        print("reboot and replug. Re-run this scan if the wake word goes deaf later, and")
+        print("install pipewire-utils to get the stable node name instead.")
     print()
 
     # PortAudio does not expose PipeWire node names, so `input_device` cannot be

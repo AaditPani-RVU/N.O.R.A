@@ -22,6 +22,7 @@ from typing import Callable
 import numpy as np
 
 from nora.config import get_config
+from nora.dsp import remove_dc
 
 logger = logging.getLogger("nora.wakeword")
 
@@ -222,6 +223,20 @@ def wait_for_trigger(timeout: float = 0.1) -> bool:
     return _detector.wait(timeout=timeout)
 
 
+def drain_trigger() -> None:
+    """Discard a wakeword event that fired while we were already listening.
+
+    The detector holds its own microphone stream and keeps scoring through the
+    ack, the recording and the reply. A match landing inside that window is not
+    somebody asking for a new turn -- it is usually NORA's own cue, or the user
+    saying the name again at the head of the sentence they are already being
+    recorded saying. Left in the event, it wakes the next poll unprompted, which
+    is how one wake word turns into a conversation nobody started.
+    """
+    if _detector is not None:
+        _detector.drain()
+
+
 class _WakewordDetector:
     def __init__(self, model_names: list[str], sensitivity: float, cooldown: float,
                  device: int | None = None) -> None:
@@ -247,6 +262,9 @@ class _WakewordDetector:
         if triggered:
             self._event.clear()
         return triggered
+
+    def drain(self) -> None:
+        self._event.clear()
 
     def _run(self) -> None:
         import sounddevice as sd
@@ -290,8 +308,12 @@ class _WakewordDetector:
                     except queue.Empty:
                         continue
 
-                    # openWakeWord expects int16 audio
-                    chunk_int16 = (chunk * 32767).astype(np.int16)
+                    # openWakeWord expects int16 audio. The DC offset comes
+                    # off first: the working microphone on this machine is
+                    # biased by +0.16, which reaches the model as a constant
+                    # +5242 on every sample and distorts the mel frontend the
+                    # detector scores against.
+                    chunk_int16 = (remove_dc(chunk) * 32767).astype(np.int16)
                     try:
                         prediction = model.predict(chunk_int16)
                     except Exception as exc:
