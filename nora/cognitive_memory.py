@@ -46,6 +46,13 @@ _tfidf_vocab: dict[str, int] = {}
 
 
 def _get_embedder():
+    # Locked for the same reason as _get_collections: two startup threads
+    # otherwise each load their own copy of the model.
+    with _lock:
+        return _load_embedder()
+
+
+def _load_embedder():
     global _embedder, _embedder_ready
     if _embedder_ready:
         return _embedder
@@ -83,6 +90,16 @@ def _embed(text: str) -> list[float]:
 
 
 def _get_collections():
+    # Under the lock: warm_up() and the pipeline's warm-up both land here at
+    # startup, and two PersistentClients built at once poison chromadb's shared
+    # client cache ("'RustBindingsAPI' object has no attribute 'bindings'"),
+    # leaving memory degraded until the next restart. RLock, so callers that
+    # already hold _lock are fine.
+    with _lock:
+        return _init_collections()
+
+
+def _init_collections():
     global _chroma_client, _episodes_col, _knowledge_col
     if _episodes_col is not None:
         return _episodes_col, _knowledge_col

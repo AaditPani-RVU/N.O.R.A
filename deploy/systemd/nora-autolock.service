@@ -1,0 +1,19 @@
+# Lock the screen as soon as the session starts.
+#
+# GDM auto-login brings the session (and NORA) back after a reboot with nobody
+# at the keyboard; this puts the Clavis lock screen up straight away so an open
+# lid does not mean an open desktop. The lock is Quickshell IPC, which only
+# answers once clavis-shell is running, hence the retry loop.
+
+[Unit]
+Description=Lock the screen at session start (NORA home core auto-login)
+PartOf=graphical-session.target
+After=graphical-session.target clavis-shell.service
+Wants=clavis-shell.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for i in $$(seq 60); do %h/.local/bin/qs -c clavis ipc call lock open 2>/dev/null && exit 0; sleep 1; done; echo "Clavis lock IPC never answered" >&2; exit 1'
+
+[Install]
+WantedBy=graphical-session.target

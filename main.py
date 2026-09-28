@@ -135,7 +135,11 @@ def main() -> None:
     # The URL carries NORA_API_TOKEN when one is set, so the browser gets it
     # but the log file does not.
     logger.info(f"NORA UI: {ui_url.split('?')[0]}")
-    webbrowser.open(ui_url)
+    # The systemd unit sets NORA_NO_BROWSER: a service that restarts on failure
+    # would otherwise open another dashboard tab behind the lock screen each time.
+    import os
+    if not os.environ.get("NORA_NO_BROWSER"):
+        webbrowser.open(ui_url)
 
     # Run the main async pipeline
     from nora.pipeline import run

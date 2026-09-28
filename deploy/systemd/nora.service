@@ -1,0 +1,41 @@
+# NORA as a systemd user service, tied to the graphical session.
+#
+# Installed by deploy/install_home_core.sh. The session is needed, not just
+# nice to have: the microphone and speaker go through the user's PipeWire, and
+# screen control (AT-SPI, niri IPC, ydotool) needs the Wayland session. niri
+# exports WAYLAND_DISPLAY, NIRI_SOCKET and the D-Bus address into the user
+# manager, so this unit inherits them without listing them here.
+#
+#   systemctl --user status nora       # is she up
+#   journalctl --user -u nora -f       # follow the output (nora.log has the rest)
+#   systemctl --user restart nora      # after pulling new code
+#
+# Do not also run `python main.py` by hand while this is active: the second
+# copy cannot bind the dashboard/WebSocket/remote-mic ports.
+
+[Unit]
+Description=NORA voice assistant (home core)
+PartOf=graphical-session.target
+After=graphical-session.target pipewire.service wireplumber.service
+# Keep retrying forever. With the network down at boot, the LLM check in
+# main.py fails and exits 1; NORA should come up by herself once it is back.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/JARVIS
+ExecStart=%h/Projects/JARVIS/.venv/bin/python main.py
+# As if the venv were activated (MCP servers run bare `python`), plus
+# ~/.local/bin for uvx, which the user manager's PATH lacks.
+Environment=PATH=%h/Projects/JARVIS/.venv/bin:%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=NORA_NO_BROWSER=1
+# on-failure, not always: "NORA, exit" ends with status 0 and should stay
+# stopped. `systemctl --user start nora` brings her back.
+Restart=on-failure
+RestartSec=15
+# The pipeline has worker threads; give it time to close audio cleanly.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=graphical-session.target

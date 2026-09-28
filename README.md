@@ -577,6 +577,25 @@ python main.py
 - CRIU + GPU processes: checkpointing PIDs holding `/dev/nvidia*` requires `experimental_gpu_checkpoint: true` in `config.yaml`
 - btrfs snapshots of `/home` require `/home` to be its own subvolume (Fedora default: yes; Ubuntu: check with `findmnt /home`)
 
+### Always-on (home core)
+
+To keep NORA running on a laptop that stays at home with the lid shut:
+
+```bash
+bash deploy/install_home_core.sh     # user units: NORA, lock-at-login, daily backup
+sudo bash deploy/home_core_root.sh   # lid close ignored, GDM auto-login, rclone
+rclone config create gdrive drive scope=drive.file   # one-time Drive login for backups
+```
+
+- NORA runs as the `nora` systemd **user** service inside your graphical session and
+  restarts on failure, including when the network is down at boot. `journalctl --user -u nora -f` follows it.
+  Saying "exit" stops her for good (until `systemctl --user start nora`).
+- After a reboot, GDM logs you in by itself and `nora-autolock` locks the screen immediately.
+- `nora-backup.timer` runs `deploy/backup_state.py` nightly: `.env`, Google OAuth files, every
+  `nora_*` state file and the ChromaDB directory, gpg-encrypted and copied to `gdrive:NORA-backups`
+  (the 7 newest kept locally, 60 days on Drive). The passphrase is `~/.config/nora-backup/passphrase`;
+  keep a copy off the machine. Restore with `gpg -d <file> | tar -xz -C ~/Projects/JARVIS`.
+
 ---
 
 ## Configuration

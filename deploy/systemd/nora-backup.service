@@ -1,0 +1,12 @@
+# One encrypted backup of NORA's secrets and state, uploaded to Google Drive.
+# Run by nora-backup.timer; `systemctl --user start nora-backup` runs one now.
+
+[Unit]
+Description=Back up NORA secrets and state (encrypted, to Google Drive)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Projects/JARVIS
+ExecStart=/usr/bin/python3 %h/Projects/JARVIS/deploy/backup_state.py
+Nice=10
+IOSchedulingClass=idle
