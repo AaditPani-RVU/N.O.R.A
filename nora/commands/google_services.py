@@ -154,16 +154,45 @@ def _gmail_service() -> Any:
 
 # ── Date helpers ───────────────────────────────────────────────────────────
 
+_RELATIVE_DAYS = {"today": 0, "tonight": 0, "tomorrow": 1, "yesterday": -1}
+
+
 def _parse_date(date_str: str) -> datetime:
-    """Parse a loose date string into a datetime (local timezone)."""
+    """Parse a loose date string into a datetime (local timezone).
+
+    Midnight means "no time of day was given" and the caller turns that into an
+    all-day event; any other time is one the user actually said.
+
+    The relative day and the clock time arrive together often enough to handle
+    here — "tomorrow at 4 pm" reaches this function whole, because the intent
+    parser is as likely to emit `datetime: "tomorrow at 4 pm"` as it is to split
+    it across `date` and `time`. dateutil cannot read "tomorrow" at all, so the
+    old code fell into its except branch and returned `now`: the event landed
+    today, silently, which is worse than failing. The day word comes off first,
+    then whatever follows is parsed as a time against that day.
+    """
     from dateutil.parser import parse as _parse
     now = datetime.now()
-    if date_str in ("", "today"):
+    text = (date_str or "").strip().lower()
+    if not text:
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
-    if date_str == "tomorrow":
-        return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    head = text.split()[0].rstrip(",")
+    if head in _RELATIVE_DAYS:
+        day = (now + timedelta(days=_RELATIVE_DAYS[head])).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        rest = text[len(head):].strip().lstrip(",").strip()
+        if rest.startswith("at "):
+            rest = rest[3:].strip()
+        if not rest:
+            return day
+        try:
+            return _parse(rest, default=day)
+        except Exception:
+            return day
+
     try:
-        return _parse(date_str, default=now)
+        return _parse(text, default=now.replace(hour=0, minute=0, second=0, microsecond=0))
     except Exception:
         return now
 
@@ -220,7 +249,13 @@ def check_calendar(when: str = "today") -> str:
 @register("add_calendar_event",
           sig='add_calendar_event(summary: str, date: str = "today", time: str = "")',
           description="Add an event to Google Calendar", category="notification")
-def add_calendar_event(summary: str, date: str = "today", time: str = "") -> str:
+def add_calendar_event(summary: str = "", date: str = "today", time: str = "") -> str:
+    # Synonyms the parser reaches for — title, when, datetime — are bound to
+    # these names by command_engine.bind_params before the call. The empty
+    # default is what is left to do here: a missing name should ask for one,
+    # not raise.
+    if not summary:
+        return "What should I call that event?"
     try:
         svc = _calendar_service()
         dt = _parse_date(date)
@@ -228,6 +263,13 @@ def add_calendar_event(summary: str, date: str = "today", time: str = "") -> str
         if time:
             from dateutil.parser import parse as _parse
             dt = _parse(f"{dt.date()} {time}", default=dt)
+
+        # A time of day, however it arrived: as the `time` argument, or inside
+        # the date itself ("tomorrow at 4 pm"). Midnight means none was given,
+        # which is an all-day event.
+        timed = bool(time) or bool(dt.hour or dt.minute)
+
+        if timed:
             dt_end = dt + timedelta(hours=1)
             local_tz = datetime.now().astimezone().tzinfo
             event_body = {
@@ -244,7 +286,7 @@ def add_calendar_event(summary: str, date: str = "today", time: str = "") -> str
 
         svc.events().insert(calendarId="primary", body=event_body).execute()
         date_label = str(dt.date())
-        time_label = f" at {dt.strftime('%-I:%M %p')}" if time else ""
+        time_label = f" at {dt.strftime('%-I:%M %p')}" if timed else ""
         return f"Added '{summary}' to your calendar on {date_label}{time_label}."
     except RuntimeError as e:
         return str(e)
@@ -255,8 +297,12 @@ def add_calendar_event(summary: str, date: str = "today", time: str = "") -> str
 
 @register("delete_calendar_event",
           sig="delete_calendar_event(summary: str, date: str = \"today\")",
-          description="Delete an event from Google Calendar by name", category="notification")
-def delete_calendar_event(summary: str, date: str = "today") -> str:
+          description="Delete an event from Google Calendar by name", category="notification",
+          risk="high", requires_confirmation=True)
+def delete_calendar_event(summary: str = "", date: str = "today") -> str:
+    # Synonyms are bound by command_engine.bind_params; see add_calendar_event.
+    if not summary:
+        return "Which event should I delete?"
     try:
         svc = _calendar_service()
         dt = _parse_date(date)
@@ -325,7 +371,8 @@ def check_email(filter: str = "unread") -> str:
 
 
 @register("send_email", sig="send_email(to: str, subject: str, body: str)",
-          description="Compose and send an email via Gmail", category="notification")
+          description="Compose and send an email via Gmail", category="notification",
+          risk="high", requires_confirmation=True)
 def send_email(to: str, subject: str, body: str) -> str:
     try:
         import base64

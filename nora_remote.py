@@ -175,15 +175,25 @@ def _mic_error(exc: Exception) -> None:
 
 # ── Network helpers ───────────────────────────────────────────────────────────
 
+def _auth_headers() -> dict:
+    """The server refuses requests without NORA_API_TOKEN (same value as on NORA's .env)."""
+    token = os.environ.get("NORA_API_TOKEN", "")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def send_audio(audio: np.ndarray, host: str, port: int) -> str | None:
     """POST raw float32 PCM to NORA. Returns transcription string or None."""
     try:
         resp = requests.post(
             f"http://{host}:{port}/audio",
             data=audio.tobytes(),
-            headers={"Content-Type": "application/octet-stream"},
+            headers={"Content-Type": "application/octet-stream", **_auth_headers()},
             timeout=30,
         )
+        if resp.status_code == 401:
+            print("\n  NORA refused the token. Set NORA_API_TOKEN in this machine's .env")
+            print("  to the same value as on the NORA machine.")
+            return None
         resp.raise_for_status()
         return resp.json().get("transcription")
     except requests.ConnectionError:
@@ -197,7 +207,7 @@ def send_audio(audio: np.ndarray, host: str, port: int) -> str | None:
 
 def get_stage(host: str, port: int) -> str:
     try:
-        resp = requests.get(f"http://{host}:{port}/ping", timeout=2)
+        resp = requests.get(f"http://{host}:{port}/ping", headers=_auth_headers(), timeout=2)
         return resp.json().get("stage", "idle")
     except Exception:
         return "?"

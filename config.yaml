@@ -527,6 +527,18 @@ security:
     - forget_face
     - forget_all_faces
     - set_owner
+    # Messages sent in the user's name, and deletions outside this machine.
+    - send_whatsapp
+    - send_email
+    - delete_calendar_event
+  # Networks allowed to reach the dashboard, WebSocket API and remote mic at
+  # all; everything else gets 403 before auth. Loopback + Tailscale by default.
+  # Add your LAN (e.g. "192.168.1.0/24") only if you really use it without Tailscale.
+  remote_networks:
+    - "127.0.0.0/8"
+    - "::1/128"
+    - "100.64.0.0/10"
+    - "fd7a:115c:a1e0::/48"
 
 neurosym:
   # NeuroSym-AI guardrail settings.
@@ -570,24 +582,37 @@ wakeword:
   #     - "models/wakeword/hi_nora.onnx"
   #
   # models/wakeword/hey_nora.onnx is trained here (see training/wakeword/) and
-  # covers both "hey nora" and "hi nora" — one model, both phrasings, so the
-  # list form above is not needed.
+  # covers both "hey nora" and "hi nora" in offline evaluation. It is NOT the
+  # model in use, because offline is the only place it works: live, through the
+  # microphone on this machine, "hey nora" peaks at 0.23 and the detector has
+  # never once fired on it — zero triggers across every session in nora.log.
+  # The input is not the problem and was ruled out first: `mic_probe --scan`
+  # puts 65% of energy in the 300 Hz-4 kHz band with 12% rumble, and stock
+  # hey_jarvis_v0.1 scores 0.999 on that same stream seconds later. The model
+  # overfit its training set, which was not recorded through this capture path.
+  # Re-train it against clips captured from this mic before putting it back.
   #
   # sensitivity: 0.0–1.0. This is the raw score a frame must reach, so lower
-  # is more sensitive and more false triggers. 0.9 is not a timid setting here:
-  # on 152 clips across 8 accents it wakes on 91.7% of real utterances while
-  # firing on 1.6% of the near-misses that used to break this ("hey dora",
-  # "hey laura", "aurora"). Dropping to 0.5 buys no extra wakes and multiplies
-  # the collisions — raise it, do not lower it, if she wakes to the wrong name.
-  # A bare "nora" mid-sentence stays below 0.9 by design.
+  # is more sensitive and more false triggers. 0.9 stays right for
+  # hey_jarvis_v0.1: a real "hey jarvis" through this mic scores 0.997-0.999,
+  # so the threshold sits in the empty gap between a detection and everything
+  # else rather than partway up a slope. Lowering it buys nothing and costs
+  # false wakes. (The 91.7%-at-0.9 figure this comment used to quote was
+  # measured on hey_nora.onnx against recorded clips; it never described the
+  # model actually loaded here.)
   # cooldown_sec: minimum gap between consecutive triggers.
   #
-  # input_device: which microphone to listen on. Unset means the system default.
-  # That is usually right and is not right here *now*: the current default source
-  # is an ACP digital mic emitting a DC-offset rumble with no energy above 4 kHz
-  # (measured: 99.9% of its energy below 150 Hz). It was not always the default —
-  # the log has 41 real triggers from earlier runs — so the failure is that the
-  # default moved to this mic, not that the machine never had a working one.
+  # input_device: which microphone to listen on. Unset means the system default,
+  # and on this machine that is now correct — leave it null.
+  #
+  # An earlier note here condemned the default (the ACP digital mic, node.name
+  # alsa_input.pci-0000_07_00.6.HiFi__Mic1__source) as "DC-offset rumble with no
+  # energy above 4 kHz, 99.9% below 150 Hz". A scan on 2026-09-17 says otherwise:
+  # 65% of its energy is in the speech band and 12% is rumble, and hey_jarvis
+  # scores 0.999 through it. What that old measurement caught was the DC offset
+  # landing in the zero bin — the probe's own docstring now explains the trap,
+  # and _speech_share() removes the mean before judging. The other internal
+  # input (Mic2, "Stereo Microphone") really is dead: voice level 0.0000.
   #
   # Setting this is the second choice, not the first. It takes a sounddevice
   # index or a case-insensitive substring of the name sounddevice reports, NOT
@@ -604,7 +629,7 @@ wakeword:
   #     training/wakeword/mic_probe.py --scan     # names the mic that hears you
   #     wpctl set-default <id>                    # point everything at it
   enabled: true
-  model: "models/wakeword/hey_nora.onnx"
+  model: "hey_jarvis_v0.1"
   sensitivity: 0.9
   cooldown_sec: 1.5
   input_device: null
@@ -676,13 +701,12 @@ reversible_actions:
 
 # ── Remote Mic (Mac → Windows bridge) ────────────────────────────────────────
 remote_mic:
-  # Accept microphone audio from a remote machine (e.g. a MacBook).
-  # Set enabled: true, then run nora_remote.py on the Mac:
-  #   python nora_remote.py --host <THIS_WINDOWS_IP> [--ptt]
-  # Find your Windows IP: run `ipconfig` in PowerShell → IPv4 Address (Wi-Fi).
-  # Windows Firewall: allow inbound TCP on the port below.
+  # Accept microphone audio from another machine running nora_remote.py:
+  #   python nora_remote.py --host <this machine's tailscale IP> [--ptt]
+  # Requests need `Authorization: Bearer $NORA_API_TOKEN` (nora_remote.py sends
+  # it from its own .env) and must come from security.remote_networks.
   enabled: true
-  host: "0.0.0.0"    # bind to all interfaces so the Mac can reach it
+  host: "0.0.0.0"    # all interfaces; security.remote_networks filters who gets in
   port: 8767
 
 screen_intelligence:
@@ -793,7 +817,8 @@ mcp_servers:
 websocket_api:
   # Authenticated WebSocket API for mobile PTT, typed commands, and push notifications.
   # Clients connect to ws://<host>:<port>
-  # Set NORA_API_TOKEN in .env to require token auth; leave unset for localhost-only access.
+  # Set NORA_API_TOKEN in .env to require token auth; when unset, only direct
+  # connections from this machine are accepted. security.remote_networks applies too.
   # Install dependency: pip install websockets
   enabled: true
   host: "0.0.0.0"
@@ -840,3 +865,43 @@ telegram:
   enabled: false
   token_env: "TELEGRAM_BOT_TOKEN"
   allowed_chat_ids: []
+
+briefing:
+  # show_briefing() — "what's going on in the world" as an orb takeover.
+  # No API key by design: publishers put the image in the feed themselves via
+  # media:thumbnail/media:content, so curated RSS beats a paid search API on
+  # both cost and picture quality. Google News RSS is the catch-all for topics
+  # no feed covers ("what's new in quantum computing") — it carries no
+  # thumbnails, so those cards fall back to the typographic treatment.
+  cards: 6                  # how many make it to the screen AND to the summary
+  per_feed: 4               # cap before merge, so one chatty feed can't sweep
+  fresh_hours: 36           # older than this is not "going on"
+  timeout: 4                # per-feed seconds; slow feeds are dropped, not waited on
+  budget: 3.5               # whole-fetch ceiling; stragglers are shipped without
+  hold_ms: 45000            # dwell before auto-dismiss; re-arms on interaction
+
+  # Bare "what's going on in the world" fans out across these. A named topic
+  # ("what's new in the car world") uses just that interest's feeds.
+  interests:
+    learning:
+      say: ["learning", "upskilling", "tech", "programming", "study"]
+      feeds:
+        - https://www.freecodecamp.org/news/rss/
+        - https://www.technologyreview.com/feed/
+        - https://hnrss.org/frontpage
+    music:
+      say: ["music", "songs", "albums"]
+      feeds:
+        - https://pitchfork.com/feed/feed-news/rss
+    cars:
+      say: ["cars", "car", "auto", "automotive"]
+      feeds:
+        - https://www.caranddriver.com/rss/all.xml/
+        - https://www.motor1.com/rss/news/all/
+    politics:
+      say: ["politics", "political", "india", "election", "government"]
+      feeds:
+        - https://www.theguardian.com/world/rss
+        - https://www.thehindu.com/news/national/feeder/default.rss
+        - https://indianexpress.com/section/technology/feed/
+        - http://feeds.bbci.co.uk/news/world/rss.xml

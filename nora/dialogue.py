@@ -244,6 +244,14 @@ _COMMAND_SIGNALS = (
     r"\bcommit\b", r"\bpush\b", r"\bpull\b", r"\bdeploy\b", r"\binstall\b",
     r"\bcreate\b", r"\bmake\s+(?:a|an|the)\b", r"\bwrite\b", r"\bsave\b",
     r"\bshow\s+me\b", r"\bfind\b", r"\bnext\s+(?:song|track)\b", r"\brecall\b",
+    # "check" needs its object, unlike the verbs above. Bare \bcheck\b would
+    # drag "should I check out that restaurant" onto the action path, and the
+    # command gate runs before the discussion gate, so nothing downstream would
+    # catch it. With an object it is unambiguous: "can you check my mail" is an
+    # instruction wearing a question mark, and routing it to the chat engine —
+    # which has no tools — is how it ends up narrating the work instead of
+    # doing it ("I'll pull your Gmail inbox... give me a moment").
+    r"\bcheck\s+(?:my|the|on|for|if|whether|e-?mails?|mail|inbox|calendar|messages?)\b",
 )
 _COMMAND_RE = re.compile("|".join(_COMMAND_SIGNALS), re.I)
 
@@ -271,11 +279,24 @@ _LOOKUP_SIGNALS = (
     r"\bwhat\s+time\b", r"\bwhat'?s\s+the\s+time\b",
     r"\bwhat(?:'?s)?\s+(?:the\s+|today'?s\s+)?date\b",
     r"\bwhat\s+day\s+is\s+it\b", r"\bday\s+of\s+the\s+week\b",
-    r"\bcalendar\b", r"\bmy\s+(?:email|inbox|schedule|meetings?)\b",
+    r"\bcalendar\b", r"\bmy\s+(?:e-?mails?|mail|inbox|schedule|meetings?|messages?)\b",
     # News, sport and markets — current state, unknowable from weights
     r"\b(?:the|any|latest|breaking|top|world|today'?s)\s+news\b",
     r"\bnews\s+(?:today|headlines?)\b", r"\bheadlines\b",
-    r"\bwhat'?s\s+(?:happening|going\s+on)\s+in\s+the\s+world\b",
+    # "What's new in the AI world", "anything happening with cars", "catch me
+    # up" — a browse request, not a question with a single answer. Rule 8
+    # below judges on length and a question mark, so all of these came back
+    # short enough to count as conversation and the model answered them from
+    # its weights: "what's new in quantum computing" produced three confident
+    # paragraphs of research that never happened. The form is the signal —
+    # nobody asking this wants an answer invented.
+    # The lookaheads keep "what's new with you" the pleasantry it is: asking
+    # after NORA is not a request for the news.
+    r"\bwhat'?s\s+(?:happening|going\s+on)\s+(?:in|with|around)\s+(?!you\b|u\b|ya\b|yourself\b|your\b)",
+    r"\bwhat'?s\s+new\s+(?:in|with|on|for)\s+(?!you\b|u\b|ya\b|yourself\b|your\b)",
+    r"\bwhat'?s\s+the\s+latest\s+(?:in|with|on|from)\s+(?!you\b|u\b|ya\b|yourself\b|your\b)",
+    r"\banything\s+(?:new|happening|going\s+on)\s+(?!with\s+(?:you|u|ya)\b)",
+    r"\bcatch\s+me\s+up\b", r"\bbring\s+me\s+up\s+to\s+speed\b",
     r"\bwho\s+won\b", r"\bwhat'?s\s+the\s+score\b", r"\bfinal\s+score\b",
     r"\b(?:stock|share)\s+price\b", r"\btrading\s+at\b", r"\bexchange\s+rate\b",
     # What is on the screen right now. Same reasoning as the weather: the model

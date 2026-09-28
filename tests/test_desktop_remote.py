@@ -199,7 +199,8 @@ class TestActing(unittest.TestCase):
 
 class TestRouteAuth(unittest.TestCase):
     """The remote drives the user's actual desktop, so a configured token is
-    required — unlike the read-only routes, which stay open."""
+    required. (Since Phase 0 every non-static route requires it; see
+    tests/test_remote_security.py.)"""
 
     @classmethod
     def setUpClass(cls):

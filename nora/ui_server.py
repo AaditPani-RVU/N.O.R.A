@@ -153,7 +153,10 @@ def notify_location(name: str, country: str, lat: float, lon: float) -> None:
 def notify_takeover(kind: str, **extra: Any) -> None:
     """Ask the dashboard to morph the orb into one of the takeovers.
 
-    *kind* is "processes", "memory", or "off" to dismiss whatever is up.
+    *kind* is "processes", "memory", "briefing", or "off" to dismiss
+    whatever is up. "briefing" carries its cards in *extra* rather than
+    having the page fetch them, so the grid on screen is exactly the list
+    NORA is summarising out loud.
     Rides the shared _state snapshot with its own monotonic seq for exactly
     the reason notify_location() does: it then reaches the page over a live
     WebSocket and over the HTTP polling fallback without a second code path.
@@ -236,10 +239,39 @@ def ws_notify(message: str) -> None:
 
 async def _ws_connection_handler(websocket: Any, token: str) -> None:
     """Handle a single authenticated WebSocket connection."""
+    import hmac
     import urllib.parse
+    from nora import security
+
+    # ── Network ───────────────────────────────────────────────────────────
+    try:
+        peer = websocket.remote_address[0]
+    except Exception:
+        peer = None
+    if not security.peer_allowed(peer):
+        logger.warning("ws: refused connection from %s (outside remote_networks)", peer)
+        return
 
     # ── Auth ──────────────────────────────────────────────────────────────
-    if token:
+    if not token:
+        # No token configured: only a direct connection from this machine.
+        headers = None
+        for getter in (lambda: websocket.request.headers,
+                       lambda: websocket.request_headers):
+            try:
+                headers = getter()
+                break
+            except Exception:
+                continue
+        if not security.is_loopback(peer) or headers is None or security.is_proxied(headers):
+            logger.warning("ws: refused %s — NORA_API_TOKEN is unset, so only "
+                           "direct local connections are allowed", peer)
+            try:
+                await websocket.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+            except Exception:
+                pass
+            return
+    else:
         # 1. Try query-string token: ws://host:port?token=xxx
         # websockets >= 14 moved the request line to `.request.path`; the old
         # `.path` attribute is gone. Reading only the old one silently yielded
@@ -269,7 +301,8 @@ async def _ws_connection_handler(websocket: Any, token: str) -> None:
             except Exception:
                 pass
 
-        if provided != token:
+        provided = provided if isinstance(provided, str) else ""
+        if not hmac.compare_digest(provided.encode("utf-8"), token.encode("utf-8")):
             try:
                 await websocket.send(json.dumps({"type": "error", "message": "Unauthorized"}))
             except Exception:
@@ -427,6 +460,11 @@ def _player_music_state() -> dict:
     return context.get_music()
 
 
+# Routes served without a token: the dashboard shell and its static scripts.
+_PUBLIC_ROUTES = frozenset({"/", "/index.html", "/takeovers.js", "/remote.js",
+                            "/geo.js", "/briefing.js"})
+
+
 class _Handler(BaseHTTPRequestHandler):
     @property
     def route(self) -> str:
@@ -442,6 +480,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         route = self.route
+        if not self._peer_ok():
+            return
+        # The page and its scripts carry no private data and have to load
+        # before the browser can present the token. Everything else is state
+        # about the user's machine and life, so it needs the token.
+        if route not in _PUBLIC_ROUTES and not self._token_ok():
+            self._json_denied()
+            return
         if route == "/state":
             self._serve_state()
         elif route == "/metrics":
@@ -466,6 +512,11 @@ class _Handler(BaseHTTPRequestHandler):
             # file is long enough already. Still same-origin.
             self._serve_file(_STATIC_DIR / "takeovers.js",
                              "application/javascript; charset=utf-8")
+        elif route == "/briefing.js":
+            # The headline grid. Split out for the same reason the
+            # others are: index.html is long enough already.
+            self._serve_file(_STATIC_DIR / "briefing.js",
+                             "application/javascript; charset=utf-8")
         elif route == "/remote.js":
             # The desktop remote's renderer. Split out for the same reason
             # takeovers.js and geo.js are — index.html is long enough.
@@ -480,16 +531,23 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def do_OPTIONS(self) -> None:  # CORS preflight
+    def do_OPTIONS(self) -> None:
+        # The dashboard is same-origin, so no cross-origin access is granted.
+        # This used to answer every preflight with `Allow-Origin: *`, which let
+        # any web page open in a browser on this machine POST /type_command.
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_POST(self) -> None:
         route = self.route
+        if not self._peer_ok():
+            return
+        # Every POST changes something: runs a command, kills a process, drives
+        # the desktop or the speakers. None of them run without the token.
+        if not self._token_ok():
+            self._json_denied()
+            return
         if route == "/ptt":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -568,13 +626,27 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
 
-    def _token_ok(self) -> bool:
-        """True when the caller carries NORA_API_TOKEN, or none is configured.
+    def _peer_ok(self) -> bool:
+        """Refuse connections from outside `security.remote_networks` outright."""
+        from nora import security
 
-        Same rule the WebSocket applies: unset means localhost-only trust,
-        set means every reachable client has to prove it. Accepts the token
-        on the query string (the form the dashboard is already opened with)
-        or as a bearer header for anything scripted.
+        peer = self.client_address[0] if self.client_address else None
+        if security.peer_allowed(peer):
+            return True
+        logger.warning("ui: refused %s %s from %s (outside remote_networks)",
+                       self.command, self.route, peer)
+        self.send_response(403)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return False
+
+    def _token_ok(self) -> bool:
+        """True when the caller carries NORA_API_TOKEN, or none is configured
+        and the request comes straight from this machine.
+
+        Same rule the WebSocket applies. Accepts the token on the query string
+        (the form the dashboard is opened with) or as a bearer header (what the
+        dashboard's fetch calls and scripts send).
         """
         import urllib.parse
         from nora import security
@@ -585,14 +657,15 @@ class _Handler(BaseHTTPRequestHandler):
             auth = self.headers.get("Authorization", "")
             if auth.startswith("Bearer "):
                 provided = auth[7:]
-        return security.check_api_token(provided)
+        peer = self.client_address[0] if self.client_address else None
+        return security.check_api_token(
+            provided, peer=peer, proxied=security.is_proxied(self.headers))
 
     def _json_denied(self) -> None:
         payload = json.dumps({"ok": False, "error": "unauthorised"}).encode()
         self.send_response(401)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -600,7 +673,6 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -656,7 +728,6 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(payload).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
@@ -665,7 +736,6 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(_live_music_state()).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
@@ -693,7 +763,6 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(payload).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
@@ -738,7 +807,6 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(episodes).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
@@ -752,7 +820,6 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(analytics).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)

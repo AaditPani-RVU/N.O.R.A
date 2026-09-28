@@ -278,7 +278,14 @@ def open_url(url: str) -> str:
 @register(
     "tell_me_about",
     sig="tell_me_about(query: str)",
-    description="Search the web + SPEAK result. Use for any factual/current-events question.",
+    description=(
+        "Search the web + SPEAK result. Use for a SPECIFIC question that has "
+        "an answer — 'who won the match', 'what's the petrol price', 'when "
+        "does the film come out'. If they are instead asking to be caught up "
+        "on a whole subject with no specific question — 'what's going on in "
+        "the world', 'what's new in the AI world' — use show_briefing, which "
+        "puts the headlines on screen as well as reading them out."
+    ),
     category="web",
 )
 def tell_me_about(query: str) -> str:

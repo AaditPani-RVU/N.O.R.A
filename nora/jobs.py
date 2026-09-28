@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import threading
 import time
@@ -144,12 +145,27 @@ def _save() -> None:
             _jobs.pop(job.id, None)
             _work.pop(job.id, None)
         payload = {"jobs": [asdict(j) for j in keep]}
+    # One temp file per call, not one per module. Two workers finishing at once
+    # both wrote `nora_jobs.json.tmp` and both renamed it; the second rename
+    # found the name already consumed by the first and failed with ENOENT, so
+    # the queue silently stopped persisting:
+    #
+    #   Could not save jobs: [Errno 2] No such file or directory:
+    #   '.../nora_jobs.json.tmp' -> '.../nora_jobs.json'
+    #
+    # The write itself is outside the lock deliberately — holding it across
+    # disk I/O would serialise every job update behind the filesystem — so the
+    # uniqueness has to come from the name.
+    tmp = _JOBS_PATH.with_name(f"{_JOBS_PATH.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
-        tmp = _JOBS_PATH.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(_JOBS_PATH)
     except Exception as e:
         logger.warning("Could not save jobs: %s", e)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ── Public API ───────────────────────────────────────────────────────────────

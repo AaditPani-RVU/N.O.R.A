@@ -545,6 +545,151 @@
       #takec, #tk-card { transition:none; }
     }
 
+    /* ══════════════════════════════════════════════════════════════════
+       BRIEFING — current headlines as a card grid
+       Same vocabulary as the constellations (mono kickers, hairline rules,
+       the --rgb accent), but DOM rather than canvas: this surface is
+       photographs and text, and both want the browser's own rasteriser.
+       The orb stays visible behind it, dimmed — the grid is a panel over
+       the dashboard, not a morph of the orb itself.
+       ══════════════════════════════════════════════════════════════════ */
+
+    .bf-root {
+      position:fixed; inset:0; z-index:70;
+      display:flex; flex-direction:column; gap:14px;
+      padding:clamp(18px, 4vh, 46px) clamp(16px, 5vw, 64px);
+      background:
+        radial-gradient(120% 90% at 50% 0%, rgba(var(--rgb),0.10), transparent 60%),
+        rgba(2,8,16,0.90);
+      backdrop-filter:blur(14px) saturate(1.1);
+      opacity:0; pointer-events:none;
+      transition:opacity var(--t-mid) var(--ease);
+    }
+    .bf-root.in { opacity:1; pointer-events:auto; }
+
+    .bf-head {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:16px; flex:0 0 auto;
+      border-bottom:1px solid var(--cg); padding-bottom:11px;
+    }
+    .bf-kicker {
+      font-family:var(--mono); font-size:10px; letter-spacing:3px;
+      color:#e6f6ff; text-shadow:0 0 14px rgba(var(--rgb),0.7);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    /* The dismiss button doubles as the countdown: the hairline underneath
+       drains left to right, so the 45 seconds are visible without a number
+       ticking in your peripheral vision the whole time. */
+    .bf-close {
+      position:relative; flex:0 0 auto; cursor:pointer; overflow:hidden;
+      padding:9px 16px; min-height:36px;
+      background:rgba(var(--rgb),0.09); border:1px solid var(--cg);
+      color:var(--txt); border-radius:2px;
+      font-family:var(--mono); font-size:9.5px; letter-spacing:2px;
+      transition:background var(--t-fast) var(--ease);
+    }
+    .bf-close:hover { background:rgba(var(--rgb),0.2); }
+    .bf-ring {
+      position:absolute; left:0; bottom:0; height:2px;
+      width:calc(var(--bf-left, 1) * 100%);
+      background:linear-gradient(90deg, rgba(var(--rgb),0.35), rgba(var(--rgb),0.95));
+      box-shadow:0 0 8px rgba(var(--rgb),0.8);
+      transition:width 260ms linear;
+    }
+
+    .bf-grid {
+      flex:1 1 auto; min-height:0; display:grid; gap:clamp(10px, 1.6vw, 18px);
+      grid-template-columns:repeat(3, 1fr);
+      /* Rows size to content, not to the viewport. Stretching two rows to
+         fill a 1000px screen gave each card a poster-sized photograph with
+         the headline crushed along the bottom edge — the picture is support,
+         the sentence is the point. */
+      grid-auto-rows:auto; align-content:start;
+      overflow-y:auto; overflow-x:hidden;
+      scrollbar-width:thin; scrollbar-color:rgba(var(--rgb),0.35) transparent;
+    }
+    .bf-grid::-webkit-scrollbar { width:6px; }
+    .bf-grid::-webkit-scrollbar-track { background:transparent; }
+    .bf-grid::-webkit-scrollbar-thumb {
+      background:rgba(var(--rgb),0.35); border-radius:3px;
+    }
+    .bf-card {
+      display:flex; flex-direction:column; min-height:0; overflow:hidden;
+      text-decoration:none; color:inherit; border-radius:3px;
+      background:rgba(var(--rgb),0.045);
+      border:1px solid var(--cg);
+      opacity:0; transform:translateY(10px);
+      animation:bfIn 460ms var(--ease) forwards;
+      animation-delay:calc(var(--i, 0) * 55ms);
+      transition:border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+    }
+    .bf-card:hover {
+      border-color:rgba(var(--rgb),0.55);
+      background:rgba(var(--rgb),0.10);
+    }
+    @keyframes bfIn { to { opacity:1; transform:none; } }
+
+    .bf-media {
+      position:relative; flex:0 0 auto; aspect-ratio:16/9;
+      background:rgba(0,0,0,0.35); overflow:hidden;
+    }
+    .bf-media img {
+      width:100%; height:100%; object-fit:cover; display:block;
+      /* Press the photographs toward the dashboard's own blue so six
+         unrelated newsrooms' colour grading doesn't shred the palette. */
+      filter:saturate(0.82) contrast(1.06) brightness(0.88);
+      transition:filter var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+    }
+    .bf-card:hover .bf-media img { filter:none; transform:scale(1.03); }
+    /* The no-image case, made deliberate. */
+    .bf-media.bf-noimg {
+      display:flex; align-items:center; justify-content:center;
+      font-family:var(--mono); font-size:clamp(34px, 5vw, 58px);
+      color:rgba(var(--rgb),0.30); letter-spacing:2px;
+      background:
+        repeating-linear-gradient(135deg, rgba(var(--rgb),0.05) 0 2px, transparent 2px 9px),
+        rgba(var(--rgb),0.03);
+    }
+
+    .bf-body { flex:0 0 auto; padding:10px 12px 12px; }
+    .bf-meta {
+      display:flex; align-items:center; gap:6px; margin-bottom:5px;
+      font-family:var(--mono); font-size:8.5px; letter-spacing:1.6px;
+      color:rgba(var(--rgb),0.85); text-transform:uppercase;
+    }
+    .bf-dot { opacity:0.45; }
+    .bf-age { color:var(--dim); letter-spacing:1.2px; }
+    .bf-title {
+      margin:0; font-size:13.5px; line-height:1.34; font-weight:500;
+      color:var(--txt);
+      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+
+    /* Tablet: two up. Phone: one column that scrolls, headline-led, because
+       a 3-up grid at 360px is six unreadable stamps. */
+    @media (max-width: 900px) {
+      .bf-grid { grid-template-columns:repeat(2, 1fr); }
+    }
+    @media (max-width: 560px) {
+      .bf-root { padding:14px 12px calc(14px + env(safe-area-inset-bottom, 0px)); }
+      .bf-grid { grid-template-columns:1fr; grid-auto-rows:auto; }
+      .bf-card { flex-direction:row; align-items:stretch; }
+      /* Sideways on a phone: a 16:9 strip above a two-line headline wastes
+         the whole screen on six thumbnails, so the picture becomes a square
+         chip and the headline gets the width. */
+      .bf-media { flex:0 0 92px; aspect-ratio:1; }
+      .bf-body { flex:1 1 auto; padding:9px 11px; }
+      .bf-title { font-size:13px; -webkit-line-clamp:3; }
+      .bf-close { min-height:44px; padding:11px 15px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .bf-root { transition:none; }
+      .bf-card { animation:none; opacity:1; transform:none; }
+      .bf-media img, .bf-ring { transition:none; }
+    }
+
 
     @media (prefers-reduced-motion: reduce) {
       .orb-wrap[data-globe] { transition: none; }
@@ -2380,9 +2525,26 @@
      request fails the globe falls back to graticule-only rather than dying. -->
 <script src="/geo.js"></script>
 <script src="/takeovers.js"></script>
+<script src="/briefing.js"></script>
 <script src="/remote.js"></script>
 <script>
 'use strict';
+
+// Every same-origin API call carries the token as a bearer header. The server
+// requires it on all routes except the page and its static scripts, so this
+// one wrapper covers the dashboard, takeovers.js and remote.js alike.
+// Absolute URLs (weather, geolocation) are left untouched.
+(() => {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : '';
+    const token = authToken();
+    if (!token || !url.startsWith('/') || url.startsWith('//')) return nativeFetch(input, init);
+    const headers = new Headers(init.headers || {});
+    if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+    return nativeFetch(input, { ...init, headers });
+  };
+})();
 
 // ═══════════════════════════════════════════════════
 //  SETTINGS — atmosphere + accent, persisted
@@ -3925,9 +4087,18 @@ function applyState(d) {
     // and never auto-hides. "off" still means everything goes away.
     if (kind === 'desktop') {
       if (window.NORA_TAKEOVERS) NORA_TAKEOVERS.hide();
+      if (window.NORA_BRIEFING) NORA_BRIEFING.hide();
       if (window.NORA_REMOTE) NORA_REMOTE.show();
+    } else if (kind === 'briefing') {
+      // Also a panel rather than an orb morph, so it clears the others and
+      // carries its whole payload with it — the cards arrive already fetched
+      // so the grid matches the sentence being spoken over it.
+      if (window.NORA_TAKEOVERS) NORA_TAKEOVERS.hide();
+      if (window.NORA_REMOTE) NORA_REMOTE.hide();
+      if (window.NORA_BRIEFING) NORA_BRIEFING.show(d.takeover);
     } else if (window.NORA_TAKEOVERS) {
       if (window.NORA_REMOTE) NORA_REMOTE.hide();
+      if (window.NORA_BRIEFING) NORA_BRIEFING.hide();
       if (kind === 'off') NORA_TAKEOVERS.hide();
       else if (kind === 'memory' && d.takeover.focus) NORA_TAKEOVERS.focusMemories(d.takeover.focus);
       else NORA_TAKEOVERS.show(kind);
@@ -4786,6 +4957,15 @@ if (window.NORA_TAKEOVERS) {
   addEventListener('keydown', e => {
     if (e.key === 'Escape' && NORA_TAKEOVERS.active()) NORA_TAKEOVERS.hide();
   }, true);
+
+  // The briefing is its own overlay, but Esc has to mean the same thing
+  // there — it is the key you reach for before the dismiss button.
+  if (window.NORA_BRIEFING) {
+    NORA_BRIEFING.init({ log: (msg, ok) => addActivity(msg, ok) });
+    addEventListener('keydown', e => {
+      if (e.key === 'Escape' && NORA_BRIEFING.active()) NORA_BRIEFING.hide();
+    }, true);
+  }
 
   // A takeover is bigger than the column it sits in and covers the panels,
   // so a tap on the dimmed area around it should dismiss it — the same

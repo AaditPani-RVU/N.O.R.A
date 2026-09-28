@@ -90,7 +90,8 @@ def _resolve_contact(contact: str) -> str:
 
 
 @register("send_whatsapp", sig="send_whatsapp(contact: str, message: str)",
-           description="Send WhatsApp message via pywhatkit (needs WhatsApp Web open)", category="notification")
+           description="Send WhatsApp message via pywhatkit (needs WhatsApp Web open)", category="notification",
+           risk="high", requires_confirmation=True)
 def send_whatsapp(contact: str, message: str) -> str:
     """Send a WhatsApp message (requires WhatsApp Web open in default browser).
 

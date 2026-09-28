@@ -8,6 +8,10 @@ Endpoints
 POST /audio   raw float32 mono 16 kHz PCM body → transcribe + queue
 GET  /ping    {"ok": true, "stage": "<pipeline stage>"}
 
+Both need `Authorization: Bearer <NORA_API_TOKEN>` and a peer inside
+`security.remote_networks`. This server takes audio and turns it into commands,
+so an unauthenticated POST was a way to speak to NORA from anywhere on the LAN.
+
 Start with remote_mic.start() in pipeline.py when remote_mic.enabled: true.
 Client: run nora_remote.py on the remote machine.
 """
@@ -22,10 +26,33 @@ logger = logging.getLogger("nora.remote_mic")
 
 _RMS_FLOOR = 0.003  # skip silent/nearly-silent buffers
 
+# 60 s of float32 mono at 16 kHz. A longer body is refused before it is read,
+# so a client can't make NORA allocate whatever Content-Length it claims.
+_MAX_BODY_BYTES = 60 * 16000 * 4
+
 
 class _Handler(BaseHTTPRequestHandler):
 
+    def _authorised(self) -> bool:
+        from nora import security
+
+        peer = self.client_address[0] if self.client_address else None
+        if not security.peer_allowed(peer):
+            logger.warning("Remote mic: refused %s (outside remote_networks)", peer)
+            self._send(403)
+            return False
+        auth = self.headers.get("Authorization", "")
+        provided = auth[7:] if auth.startswith("Bearer ") else ""
+        if not security.check_api_token(
+                provided, peer=peer, proxied=security.is_proxied(self.headers)):
+            logger.warning("Remote mic: refused unauthenticated request from %s", peer)
+            self._json({"ok": False, "error": "unauthorised"}, 401)
+            return False
+        return True
+
     def do_GET(self) -> None:
+        if not self._authorised():
+            return
         if self.path == "/ping":
             try:
                 from nora import ui_server
@@ -38,6 +65,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404)
 
     def do_POST(self) -> None:
+        if not self._authorised():
+            return
         if self.path == "/audio":
             self._handle_audio()
         else:
@@ -47,9 +76,15 @@ class _Handler(BaseHTTPRequestHandler):
         import numpy as np
         from nora import text_input, transcriber
 
-        length = int(self.headers.get("Content-Length", 0))
-        if not length:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = -1
+        if length <= 0:
             self._json({"ok": False, "error": "empty body"}, 400)
+            return
+        if length > _MAX_BODY_BYTES:
+            self._json({"ok": False, "error": "body too large"}, 413)
             return
 
         raw = self.rfile.read(length)
@@ -89,7 +124,6 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -104,6 +138,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 def start(host: str = "0.0.0.0", port: int = 8767) -> str:
     """Start the remote mic HTTP server in a daemon thread. Returns the URL."""
+    import os
+    if not os.environ.get("NORA_API_TOKEN"):
+        logger.warning("Remote mic: NORA_API_TOKEN is unset, so only requests "
+                       "from this machine will be accepted")
     server = HTTPServer((host, port), _Handler)
     thread = threading.Thread(
         target=server.serve_forever,

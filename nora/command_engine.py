@@ -18,6 +18,70 @@ _registry: dict[str, Callable] = {}
 _meta: dict[str, "CommandMeta"] = {}
 
 
+# Keyword names the intent parser reaches for instead of the one in the
+# registered signature, mapped to the parameter they mean. Bound only onto a
+# parameter the handler actually has and has not already been given, so a
+# handler with its own `subject` or `time` keeps it.
+#
+# This exists because the failure it prevents is total and user-visible: an
+# unexpected keyword is a TypeError, the pipeline speaks the exception, and a
+# perfectly well-understood request dies as "Failed: add_calendar_event() got
+# an unexpected keyword argument 'title'". The parser is not wrong to say
+# `title` — every calendar UI calls it that — and it is not wrong to say `when`
+# either, because `check_calendar(when=...)` is a real signature sitting next
+# to it in the same prompt. Fixing the model's word choice one prompt at a time
+# does not converge; accepting the synonym does.
+_PARAM_ALIASES: dict[str, str] = {
+    # what a thing is called
+    "title": "summary", "name": "summary", "event": "summary",
+    "event_name": "summary", "label": "summary",
+    # when it happens
+    "when": "date", "day": "date", "datetime": "date", "date_time": "date",
+    "on": "date", "date_str": "date",
+    "at": "time", "start": "time", "start_time": "time", "clock": "time",
+    # free text
+    "message": "text", "content": "text", "body": "text",
+    # lookups
+    "q": "query", "search": "query", "term": "query", "search_query": "query",
+}
+
+
+def bind_params(handler: Callable, params: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Fit `params` to what `handler` actually accepts.
+
+    Returns the keyword arguments to call with, plus the names that could not
+    be placed. A handler taking **kwargs is handed everything untouched — it
+    has already said it wants whatever arrives.
+
+    Unplaceable keys are dropped rather than raised on, because the handler's
+    own defaults are a better answer than a spoken TypeError, and the dropped
+    names are logged so a recurring one can earn a place in _PARAM_ALIASES.
+    """
+    import inspect
+
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return dict(params), []
+
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        return dict(params), []
+
+    accepted = set(sig.parameters)
+    bound: dict[str, Any] = {k: v for k, v in params.items() if k in accepted}
+
+    unplaced: list[str] = []
+    for key, value in params.items():
+        if key in accepted:
+            continue
+        target = _PARAM_ALIASES.get(key)
+        if target in accepted and target not in bound:
+            bound[target] = value
+        else:
+            unplaced.append(key)
+    return bound, unplaced
+
+
 @dataclass
 class CommandMeta:
     sig: str = ""                      # full signature for the LLM prompt
@@ -176,6 +240,13 @@ async def execute(intent: IntentResponse) -> list[StepResult]:
             results.append(result)
             logger.warning(f"Unknown action: {action}")
             break
+
+        params, unplaced = bind_params(handler, params)
+        if unplaced:
+            logger.warning(
+                "Dropped %d parameter(s) %s did not accept: %s",
+                len(unplaced), action, ", ".join(sorted(unplaced)),
+            )
 
         try:
             logger.info(f"Executing: {action}({params})")

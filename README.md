@@ -714,7 +714,18 @@ http://<laptop-tailscale-ip>:8766/?token=<NORA_API_TOKEN>
 
 Find the IP with `tailscale ip -4`, and the token with `grep NORA_API_TOKEN .env`.
 The token is remembered in `localStorage`, so later visits need only the bare URL.
-Omit it entirely if `NORA_API_TOKEN` is unset.
+
+**Access rules** (all three servers: dashboard `8766`, WebSocket `8765`, remote mic `8767`):
+
+- Connections from outside `security.remote_networks` get `403` before anything else.
+  The default is loopback + Tailscale ranges, so a LAN or café Wi-Fi peer can't reach NORA
+  even though the servers listen on `0.0.0.0`.
+- Every route except the page itself and its static scripts needs the token, as
+  `?token=` or `Authorization: Bearer`. The dashboard adds the header to its own calls.
+- With `NORA_API_TOKEN` unset, only direct connections from the laptop itself are accepted.
+  Set a token before using NORA from any other device.
+- No cross-origin access: the servers send no CORS headers, so other web pages can't call them.
+- `nora_remote.py` reads `NORA_API_TOKEN` from its own `.env`; use the same value as the laptop.
 
 ### 3. Tap **TAP FOR AUDIO** once
 

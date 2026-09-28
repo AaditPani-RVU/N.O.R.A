@@ -40,6 +40,33 @@ _cache: tuple[float, "FocusState"] | None = None
 # Mic-capture streams owned by NORA itself must not count as a call
 _SELF_NAMES = ("nora", "python")
 
+# Where a stream's owner might be named. `application.name` alone is not
+# enough: NORA's own echo-cancel capture (`nora_echo_capture`) and denoised
+# source (`nora_denoised_mic`) are PipeWire filter-chain nodes, not clients, so
+# they carry no application.name at all — the field is the empty string, which
+# matches none of _SELF_NAMES and therefore read as somebody else's microphone.
+#
+# The cost of that was total and silent. One permanently-running input stream
+# means current() answers CALL forever, allows_proactive_speech() is never
+# true, and every deferred answer and proactive suggestion is queued by
+# `gated()` and never flushed — the user asks a question, NORA says she'll get
+# back to them, the job finishes in six seconds, and nothing is ever spoken.
+# The identifying name was in `node.name` the whole time.
+_SELF_NAME_PROPS = (
+    "application.name",
+    "node.name",
+    "application.process.binary",
+    "media.name",
+)
+
+
+def _is_own_stream(props: dict) -> bool:
+    """Whether a PipeWire node belongs to NORA rather than to another app."""
+    haystack = " ".join(
+        str(props.get(key, "")) for key in _SELF_NAME_PROPS
+    ).lower()
+    return any(name in haystack for name in _SELF_NAMES)
+
 
 class FocusState(Enum):
     AVAILABLE = "available"
@@ -75,10 +102,11 @@ def _pipewire_state() -> FocusState:
             continue
         props = info.get("props", {})
         media_class = props.get("media.class", "")
-        app = props.get("application.name", "").lower()
-        if media_class == "Stream/Input/Audio" and not any(s in app for s in _SELF_NAMES):
+        if _is_own_stream(props):
+            continue
+        if media_class == "Stream/Input/Audio":
             return FocusState.CALL
-        if media_class == "Stream/Output/Audio" and not any(s in app for s in _SELF_NAMES):
+        if media_class == "Stream/Output/Audio":
             media_playing = True
     return FocusState.MEDIA if media_playing else FocusState.AVAILABLE
 

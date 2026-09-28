@@ -35,6 +35,8 @@ _session_reversals: dict[str, int] = {}
 _HARD_CONFIRM = {
     "delete_file", "shutdown", "close_all_apps", "patch_file",
     "git_smart_commit", "move_file", "undo_actions_since",
+    # Speak for the user to someone else, or delete their data elsewhere.
+    "send_whatsapp", "send_email", "delete_calendar_event",
 }
 
 

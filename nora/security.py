@@ -1,6 +1,8 @@
 """Security layer — action blocking, confirmation enforcement, and API auth."""
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import logging
 import os
 
@@ -161,14 +163,79 @@ def guest_decline_message(action: str = "") -> str:
 # WebSocket / REST API token auth (Sprint 5)
 # ---------------------------------------------------------------------------
 
-def check_api_token(provided: str) -> bool:
-    """Return True if the provided token matches NORA_API_TOKEN.
+# Where a remote client may connect from at all, before any token is looked at.
+# Loopback plus Tailscale's address ranges (CGNAT IPv4 and the tailnet ULA).
+# The servers bind 0.0.0.0 so they keep working when tailscaled comes up after
+# NORA does; this is what stops that from meaning "anyone on the café Wi-Fi".
+_DEFAULT_REMOTE_NETWORKS = (
+    "127.0.0.0/8",
+    "::1/128",
+    "100.64.0.0/10",
+    "fd7a:115c:a1e0::/48",
+)
 
-    If NORA_API_TOKEN is not set in .env, the check always passes — suitable
-    for localhost-only deployments where network isolation is the security
-    boundary.
+# Headers a reverse proxy adds. Their presence means the loopback peer address
+# is the proxy (e.g. `tailscale serve`), not the person on the other end.
+_PROXY_HEADERS = ("X-Forwarded-For", "Forwarded", "Tailscale-User-Login")
+
+
+def _parse_ip(peer: str | None):
+    if not peer:
+        return None
+    try:
+        ip = ipaddress.ip_address(str(peer).split("%", 1)[0])
+    except ValueError:
+        return None
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip
+
+
+def _remote_networks() -> list:
+    configured = (get_config().get("security", {}) or {}).get("remote_networks")
+    networks = []
+    for net in (_DEFAULT_REMOTE_NETWORKS if configured is None else configured):
+        try:
+            networks.append(ipaddress.ip_network(str(net), strict=False))
+        except ValueError:
+            logger.warning("security.remote_networks: ignoring invalid network %r", net)
+    return networks
+
+
+def is_loopback(peer: str | None) -> bool:
+    ip = _parse_ip(peer)
+    return bool(ip and ip.is_loopback)
+
+
+def peer_allowed(peer: str | None) -> bool:
+    """Whether a connection from this address may reach NORA's remote surfaces."""
+    ip = _parse_ip(peer)
+    if ip is None:
+        return False
+    return any(ip in net for net in _remote_networks())
+
+
+def is_proxied(headers) -> bool:
+    """True when a request carries reverse-proxy headers. `headers` needs `.get`."""
+    try:
+        return any(headers.get(h) for h in _PROXY_HEADERS)
+    except Exception:
+        return True  # can't tell, so don't grant loopback trust
+
+
+def check_api_token(provided: str, *, peer: str | None = None, proxied: bool = False) -> bool:
+    """Return True if the caller may use an authenticated remote surface.
+
+    With NORA_API_TOKEN set, the provided token must match (constant-time).
+
+    With it unset, only a direct loopback connection passes. This used to pass
+    everyone, while the servers listened on 0.0.0.0, so "unset" quietly meant
+    "open to the network". A caller that can't say who the peer is gets no
+    loopback trust.
     """
     expected = os.environ.get("NORA_API_TOKEN", "")
     if not expected:
-        return True
-    return provided == expected
+        return peer is not None and not proxied and is_loopback(peer)
+    if not provided:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))

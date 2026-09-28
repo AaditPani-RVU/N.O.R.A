@@ -312,6 +312,34 @@ def _build_rules() -> None:
         lambda m: _intent("press enter", "press_keys", {"keys": "enter"}),
     )
 
+    # ─── Briefing ─────────────────────────────────────────────────────────
+    # Deterministic because the planner would not hold still: asked to route
+    # "what's new in the car world" it picked ask_claude, and "what's new in
+    # quantum computing" tell_me_about, while routing the near-identical
+    # "what's new in music" to show_briefing. These phrasings are a closed
+    # set and mean exactly one thing, which is what this layer is for.
+    #
+    # The topic is passed through raw — briefing._core_topic() strips the
+    # carrier words, so "the car world" and "cars" both land on the same
+    # interest and an unknown subject still reaches Google News intact.
+    _rule(
+        r"(?:what(?:'?s|\s+is)?\s+(?:going\s+on|happening)(?:\s+in\s+the\s+world)?"
+        r"|what(?:'?s|\s+is)?\s+(?:the\s+)?news(?:\s+today)?"
+        r"|what(?:'?s|\s+is)?\s+(?:the\s+)?(?:latest\s+)?headlines?"
+        r"|catch\s+me\s+up(?:\s+on\s+(?:the\s+)?(?:news|world))?"
+        r"|bring\s+me\s+up\s+to\s+speed"
+        r"|any\s+news|(?:the\s+)?(?:latest\s+)?headlines?)",
+        lambda m: _intent("news briefing", "show_briefing", {"topic": ""}),
+    )
+
+    _rule(
+        r"(?:what(?:'?s|\s+is)?\s+(?:new|happening|going\s+on)\s+(?:in|with|on|for|around)"
+        r"|what(?:'?s|\s+is)?\s+the\s+latest\s+(?:in|with|on|from)"
+        r"|any(?:thing)?\s+(?:new|news|happening)\s+(?:in|with|on|about|from))"
+        r"\s+(?!you\b|u\b|ya\b|yourself\b|your\b)(?P<topic>.+)",
+        lambda m: _intent("news briefing", "show_briefing",
+                          {"topic": m.group("topic").strip()}),
+    )
     # ─── Conversational ───────────────────────────────────────────────────
     _rule(
         r"(?:hey|hi|hello)(?:\s+(?:nora|there))?(?:\s+how\s+are\s+you)?[.!?]*",
