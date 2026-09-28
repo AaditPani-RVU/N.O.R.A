@@ -485,8 +485,11 @@ STT is not good enough; expect +0.5–1 s.
      unavailable until login while the rest keeps running.
    - `tailscaled` is already enabled.
    - Battery is healthy (full = design capacity, 45 cycles). The kernel exposes
-     **no charge limit** for this model, so it would sit at 100% on AC. Check
-     the BIOS for a battery-care / adaptive charging option.
+     **no charge limit** for this model, so it would sit at 100% on AC. The
+     BIOS (Victus 16-e0xxx, F.19) has no battery-care or power-on-AC option
+     either. Accepted: the battery is the UPS and some wear is the price; keep
+     the vents clear. An outage longer than the battery needs one press of the
+     power button, after which auto-login brings everything back.
    - `.env` secrets and the core's data should be backed up somewhere off this machine.
 2. **Phone wake-up — FCM doorbell.** A high-priority FCM data message with no
    content ("connect now"); the phone then reaches the core over the tailnet and
@@ -507,7 +510,7 @@ its own. S/M/L = relative size.
 | Phase | Deliverable | Exit criteria | Size |
 |---|---|---|---|
 | **0 — Close the holes** | Fix S1–S6: auth on `remote_mic` and all dashboard routes, no CORS, confirm outbound actions, fail closed, `compare_digest`, peer-network filter | Unauthenticated `POST /audio` rejected; tests for each | **done** (ADR-0001) |
-| **0b — Home core host** | Lid-close ignore, systemd user service with restart, session/auto-login decision, battery-care check, backup of `.env` + state | Close lid, reboot, pull network: NORA comes back on its own and is reachable over the tailnet from the travel laptop | **in progress** — user units, backup and auto-lock installed (`deploy/`); root half (`home_core_root.sh`), Drive login and BIOS checks pending |
+| **0b — Home core host** | Lid-close ignore, systemd user service with restart, session/auto-login decision, battery-care check, backup of `.env` + state | Close lid, reboot, pull network: NORA comes back on its own and is reachable over the tailnet from the travel laptop | **done** 2026-09-28 — `deploy/`; reboot test passed (NORA up 1 s after auto-login, screen locked, nightly encrypted backup to Drive). BIOS has no battery-care option: accepted, see §9 |
 | **1 — Audit** | This document | Approved | done |
 | **2 — Core foundations** | SQLite store (jobs, schedules, tasks first); channel-aware turn API merging `pipeline.handle_turn` + `gateway/core.py`; delivery router; Device Hub with pairing, handshake, invoke/result, confirmations; capability adapter in `command_engine`; **a Python fake device** used by tests | Fake device pairs, advertises `test.echo`, the LLM can call it, confirmation round-trips, audit shows device + origin, desktop behaviour unchanged | L |
 | **3 — Android skeleton** | Kotlin app: QR pairing, Keystore auth, reconnecting socket, outbox, kill switch, QS tile, audit screen, `device.status`, `phone.notify` | "NORA, what's my phone battery?" works from the laptop; kill switch stops it; reconnect after airplane mode | M |
