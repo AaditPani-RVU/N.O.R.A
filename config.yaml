@@ -835,7 +835,8 @@ hub:
   # refuses any other host. Other devices reach it through `tailscale serve`
   # (real *.ts.net TLS, tailnet only), never a LAN address. Every device still
   # authenticates with its own key; see `python -m nora.hub` for pairing.
-  enabled: false
+  # Published as https://aaditsvictus-1.tailcbe88a.ts.net:8443 (tailscale serve).
+  enabled: true
   host: "127.0.0.1"
   port: 8770
   # How long a device gets to run one capability before it counts as TIMEOUT.
