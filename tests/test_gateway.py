@@ -7,8 +7,8 @@ process that can drive the user's desktop. A bot token is a bearer credential,
 so the interesting test is not "an allowed chat gets through" but "an empty
 allowlist refuses to start at all".
 
-*Confirmation does not travel.* `handle_text` must refuse anything the security
-policy flags rather than accepting a typed "yes" — whoever is holding the phone
+*Confirmation does not travel.* `handle_text` must refuse anything the policy
+wants confirmed rather than accepting a typed "yes" — whoever is holding the phone
 is not necessarily whoever owns the machine. That refusal is the one behaviour
 here worth being strict about.
 
@@ -17,11 +17,18 @@ Stdlib unittest only — run with:  python -m unittest tests.test_gateway -v
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import unittest
 from unittest import mock
 
+from nora import command_engine
 from nora.gateway import core, telegram
 from nora.schemas import ActionStep, IntentResponse, StepResult
+
+try:
+    from tests.test_pipeline_smoke import SIDE_EFFECTS
+except ImportError:          # run from inside tests/
+    from test_pipeline_smoke import SIDE_EFFECTS
 
 
 def _cfg(**over):
@@ -79,6 +86,16 @@ class AllowlistTest(unittest.TestCase):
 
 
 class HeadlessTurnTest(unittest.TestCase):
+    # The headless turn is `pipeline.handle_turn` on a text channel, so it
+    # needs what that turn needs: the real command registry (the risk ladder
+    # scores unknown actions as dangerous) and durable writes stubbed out.
+    def setUp(self) -> None:
+        command_engine.discover_commands()
+        stack = contextlib.ExitStack()
+        for target, value in SIDE_EFFECTS:
+            stack.enter_context(mock.patch(target, autospec=True, return_value=value))
+        self.addCleanup(stack.close)
+
     def test_confirmation_is_refused_not_accepted(self) -> None:
         """The one thing a remote message must never be able to do."""
         intent = IntentResponse(
@@ -109,7 +126,9 @@ class HeadlessTurnTest(unittest.TestCase):
             reply = asyncio.run(core.handle_text("shut down"))
 
         execute.assert_not_called()
-        self.assertIn("blocked", reply)
+        # Any of the security-refusal lines; which one is picked at random.
+        from nora import phrasing
+        self.assertIn(reply, phrasing._resolve_pool("blocked")[1])
 
     def test_ordinary_command_runs_and_reports(self) -> None:
         intent = IntentResponse(

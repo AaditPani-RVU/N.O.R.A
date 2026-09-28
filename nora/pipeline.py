@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from nora import ambient, audit_log, autonomy, cognitive_memory, command_engine, confidence, consent_memory, context, conversation, dialogue, focus, intent_parser, memory, neurosym_guard, phrasing, post_action_cards, proactive, reversible, risk, security, session_briefing, speaker, text_input, tool_trust, transcriber
+from nora import channel as _channel
+from nora import delivery
 from nora import wiring
+from nora.channel import Channel, ConfirmRequest
 from nora.config import get_config
 from nora.commands.greetings import daddys_home
 from nora.commands.music import iron_man_entrance
@@ -148,7 +152,8 @@ def _actions(intent: IntentResponse) -> list[str]:
     return [s.action for s in intent.steps]
 
 
-async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcome:
+async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0,
+                      channel: Channel | None = None) -> TurnOutcome:
     """Take one utterance from heard text to finished action.
 
     This is the whole of NORA's decision-making for a single turn: guards, the
@@ -159,8 +164,25 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
     the conversation engine, the confirmation prompt), and everything else it
     calls for real.
 
+    `channel` is where the request came from. Replies and confirmations go
+    back to it; without one the turn is the local microphone's, answered
+    through `deps.speak` and confirmed through `deps.confirm` as it always was.
+
     Raises nothing it can help; the caller's loop catches what escapes.
     """
+    if channel is None:
+        channel = _channel.local(deps.speak, deps.confirm)
+    token = _channel.bind(channel)
+    try:
+        return await _handle_turn(text, deps, rms, channel)
+    finally:
+        _channel.unbind(token)
+
+
+async def _handle_turn(text: str, deps: TurnDeps, rms: float,
+                       channel: Channel) -> TurnOutcome:
+    speak = channel.speak
+    delivery.note_active(channel.device_id)
     loop = asyncio.get_running_loop()
     from nora import ui_server
     mem_ctx: dict = {}  # ensure always bound before LLM branch
@@ -179,7 +201,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
     if not input_safe:
         severity = input_violations[0].get("severity", "unknown") if input_violations else "unknown"
         logger.warning(f"NeuroSym blocked input [{severity}]: {text[:80]}")
-        deps.speak(phrasing.get("blocked"), mood="error")
+        speak(phrasing.get("blocked"), mood="error")
         cognitive_memory.record_knowledge(text, source="blocked_input")
         ui_server.notify_stage("idle")
         return TurnOutcome(kind="blocked", text=text, stage="input_guard", violations=input_violations)
@@ -190,7 +212,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
 
     # Every heard utterance joins the transcript, command or not — a
     # follow-up two turns later may well reference a command.
-    dialogue.record_user(text)
+    dialogue.record_user(text, **({} if channel.is_local else {"kind": channel.kind}))
 
     # Log every utterance to the knowledge base
     ambient.log_entry(text, source="command")
@@ -204,14 +226,16 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
         deps.frustration.record(text_lower, rms=rms, success=True)
         return TurnOutcome(kind="interrupted", text=text)
 
+    # Only the core's own microphone can end the process. "Goodbye" typed on a
+    # phone is a farewell, not a shutdown order.
     exit_words = ["exit", "quit", "goodbye", "good bye", "shut down nora", "stop nora", "go to sleep"]
-    if text_lower in exit_words or any(text_lower.startswith(w + " ") and len(text_lower.split()) <= 4 for w in exit_words):
-        deps.speak(phrasing.get("goodbye"))
+    if channel.is_local and (text_lower in exit_words or any(text_lower.startswith(w + " ") and len(text_lower.split()) <= 4 for w in exit_words)):
+        speak(phrasing.get("goodbye"))
         logger.info("Exit command received. Shutting down.")
         return TurnOutcome(kind="exit", text=text)
 
     if is_wake_phrase(text_lower):
-        deps.speak(phrasing.get("already_awake"), mood="chat")
+        speak(phrasing.get("already_awake"), mood="chat")
         return TurnOutcome(kind="chat", text=text, intent="already_awake")
 
     # 3a. Fast-path: deterministic resolution before the LLM is ever touched.
@@ -222,7 +246,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
     if _fast_intent is not None and not _fast_intent.steps and _fast_intent.response:
         # Pure conversational shortcut — speak and loop immediately
         ui_server.notify_stage("speaking")
-        deps.speak(_fast_intent.response, mood="chat")
+        speak(_fast_intent.response, mood="chat")
         ui_server.notify_stage("idle")
         context.add_session_turn(
             text=text, intent="chat", actions=[], result_summary="",
@@ -237,7 +261,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
         intent = _fast_intent
         has_blocked, needs_confirm = security.check_steps(intent.steps)
         if has_blocked:
-            deps.speak(phrasing.get("blocked"), mood="error")
+            speak(phrasing.get("blocked"), mood="error")
             deps.frustration.record(text_lower, rms=rms, success=False)
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="blocked", text=text, stage="security", intent=intent.intent, actions=_actions(intent))
@@ -264,7 +288,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
             try:
                 reply = await asyncio.wait_for(
                     loop.run_in_executor(
-                        None, deps.respond, text, _chat_ctx, _act
+                        None, contextvars.copy_context().run, deps.respond, text, _chat_ctx, _act
                     ),
                     timeout=deps.llm_timeout,
                 )
@@ -276,7 +300,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
                 reply = phrasing.get("recovered")
 
             ui_server.notify_stage("speaking")
-            deps.speak(reply, mood="chat")
+            speak(reply, mood="chat")
             ui_server.notify_stage("idle")
 
             # Chat turns reach the session buffer too. They never did
@@ -314,21 +338,21 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
         try:
             intent = await asyncio.wait_for(
                 loop.run_in_executor(
-                    None, deps.parse_intent, text, mem_ctx, screen_ctx
+                    None, contextvars.copy_context().run, deps.parse_intent, text, mem_ctx, screen_ctx
                 ),
                 timeout=deps.llm_timeout,
             )
         except asyncio.TimeoutError:
             logger.warning("Intent parsing timed out")
             print("[NORA] Intent parsing timed out")
-            deps.speak(phrasing.get("too_slow"), mood="error")
+            speak(phrasing.get("too_slow"), mood="error")
             deps.frustration.record(text_lower, rms=rms, success=False)
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="error", text=text, stage="intent_timeout")
         except Exception as e:
             logger.warning(f"Intent parsing failed: {e}")
             print(f"[NORA] Intent parsing error: {e}")
-            deps.speak(phrasing.get("not_understood"), mood="error")
+            speak(phrasing.get("not_understood"), mood="error")
             deps.frustration.record(text_lower, rms=rms, success=False)
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="error", text=text, stage="intent_failed")
@@ -340,9 +364,9 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
                 "more information", "more detail", "please provide",
             )
             if any(w in intent.error.lower() for w in _clarify_words):
-                deps.speak(phrasing.get("not_understood"), mood="error")
+                speak(phrasing.get("not_understood"), mood="error")
             else:
-                deps.speak(f"{phrasing.get('error')} {intent.error}", mood="error")
+                speak(f"{phrasing.get('error')} {intent.error}", mood="error")
             deps.frustration.record(text_lower, rms=rms, success=False)
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="error", text=text, stage="intent_error", message=intent.error or "")
@@ -351,7 +375,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
         ui_server.notify_stage("guarding")
         plan_safe, plan_needs_confirm, plan_violations = neurosym_guard.check_intent(intent)
         if not plan_safe:
-            deps.speak(phrasing.get("blocked"), mood="error")
+            speak(phrasing.get("blocked"), mood="error")
             deps.frustration.record(text_lower, rms=rms, success=False)
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="blocked", text=text, stage="plan_guard", intent=intent.intent, actions=_actions(intent), violations=plan_violations)
@@ -361,7 +385,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
         # Config-based block list
         has_blocked, needs_confirm = security.check_steps(intent.steps)
         if has_blocked:
-            deps.speak(phrasing.get("blocked"), mood="error")
+            speak(phrasing.get("blocked"), mood="error")
             deps.frustration.record(text_lower, rms=rms, success=False)
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="blocked", text=text, stage="security", intent=intent.intent, actions=_actions(intent))
@@ -380,7 +404,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
                 try:
                     reply = await asyncio.wait_for(
                         loop.run_in_executor(
-                            None, deps.respond, text, mem_ctx, dialogue.Act.UNKNOWN
+                            None, contextvars.copy_context().run, deps.respond, text, mem_ctx, dialogue.Act.UNKNOWN
                         ),
                         timeout=deps.llm_timeout,
                     )
@@ -400,7 +424,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
                     reply = conversation.for_speech(_raw_reply)
 
             ui_server.notify_stage("speaking")
-            deps.speak(reply, mood="chat")
+            speak(reply, mood="chat")
             ui_server.notify_stage("idle")
             context.add_session_turn(
                 text=text, intent="chat", actions=[], result_summary="",
@@ -431,12 +455,16 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
     if intent_parser.is_autonomous_task(text) and len(intent.steps) == 0:
         # No steps planned yet: route to ReAct planner
         ui_server.notify_stage("acting")
-        results = await deps.run_plan(text, mem_ctx)
+        if channel.is_local:
+            results = await deps.run_plan(text, mem_ctx)
+        else:
+            results = await deps.run_plan(text, mem_ctx, speak=speak,
+                                          confirm=channel.confirm)
         context.wake_triggered = False
         summary = summarize_results(results)
         if summary:
             ui_server.notify_stage("speaking")
-            deps.speak(summary, mood="info" if all(r.success for r in results) else "error")
+            speak(summary, mood="info" if all(r.success for r in results) else "error")
         ui_server.notify_stage("idle")
         return TurnOutcome(kind="executed", text=text, intent=intent.intent, actions=_actions(intent), results=results, reply=summary, source="react_planner")
 
@@ -467,13 +495,26 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
 
     # 4c. Confirmation prompt — kept brief so it doesn't feel like bureaucracy
     if intent.requires_confirmation:
+        if not channel.can_confirm:
+            # A channel that cannot put the question to its user (Telegram)
+            # does not get to answer it either. Refused, not assumed.
+            actions = ", ".join(_actions(intent))
+            speak(f"That needs confirming out loud ({actions}), so I've left it. "
+                  f"Ask me in the room.", mood="error")
+            ui_server.notify_stage("idle")
+            return TurnOutcome(kind="cancelled", text=text, stage="unconfirmable",
+                               intent=intent.intent, actions=_actions(intent))
         step_labels = " → ".join(s.action.replace("_", " ") for s in intent.steps[:6])
-        deps.speak(f"{step_labels}. Confirm?", mood="confirmation")
-        confirmed = await deps.confirm()
+        speak(f"{step_labels}. Confirm?", mood="confirmation")
+        confirmed = await channel.confirm(ConfirmRequest(
+            turn_id=channel.turn_id, steps=list(intent.steps),
+            rendered=f"{step_labels}?"))
         # Consent memory learns from every prompt (CODEX_INTEGRATION.md 5.2)
         consent_memory.record([s.action for s in intent.steps], confirmed)
+        if confirmed:
+            channel.confirmed_by = channel.device_id
         if not confirmed:
-            deps.speak(phrasing.get("cancelled"))
+            speak(phrasing.get("cancelled"))
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="cancelled", text=text, stage="declined", intent=intent.intent, actions=_actions(intent))
 
@@ -500,7 +541,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
     all_ok_early = all(r.success for r in results) if results else True
     if summary:
         ui_server.notify_stage("speaking")
-        deps.speak(summary, mood="info" if all_ok_early else "error")
+        speak(summary, mood="info" if all_ok_early else "error")
     ui_server.notify_stage("idle")
 
     # Record turn to session context buffer
@@ -544,7 +585,7 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0) -> TurnOutcom
     all_ok = all(r.success for r in results) if results else True
     if deps.frustration.record(text_lower, rms=rms, success=all_ok):
         logger.info("Frustration detected -- offering proactive help")
-        deps.speak("You seem stuck. Want me to ask Claude for help?", mood="proactive")
+        speak("You seem stuck. Want me to ask Claude for help?", mood="proactive")
 
 
     return TurnOutcome(

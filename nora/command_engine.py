@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import contextvars
 import importlib
 import logging
 import pkgutil
@@ -89,6 +90,7 @@ class CommandMeta:
     risk: str = "low"                  # "low" | "medium" | "high"
     requires_confirmation: bool = False
     category: str = ""                 # groups commands in the generated prompt block
+    device: str = ""                   # device id that executes it; "" = the core itself
 
 
 def register(
@@ -115,6 +117,46 @@ def register(
     return decorator
 
 
+def register_device_capability(
+    action_name: str,
+    handler: Callable,
+    *,
+    device: str,
+    sig: str,
+    description: str,
+    risk: str,
+) -> bool:
+    """Register a connected device's capability as an ordinary command.
+
+    This is the whole capability adapter: once registered, the intent parser
+    sees it in the prompt, and the planner, risk, autonomy, audit and trust
+    ledger treat it like any local command — no special-casing downstream.
+    Returns False (and registers nothing) if the name belongs to a local
+    command or to a different device; a phone must not be able to shadow
+    `delete_file`, or another phone's capability.
+    """
+    existing = _meta.get(action_name)
+    if existing is not None and existing.device != device:
+        logger.warning("Capability %s from %s refused: name already taken by %s",
+                       action_name, device, existing.device or "the core")
+        return False
+    _registry[action_name] = handler
+    _meta[action_name] = CommandMeta(
+        sig=sig, description=description, risk=risk, category="device", device=device,
+    )
+    return True
+
+
+def unregister_device(device: str) -> list[str]:
+    """Drop every capability a device registered. Its actions leave the prompt
+    with it, so the LLM never plans a step on a device that is not there."""
+    gone = [name for name, meta in _meta.items() if meta.device == device]
+    for name in gone:
+        _meta.pop(name, None)
+        _registry.pop(name, None)
+    return gone
+
+
 def get_available_actions() -> list[str]:
     """Return all registered action names."""
     return sorted(_registry.keys())
@@ -134,6 +176,7 @@ _OPTIONAL_CATEGORIES = (
     ("focus", "Focus & Ambient (Linux):"),
     ("vision", "Vision & Camera:"),
     ("mcp", "MCP Tools:"),
+    ("device", "Device capabilities (run on a connected phone or laptop):"),
 )
 
 
@@ -253,7 +296,10 @@ async def execute(intent: IntentResponse) -> list[StepResult]:
             if asyncio.iscoroutinefunction(handler):
                 coro = handler(**params)
             else:
-                coro = loop.run_in_executor(None, lambda h=handler, p=params: h(**p))
+                # copy_context: the handler sees the turn's channel
+                # (`nora.channel.current()`), e.g. to tag a job it queues.
+                ctx = contextvars.copy_context()
+                coro = loop.run_in_executor(None, lambda h=handler, p=params: ctx.run(h, **p))
             output = await asyncio.wait_for(coro, timeout=timeout)
             if isinstance(output, StepResult):
                 result = output
@@ -288,16 +334,27 @@ def _log_audit(
     success: bool,
     intent: "IntentResponse",
 ) -> None:
-    """Fire-and-forget audit log write; never raises."""
+    """Fire-and-forget audit log write; never raises.
+
+    Attributed to the channel of the turn in progress (`nora.channel`), so a
+    row says which device asked and on whose authority, not just what ran.
+    """
     try:
-        from nora import audit_log
+        from nora import audit_log, channel
         user_text = getattr(intent, "_user_text", "")
+        ch = channel.current()
+        meta = _meta.get(action)
         audit_log.record(
             action=action,
             params=params,
             result=result_msg,
             success=success,
             user_text=user_text,
+            device=ch.device_id if ch else "local",
+            origin=ch.origin if ch else "live_user",
+            turn_id=ch.turn_id if ch else "",
+            executed_on=(meta.device if meta and meta.device else "local"),
+            confirmed_by=(ch.confirmed_by if ch else ""),
         )
     except Exception:
         pass

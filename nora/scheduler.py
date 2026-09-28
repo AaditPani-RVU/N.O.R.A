@@ -6,8 +6,8 @@ fired because a *clock* said so, which meant NORA could not hold the single most
 ordinary instruction anyone gives a voice assistant — "remind me at six",
 "brief me every morning".
 
-This is that missing half. A schedule is a durable row in `nora_schedules.json`;
-a ticker thread wakes every `_TICK_SEC`, and anything due is handed to
+This is that missing half. A schedule is a durable row in the core store's
+`schedules` table (`nora.store`); a ticker thread wakes every `_TICK_SEC`, and anything due is handed to
 `nora.jobs`, which runs it off-turn and speaks the result through the
 focus-gated channel. The scheduler decides *when*; jobs owns *running* and
 *saying*. Neither knows about the other's problem.
@@ -25,15 +25,13 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import astuple, dataclass, field, fields
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
+
+from nora import store
 
 logger = logging.getLogger("nora.scheduler")
-
-_ROOT = Path(__file__).resolve().parent.parent
-_SCHED_PATH = _ROOT / "nora_schedules.json"
 
 # How often the ticker checks for due work. Schedules are minute-resolution at
 # best (nobody says "remind me at 6:03:20"), so a 20s tick is three chances to
@@ -67,12 +65,20 @@ class Schedule:
     created_at: float = field(default_factory=time.time)
     last_run: float = 0.0
     run_count: int = 0
+    # The device that asked for it; what it produces is delivered there.
+    device: str = "local"
 
     def describe(self) -> str:
         when = datetime.fromtimestamp(self.next_run).strftime("%A at %-I:%M %p")
         return f"{self.what} — {self.spec} (next {when})"
 
 
+_COLUMNS = tuple(f.name for f in fields(Schedule))
+
+# The live schedules, write-through to the store. Kept in memory because
+# `add()` hands back the object the ticker will fire — callers (and tests) may
+# hold it — and only the core process runs the ticker, so the store is the
+# durable copy rather than something another writer races.
 _lock = threading.RLock()
 _schedules: dict[str, Schedule] = {}
 _thread: threading.Thread | None = None
@@ -234,58 +240,90 @@ def _advance(sched: Schedule) -> None:
 
 # ── Persistence ──────────────────────────────────────────────────────────────
 
+def _row_to_schedule(row) -> Schedule:
+    data = {k: row[k] for k in _COLUMNS}
+    data["recurring"] = bool(data["recurring"])
+    data["enabled"] = bool(data["enabled"])
+    data["daily_at"] = json.loads(data["daily_at"]) if data["daily_at"] else None
+    return Schedule(**data)
+
+
+def _to_row(sched: Schedule) -> tuple:
+    values = dict(zip(_COLUMNS, astuple(sched)))
+    values["daily_at"] = json.dumps(sched.daily_at) if sched.daily_at is not None else None
+    values["recurring"] = int(sched.recurring)
+    values["enabled"] = int(sched.enabled)
+    return tuple(values[k] for k in _COLUMNS)
+
+
+def _insert(sched: Schedule) -> None:
+    with store.transaction() as conn:
+        conn.execute(
+            f"INSERT INTO schedules ({', '.join(_COLUMNS)})"
+            f" VALUES ({', '.join('?' * len(_COLUMNS))})",
+            _to_row(sched),
+        )
+
+
+def _write(sched: Schedule) -> None:
+    """Update an existing row. An UPDATE, not an upsert, so a write racing a
+    cancellation cannot bring the row back."""
+    assigns = ", ".join(f"{k} = ?" for k in _COLUMNS[1:])
+    with store.transaction() as conn:
+        conn.execute(f"UPDATE schedules SET {assigns} WHERE id = ?",
+                     (*_to_row(sched)[1:], sched.id))
+
+
+def _delete(sched_id: str) -> None:
+    with store.transaction() as conn:
+        conn.execute("DELETE FROM schedules WHERE id = ?", (sched_id,))
+
+
 def _load() -> None:
+    """Roll recurring schedules that came due while NORA was off forward.
+
+    A due-time that passed while NORA was off fires once on the next tick for
+    a one-shot ("remind me at 6" still matters at 6:05), but a recurring
+    schedule rolls forward instead of replaying the backlog.
+    """
     global _loaded
     if _loaded:
         return
     _loaded = True
-    if not _SCHED_PATH.exists():
-        return
-    try:
-        raw = json.loads(_SCHED_PATH.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("Could not read %s: %s", _SCHED_PATH.name, e)
-        return
-    known = set(Schedule.__dataclass_fields__)
     now = time.time()
-    for entry in raw.get("schedules", []):
-        try:
-            sched = Schedule(**{k: v for k, v in entry.items() if k in known})
-        except Exception:
-            continue
-        # A due-time that passed while NORA was off fires once on the next
-        # tick for a one-shot ("remind me at 6" still matters at 6:05), but a
-        # recurring schedule rolls forward instead of replaying the backlog.
-        if sched.enabled and sched.next_run < now and sched.recurring:
-            _advance(sched)
-        _schedules[sched.id] = sched
-    logger.info("Loaded %d schedules", len(_schedules))
-
-
-def _save() -> None:
+    rows = store.query(f"SELECT {', '.join(_COLUMNS)} FROM schedules")
     with _lock:
-        payload = {"schedules": [asdict(s) for s in _schedules.values()]}
-    try:
-        tmp = _SCHED_PATH.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(_SCHED_PATH)
-    except Exception as e:
-        logger.warning("Could not save schedules: %s", e)
+        for row in rows:
+            sched = _row_to_schedule(row)
+            if sched.enabled and sched.next_run < now and sched.recurring:
+                _advance(sched)
+                _write(sched)
+            _schedules[sched.id] = sched
+    logger.info("Loaded %d schedules", len(_schedules))
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def add(spec: str, what: str) -> Schedule | None:
-    """Create a schedule. Returns None when the time expression is unparseable."""
+def add(spec: str, what: str, *, device: str | None = None) -> Schedule | None:
+    """Create a schedule. Returns None when the time expression is unparseable.
+
+    `device` is where it fires; by default the device whose turn created it.
+    """
+    from nora import channel
+
     sched = parse_spec(spec)
     if sched is None:
         return None
     sched.id = uuid.uuid4().hex[:8]
     sched.what = what.strip()
+    if device is None:
+        ch = channel.current()
+        device = ch.device_id if ch else channel.LOCAL_DEVICE
+    sched.device = device
     with _lock:
         _load()
+        _insert(sched)
         _schedules[sched.id] = sched
-    _save()
     logger.info("Scheduled [%s] %s :: %s", sched.id, sched.spec, sched.what)
     return sched
 
@@ -295,20 +333,20 @@ def remove(query: str) -> Schedule | None:
     with _lock:
         _load()
         if query in _schedules:
-            sched = _schedules.pop(query)
-            _save()
-            return sched
-        words = {w for w in query.lower().split() if len(w) > 3}
-        best: tuple[int, Schedule] | None = None
-        for sched in _schedules.values():
-            overlap = len(words & set(sched.what.lower().split()))
-            if overlap and (best is None or overlap > best[0]):
-                best = (overlap, sched)
-        if best is None:
-            return None
-        _schedules.pop(best[1].id, None)
-    _save()
-    return best[1]
+            target = _schedules[query]
+        else:
+            words = {w for w in query.lower().split() if len(w) > 3}
+            best: tuple[int, Schedule] | None = None
+            for sched in _schedules.values():
+                overlap = len(words & set(sched.what.lower().split()))
+                if overlap and (best is None or overlap > best[0]):
+                    best = (overlap, sched)
+            if best is None:
+                return None
+            target = best[1]
+        _schedules.pop(target.id, None)
+        _delete(target.id)
+    return target
 
 
 def listing() -> list[Schedule]:
@@ -379,12 +417,15 @@ def _fire(sched: Schedule) -> None:
         what[:60],
         lambda: runner(what),
         kind="cron",
+        device=sched.device,
     )
     with _lock:
         sched.last_run = time.time()
         sched.run_count += 1
         _advance(sched)
-    _save()
+        # Cancelled between the tick and here: stays cancelled.
+        if sched.id in _schedules:
+            _write(sched)
     logger.info("Fired schedule [%s] %s", sched.id, what[:60])
 
 
@@ -433,7 +474,11 @@ def stop() -> None:
 def reset_for_tests() -> None:
     global _loaded, _runner
     stop()
+    if store.path() == store._DEFAULT_PATH:
+        raise RuntimeError("refusing to wipe the live store; set NORA_STORE_PATH")
     with _lock:
         _schedules.clear()
-    _loaded = True   # skip disk entirely under test
+        with store.transaction() as conn:
+            conn.execute("DELETE FROM schedules")
+    _loaded = True   # nothing to roll forward in an empty table
     _runner = None

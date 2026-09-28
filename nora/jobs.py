@@ -19,8 +19,8 @@ When it finishes, the result is *spoken unprompted* through the same
 focus-gated channel `proactive`, `terminal_monitor` and `anomaly_watchdog`
 already use — NORA comes back to you, in speech, without being asked again.
 
-Jobs are durable. They live in `nora_jobs.json` alongside the other root state
-files, so a job that was still running when NORA went down is visible on the
+Jobs are durable. They live in the `jobs` table of the core store
+(`nora.store`), so a job that was still running when NORA went down is visible on the
 next boot instead of vanishing silently. Delivery is *not* replayed across a
 restart — speaking the answer to a question asked yesterday, out of nowhere,
 would be worse than not answering — but the answer is kept and `pending()` /
@@ -28,22 +28,18 @@ would be worse than not answering — but the answer is kept and `pending()` /
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 import queue
 import threading
 import time
 import traceback
 import uuid
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from typing import Any, Callable
+from dataclasses import astuple, dataclass, field, fields
+from typing import Callable
+
+from nora import channel, delivery, store
 
 logger = logging.getLogger("nora.jobs")
-
-_ROOT = Path(__file__).resolve().parent.parent
-_JOBS_PATH = _ROOT / "nora_jobs.json"
 
 STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
@@ -81,6 +77,8 @@ class Job:
     # Set on jobs restored from disk at boot: their result is retrievable but
     # is never spoken unprompted, because the moment for it has passed.
     stale: bool = False
+    # The device whose request queued this job; the answer goes back there.
+    device: str = "local"
 
     def duration(self) -> float:
         if not self.started_at:
@@ -89,11 +87,16 @@ class Job:
         return end - self.started_at
 
 
+_COLUMNS = tuple(f.name for f in fields(Job))
+_BOOL_COLUMNS = ("delivered", "deliver", "stale")
+
+# Serialises this process's read-modify-write of a job row. Cross-process
+# safety comes from the store's transactions; this only keeps the two workers
+# and the submitting thread from racing each other.
 _lock = threading.RLock()
-_jobs: dict[str, Job] = {}
 _queue: "queue.Queue[str]" = queue.Queue()
 # job id -> the callable to run. Deliberately *not* persisted: a function
-# reference cannot be JSON, and resurrecting arbitrary callables across a
+# reference cannot be stored, and resurrecting arbitrary callables across a
 # restart is not a thing to do by accident.
 _work: dict[str, Callable[[], str]] = {}
 
@@ -105,67 +108,61 @@ _started = False
 
 # ── Persistence ──────────────────────────────────────────────────────────────
 
+def _row_to_job(row) -> Job:
+    data = {k: row[k] for k in _COLUMNS}
+    for k in _BOOL_COLUMNS:
+        data[k] = bool(data[k])
+    return Job(**data)
+
+
+def _insert(job: Job) -> None:
+    with store.transaction() as conn:
+        conn.execute(
+            f"INSERT INTO jobs ({', '.join(_COLUMNS)}) VALUES ({', '.join('?' * len(_COLUMNS))})",
+            astuple(job),
+        )
+    _trim()
+
+
+def _update(job_id: str, **changes) -> None:
+    assigns = ", ".join(f"{k} = ?" for k in changes)
+    with store.transaction() as conn:
+        conn.execute(f"UPDATE jobs SET {assigns} WHERE id = ?", (*changes.values(), job_id))
+
+
+def _select(where: str = "", params: tuple = (), order: str = "created_at") -> list[Job]:
+    sql = f"SELECT {', '.join(_COLUMNS)} FROM jobs"
+    if where:
+        sql += f" WHERE {where}"
+    sql += f" ORDER BY {order}"
+    return [_row_to_job(r) for r in store.query(sql, params)]
+
+
+def _trim() -> None:
+    """Keep the newest `_HISTORY_LIMIT` finished jobs; live ones are never dropped."""
+    with store.transaction() as conn:
+        conn.execute(
+            "DELETE FROM jobs WHERE status IN (?, ?) AND id NOT IN ("
+            " SELECT id FROM jobs ORDER BY created_at DESC LIMIT ?)",
+            (*_FINISHED, _HISTORY_LIMIT),
+        )
+
+
 def _load() -> None:
-    """Read jobs from disk. Anything left mid-flight is marked failed.
+    """Settle jobs left behind by the last run. Anything mid-flight is failed.
 
-    A job in `running` at load time means the process died holding it. It has
-    no callable any more (see `_work`), so it can never complete — recording
-    that honestly beats leaving a permanent phantom in `pending()`.
+    A job still `queued` or `running` at boot means the process died holding
+    it. It has no callable any more (see `_work`), so it can never complete —
+    recording that honestly beats leaving a permanent phantom in `pending()`.
+    Nothing recovered from a previous run gets spoken out of the blue.
     """
-    if not _JOBS_PATH.exists():
-        return
-    try:
-        raw = json.loads(_JOBS_PATH.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("Could not read %s: %s", _JOBS_PATH.name, e)
-        return
-
-    known = set(Job.__dataclass_fields__)
-    for entry in raw.get("jobs", []):
-        try:
-            job = Job(**{k: v for k, v in entry.items() if k in known})
-        except Exception:
-            continue
-        if job.status in (STATUS_QUEUED, STATUS_RUNNING):
-            job.status = STATUS_FAILED
-            job.error = "Interrupted by shutdown."
-            job.finished_at = time.time()
-        # Nothing recovered from disk gets spoken out of the blue.
-        job.stale = True
-        job.delivered = True
-        _jobs[job.id] = job
-
-
-def _save() -> None:
-    """Write jobs to disk, newest first, trimmed to `_HISTORY_LIMIT`."""
-    with _lock:
-        ordered = sorted(_jobs.values(), key=lambda j: j.created_at, reverse=True)
-        keep = ordered[:_HISTORY_LIMIT]
-        for job in ordered[_HISTORY_LIMIT:]:
-            _jobs.pop(job.id, None)
-            _work.pop(job.id, None)
-        payload = {"jobs": [asdict(j) for j in keep]}
-    # One temp file per call, not one per module. Two workers finishing at once
-    # both wrote `nora_jobs.json.tmp` and both renamed it; the second rename
-    # found the name already consumed by the first and failed with ENOENT, so
-    # the queue silently stopped persisting:
-    #
-    #   Could not save jobs: [Errno 2] No such file or directory:
-    #   '.../nora_jobs.json.tmp' -> '.../nora_jobs.json'
-    #
-    # The write itself is outside the lock deliberately — holding it across
-    # disk I/O would serialise every job update behind the filesystem — so the
-    # uniqueness has to come from the name.
-    tmp = _JOBS_PATH.with_name(f"{_JOBS_PATH.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    try:
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(_JOBS_PATH)
-    except Exception as e:
-        logger.warning("Could not save jobs: %s", e)
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+    with store.transaction() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = ?, error = 'Interrupted by shutdown.', finished_at = ?"
+            " WHERE status IN (?, ?)",
+            (STATUS_FAILED, time.time(), STATUS_QUEUED, STATUS_RUNNING),
+        )
+        conn.execute("UPDATE jobs SET stale = 1, delivered = 1 WHERE stale = 0")
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
@@ -176,43 +173,46 @@ def submit(
     *,
     kind: str = "answer",
     deliver: bool = True,
+    device: str | None = None,
 ) -> str:
     """Queue `work` to run off-turn. Returns the job id immediately.
 
     `work` takes no arguments and returns the text to speak — bind arguments
     with a lambda or `functools.partial` at the call site. It runs on a worker
     thread, so it must not touch the asyncio loop.
+
+    `device` is where the answer goes; by default, the device whose turn is
+    queueing the job (`nora.channel.current()`), else the local speaker.
     """
-    job = Job(id=uuid.uuid4().hex[:12], title=title.strip(), kind=kind, deliver=deliver)
+    if device is None:
+        ch = channel.current()
+        device = ch.device_id if ch else channel.LOCAL_DEVICE
+    job = Job(id=uuid.uuid4().hex[:12], title=title.strip(), kind=kind,
+              deliver=deliver, device=device)
+    _insert(job)
     with _lock:
-        _jobs[job.id] = job
         _work[job.id] = work
     _queue.put(job.id)
-    _save()
     logger.info("Job queued [%s] %s", job.id, job.title)
     return job.id
 
 
 def get(job_id: str) -> Job | None:
-    with _lock:
-        return _jobs.get(job_id)
+    found = _select("id = ?", (job_id,))
+    return found[0] if found else None
 
 
 def pending() -> list[Job]:
     """Jobs still queued or running, oldest first."""
-    with _lock:
-        live = [j for j in _jobs.values() if j.status not in _FINISHED]
-    return sorted(live, key=lambda j: j.created_at)
+    return _select("status NOT IN (?, ?)", _FINISHED)
 
 
 def recent(limit: int = 5, *, kind: str | None = None) -> list[Job]:
     """Finished jobs, newest first."""
-    with _lock:
-        done = [
-            j for j in _jobs.values()
-            if j.status in _FINISHED and (kind is None or j.kind == kind)
-        ]
-    return sorted(done, key=lambda j: j.finished_at, reverse=True)[:limit]
+    where, params = "status IN (?, ?)", _FINISHED
+    if kind is not None:
+        where, params = where + " AND kind = ?", (*_FINISHED, kind)
+    return _select(where, params, order="finished_at DESC")[:limit]
 
 
 def find(query: str) -> Job | None:
@@ -226,9 +226,7 @@ def find(query: str) -> Job | None:
     if not words:
         return None
     best: tuple[int, float, Job] | None = None
-    with _lock:
-        candidates = list(_jobs.values())
-    for job in candidates:
+    for job in _select():
         overlap = len(words & set(job.title.lower().split()))
         if not overlap:
             continue
@@ -236,6 +234,24 @@ def find(query: str) -> Job | None:
         if best is None or rank[:2] > best[:2]:
             best = rank
     return best[2] if best else None
+
+
+# Held answers older than this are left for recall instead of being pushed:
+# a reply to something asked yesterday, arriving out of nowhere, is noise.
+_FLUSH_MAX_AGE_SEC = 12 * 3600
+
+
+def flush(device_id: str) -> int:
+    """Deliver answers held while `device_id` was offline. Returns how many."""
+    held = _select(
+        "device = ? AND delivered = 0 AND deliver = 1 AND stale = 0"
+        " AND status IN (?, ?) AND finished_at > ?",
+        (device_id, *_FINISHED, time.time() - _FLUSH_MAX_AGE_SEC),
+        order="finished_at",
+    )
+    for job in held:
+        _deliver(job)
+    return sum(1 for j in held if j.delivered)
 
 
 def describe_pending() -> str:
@@ -252,24 +268,34 @@ def describe_pending() -> str:
 # ── Worker loop ──────────────────────────────────────────────────────────────
 
 def _deliver(job: Job) -> None:
-    """Speak a finished job's result, unprompted.
+    """Say a finished job's result, unprompted, to the device that asked.
 
-    Routed through the focus-gated speak callback, so a job that lands while
-    the user is in a meeting or deep in focus is held and flushed on their next
-    interaction rather than barging in — that gating is `nora.focus`'s job, not
-    this module's.
+    A device job goes through `nora.delivery`; if that device is offline the
+    row stays undelivered and `flush()` sends it when the device reconnects.
+    A local job goes through the focus-gated speak callback, so one that lands
+    while the user is in a meeting or deep in focus is held and flushed on
+    their next interaction rather than barging in — that gating is
+    `nora.focus`'s job, not this module's.
     """
-    if _speak is None or not job.deliver or job.stale:
+    if not job.deliver or job.stale:
         return
     if job.status == STATUS_FAILED:
         text = f"I couldn't finish {job.title}. {job.error}".strip()
     else:
         text = _phrase_answer(job)
+    if job.device != channel.LOCAL_DEVICE:
+        if delivery.deliver(text, device=job.device, kind=job.kind):
+            _update(job.id, delivered=1)
+            job.delivered = True
+        else:
+            logger.info("Job %s held for %s (not connected)", job.id, job.device)
+        return
+    if _speak is None:
+        return
     try:
         _speak(text)
-        with _lock:
-            job.delivered = True
-        _save()
+        _update(job.id, delivered=1)
+        job.delivered = True
     except Exception as e:
         logger.warning("Delivery failed for job %s: %s", job.id, e)
 
@@ -288,31 +314,30 @@ def _phrase_answer(job: Job) -> str:
 
 def _run_one(job_id: str) -> None:
     with _lock:
-        job = _jobs.get(job_id)
         work = _work.get(job_id)
+    job = get(job_id)
     if job is None or work is None:
         return
 
-    with _lock:
-        job.status = STATUS_RUNNING
-        job.started_at = time.time()
-    _save()
+    job.status = STATUS_RUNNING
+    job.started_at = time.time()
+    _update(job_id, status=job.status, started_at=job.started_at)
 
     try:
         result = work() or ""
-        with _lock:
-            job.result = str(result).strip()
-            job.status = STATUS_DONE
+        job.result = str(result).strip()
+        job.status = STATUS_DONE
     except Exception as e:
         logger.error("Job %s failed: %s\n%s", job_id, e, traceback.format_exc())
-        with _lock:
-            job.error = str(e)
-            job.status = STATUS_FAILED
+        job.error = str(e)
+        job.status = STATUS_FAILED
     finally:
+        job.finished_at = time.time()
         with _lock:
-            job.finished_at = time.time()
             _work.pop(job_id, None)
-        _save()
+        _update(job_id, status=job.status, result=job.result, error=job.error,
+                finished_at=job.finished_at)
+        _trim()
         logger.info("Job %s %s in %.1fs", job_id, job.status, job.duration())
         _deliver(job)
 
@@ -357,12 +382,15 @@ def stop() -> None:
 
 
 def reset_for_tests(speak_callback: Callable[[str], None] | None = None) -> None:
-    """Clear in-memory state. Tests only — does not touch the on-disk file."""
+    """Clear queued work and the jobs table. Tests only — refuses the live store."""
     global _speak, _started
     stop()
     with _lock:
-        _jobs.clear()
         _work.clear()
+    if store.path() == store._DEFAULT_PATH:
+        raise RuntimeError("refusing to wipe the live store; set NORA_STORE_PATH")
+    with store.transaction() as conn:
+        conn.execute("DELETE FROM jobs")
     while not _queue.empty():
         try:
             _queue.get_nowait()

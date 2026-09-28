@@ -297,6 +297,8 @@ SUBSYSTEM_STARTS = [
     # exactly when someone would run the suite. Listing it here keeps the
     # assertion that the remote mic gets started while leaving the port alone.
     "nora.remote_mic.start",
+    # Binds a socket too, when enabled; stubbed for the same reason.
+    "nora.hub.server.start",
 ]
 
 SUBSYSTEM_STOPS = [

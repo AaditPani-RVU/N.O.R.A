@@ -121,31 +121,38 @@ class GatedSpeechFlushTest(unittest.TestCase):
 
 
 class JobsSaveConcurrencyTest(unittest.TestCase):
-    """Two workers finishing together must not lose the store."""
+    """Two workers finishing together must not lose the store.
+
+    Originally a race on a shared JSON temp file; the store is SQLite now, and
+    the invariant is the same: every concurrent write lands, none warns.
+    """
+
+    def setUp(self):
+        jobs.reset_for_tests(None)
 
     def test_concurrent_saves_all_succeed(self):
         warnings: list[str] = []
         with mock.patch.object(jobs.logger, "warning",
                                lambda msg, *a: warnings.append(str(msg) % a if a else msg)):
             barrier = threading.Barrier(8)
+            ids: list[str] = []
 
-            def hammer():
+            def hammer(i):
                 barrier.wait()
-                jobs._save()
+                job = jobs.Job(id=f"j{i}", title=f"job {i}")
+                jobs._insert(job)
+                jobs._update(job.id, status=jobs.STATUS_DONE, result=str(i))
+                ids.append(job.id)
 
-            threads = [threading.Thread(target=hammer) for _ in range(8)]
+            threads = [threading.Thread(target=hammer, args=(i,)) for i in range(8)]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
 
         self.assertEqual(warnings, [], f"saves failed: {warnings}")
-        self.assertTrue(jobs._JOBS_PATH.exists())
-
-    def test_no_temp_files_are_left_behind(self):
-        jobs._save()
-        leftovers = list(jobs._JOBS_PATH.parent.glob(f"{jobs._JOBS_PATH.name}.*.tmp"))
-        self.assertEqual(leftovers, [])
+        self.assertEqual(len(ids), 8)
+        self.assertEqual({j.id for j in jobs.recent(limit=20)}, set(ids))
 
 
 class MailRoutingTest(unittest.TestCase):

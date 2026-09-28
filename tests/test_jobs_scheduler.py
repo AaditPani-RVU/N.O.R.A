@@ -38,12 +38,9 @@ class SpeakRecorder:
 class JobQueueTest(unittest.TestCase):
     def setUp(self) -> None:
         self.speak = SpeakRecorder()
+        # Persistence runs for real, against the temporary store tests/conftest.py
+        # points NORA_STORE_PATH at.
         jobs.reset_for_tests(self.speak)
-        # Persistence is the one edge these tests must not exercise: the store
-        # is a real file in the repo root.
-        self._save = mock.patch.object(jobs, "_save", lambda: None)
-        self._save.start()
-        self.addCleanup(self._save.stop)
         jobs.start(self.speak)
         self.addCleanup(jobs.stop)
 
@@ -181,10 +178,6 @@ class SchedulerFiringTest(unittest.TestCase):
         self.speak = SpeakRecorder()
         jobs.reset_for_tests(self.speak)
         scheduler.reset_for_tests()
-        for mod in (jobs, scheduler):
-            patcher = mock.patch.object(mod, "_save", lambda: None)
-            patcher.start()
-            self.addCleanup(patcher.stop)
         jobs.start(self.speak)
         self.addCleanup(jobs.stop)
         self.addCleanup(scheduler.stop)
@@ -240,9 +233,6 @@ class DeferredAnswerTest(unittest.TestCase):
     def setUp(self) -> None:
         self.speak = SpeakRecorder()
         jobs.reset_for_tests(self.speak)
-        patcher = mock.patch.object(jobs, "_save", lambda: None)
-        patcher.start()
-        self.addCleanup(patcher.stop)
         jobs.start(self.speak)
         self.addCleanup(jobs.stop)
 

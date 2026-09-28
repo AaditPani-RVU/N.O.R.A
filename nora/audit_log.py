@@ -36,8 +36,19 @@ def record(
     result: str,
     success: bool,
     user_text: str = "",
+    *,
+    device: str = "local",
+    origin: str = "live_user",
+    turn_id: str = "",
+    executed_on: str = "local",
+    confirmed_by: str = "",
 ) -> None:
-    """Append one action entry to the audit log. Thread-safe."""
+    """Append one action entry to the audit log. Thread-safe.
+
+    `device` is where the request came from; `executed_on` is where the action
+    ran (a device capability runs on the device, everything else on the core).
+    `confirmed_by` names the device that approved it, when one did.
+    """
     entry: dict[str, Any] = {
         "ts": time.time(),
         "ts_human": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -46,6 +57,11 @@ def record(
         "result": result[:300],
         "success": success,
         "user_text": user_text[:200],
+        "device": device,
+        "origin": origin,
+        "turn_id": turn_id,
+        "executed_on": executed_on,
+        "confirmed_by": confirmed_by,
     }
     with _lock:
         _buffer.append(entry)

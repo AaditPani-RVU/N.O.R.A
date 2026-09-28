@@ -1,24 +1,23 @@
 """A headless turn — text in, text out, no microphone and no speaker.
 
-`pipeline.run_turn` cannot be reused here, and the reason is worth stating so
-nobody tries. That function is a loop body around a live audio device: it
-records, transcribes, speaks, drives the UI stage indicator, and asks for voice
-confirmation by listening for the word "yes". Every one of those is meaningless
-over a chat message, and the confirmation flow is worse than meaningless — it
-would block forever on a microphone nobody is speaking into.
+This used to be its own smaller turn: fast path, conversation, intent parser,
+security check, execute. "The same guards" was the claim, and it was not
+quite true — it skipped both NeuroSym guards and the risk/autonomy/confidence
+ladder, so a Telegram message faced fewer checks than the same words spoken
+in the room.
 
-So this is a deliberately smaller turn with the same guards. Fast path first,
-conversation routing second, intent parser third, then the same
-`nora.security` check and the same `nora.command_engine.execute`. What it does
-*not* do is confirm: anything the security policy flags is refused with an
-explanation rather than run, because a remote message is exactly the context in
-which "are you sure?" cannot be answered honestly. Destructive actions stay in
-the room.
+Now it is `pipeline.handle_turn` on a text `Channel`: one turn, one set of
+guards, whichever device asked. What still differs is only what the channel
+can do. A text channel has no `confirm`, so anything the policy wants
+confirmed is refused with an explanation rather than run — a remote message
+is exactly the context in which "are you sure?" cannot be answered honestly.
+Paired devices that *can* ask their user (plan §5, Confirmation) pass their
+own `confirm`.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
+from typing import Awaitable, Callable
 
 logger = logging.getLogger("nora.gateway.core")
 
@@ -26,71 +25,36 @@ logger = logging.getLogger("nora.gateway.core")
 # as unwelcome as it is in speech.
 _MAX_REPLY_CHARS = 1200
 
+# One tracker across gateway turns, like the voice loop's one tracker across
+# spoken turns — frustration is a pattern over turns, not within one.
+_frustration = None
 
-async def handle_text(text: str, *, source: str = "gateway") -> str:
+
+async def handle_text(
+    text: str,
+    *,
+    source: str = "gateway",
+    device_id: str | None = None,
+    confirm: Callable[..., Awaitable[bool]] | None = None,
+) -> str:
     """Run one utterance through NORA and return what it would have said."""
-    from nora import (
-        command_engine, context, conversation, dialogue, fast_path,
-        intent_parser, memory, security,
-    )
+    global _frustration
+    from nora import pipeline, wiring
+    from nora.channel import Channel, Collector
+    from nora.frustration import FrustrationTracker
 
     text = (text or "").strip()
     if not text:
         return ""
 
-    dialogue.record_user(text, kind=source)
-
-    # 1. Deterministic fast path — no model call at all.
-    intent = fast_path.resolve(text)
-    if intent is not None and not intent.steps and intent.response:
-        dialogue.record_nora(intent.response, kind=source)
-        return intent.response
-
-    # 2. Conversation, when the utterance is talk rather than instruction.
-    if intent is None:
-        act = dialogue.classify(text)
-        if conversation.should_handle(act):
-            loop = asyncio.get_running_loop()
-            reply = await loop.run_in_executor(
-                None, conversation.respond, text, memory.get_context_summary(), act
-            )
-            dialogue.record_nora(reply, kind=source)
-            return reply[:_MAX_REPLY_CHARS]
-
-        # 3. Action path.
-        loop = asyncio.get_running_loop()
-        try:
-            intent = await loop.run_in_executor(
-                None, intent_parser.parse_intent, text, memory.get_context_summary()
-            )
-        except Exception as e:
-            logger.warning("gateway intent parse failed: %s", e)
-            return "I couldn't work out what you wanted there."
-
-    if intent is None or not intent.steps:
-        return (intent.response if intent and intent.response
-                else "I couldn't work out what you wanted there.")
-
-    blocked, needs_confirm = security.check_steps(intent.steps)
-    if blocked:
-        return "That's blocked by the security policy."
-    if needs_confirm or intent.requires_confirmation:
-        # No voice channel to confirm on, and a chat "yes" is a weaker signal
-        # than a spoken one from someone demonstrably in the room.
-        actions = ", ".join(s.action for s in intent.steps)
-        return (f"That needs confirming out loud ({actions}), so I've left it. "
-                f"Ask me in the room.")
-
-    results = await command_engine.execute(intent)
-    reply = " ".join(r.message for r in results if r.message).strip() or "Done."
-
-    context.add_session_turn(
-        text=text, intent=intent.intent,
-        actions=[s.action for s in intent.steps],
-        result_summary=reply, success=all(r.success for r in results), reply=reply,
-    )
-    dialogue.record_nora(reply, kind=source)
-    return reply[:_MAX_REPLY_CHARS]
+    said = Collector()
+    if _frustration is None:
+        _frustration = FrustrationTracker()
+    deps = wiring.build(listener=None, frustration=_frustration, speak=said)
+    channel = Channel(device_id=device_id or source, kind="text",
+                      speak=said, confirm=confirm)
+    await pipeline.handle_turn(text, deps, channel=channel)
+    return said.text()[:_MAX_REPLY_CHARS]
 
 
 def decode_audio(data: bytes, *, sample_rate: int = 16000):

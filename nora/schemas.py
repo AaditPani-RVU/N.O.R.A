@@ -25,3 +25,4 @@ class StepResult(BaseModel):
     success: bool
     message: str = ""
     withheld: bool = False   # deliberately not run (e.g. guest mode) — not a failure
+    error_code: str = ""     # device protocol error code (nora.hub.protocol), when one applies

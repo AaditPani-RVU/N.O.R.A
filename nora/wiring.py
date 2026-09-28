@@ -74,9 +74,11 @@ def build(
         from nora import pipeline
         return await pipeline.confirmation_flow(listener)
 
-    async def _default_run_plan(text: str, mem_ctx: dict) -> list:
+    async def _default_run_plan(text: str, mem_ctx: dict, **channel_edges) -> list:
+        # `channel_edges` is `speak=`/`confirm=` for a turn that did not come
+        # from the local microphone; see `pipeline.handle_turn`.
         from nora import planner
-        return await planner.run_plan(text, mem_ctx, listener)
+        return await planner.run_plan(text, mem_ctx, listener, **channel_edges)
 
     timeouts = get_config().get("timeouts", {})
     return TurnDeps(
@@ -151,6 +153,7 @@ def start_subsystems(speak: Callable[..., None]) -> None:
     _start_mcp()
     _start_linux_hooks()
     _start_websocket_api()
+    _start_hub()
 
 
 def stop_subsystems() -> None:
@@ -167,7 +170,7 @@ def stop_subsystems() -> None:
         ("terminal_monitor", terminal_monitor.stop),
         ("anomaly_watchdog", anomaly_watchdog.stop),
         ("scheduler", scheduler.stop), ("jobs", jobs.stop),
-        ("telegram", telegram.stop),
+        ("telegram", telegram.stop), ("hub", _stop_hub),
     ):
         try:
             stop()
@@ -215,6 +218,19 @@ def _start_linux_hooks() -> None:
             getattr(mod, hook)()
         except Exception as e:
             logger.debug("%s hook skipped: %s", label, e)
+
+
+def _start_hub() -> None:
+    """Device Hub — paired phones and laptops (off unless `hub.enabled`)."""
+    from nora.hub import server
+    port = server.start()
+    if port:
+        print(f"[NORA] Device hub: ws://127.0.0.1:{port}/v1/device")
+
+
+def _stop_hub() -> None:
+    from nora.hub import server
+    server.stop()
 
 
 def _start_websocket_api() -> None:

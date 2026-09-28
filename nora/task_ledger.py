@@ -1,166 +1,127 @@
 """Task Ledger — persistent structured store of open and closed tasks.
 
-Tasks are stored in nora_tasks.json at the project root.
+Tasks live in the `tasks` table of the core store (`nora.store`).
 Each task: id, title, status, notes, log, associated_files, commands,
-created_at, updated_at, closed_at.
+created_at, updated_at, closed_at. Every function returns plain dicts in that
+shape, with `log`, `associated_files` and `commands` as lists.
 """
 from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 import uuid
-from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger("nora.task_ledger")
+from nora import store
 
-_ROOT = Path(__file__).resolve().parent.parent
-_TASKS_PATH = _ROOT / "nora_tasks.json"
-_lock = threading.RLock()
-_tasks: dict[str, dict] | None = None
+logger = logging.getLogger("nora.task_ledger")
 
 STATUS_OPEN = "open"
 STATUS_IN_PROGRESS = "in_progress"
 STATUS_CLOSED = "closed"
 STATUS_ABANDONED = "abandoned"
 
-
-def _load() -> dict[str, dict]:
-    global _tasks
-    if _tasks is not None:
-        return _tasks
-    if _TASKS_PATH.exists():
-        try:
-            _tasks = json.loads(_TASKS_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            _tasks = {}
-    else:
-        _tasks = {}
-    return _tasks
+_LIST_FIELDS = ("log", "associated_files", "commands")
+_COLUMNS = ("id", "title", "status", "notes", *_LIST_FIELDS,
+            "created_at", "updated_at", "closed_at")
+_SELECT = f"SELECT {', '.join(_COLUMNS)} FROM tasks"
 
 
-def _save() -> None:
-    if _tasks is None:
-        return
-    try:
-        _TASKS_PATH.write_text(json.dumps(_tasks, indent=2), encoding="utf-8")
-    except Exception as e:
-        logger.warning("Task ledger save failed: %s", e)
+def _to_dict(row) -> dict:
+    task = {k: row[k] for k in _COLUMNS}
+    for k in _LIST_FIELDS:
+        task[k] = json.loads(task[k] or "[]")
+    return task
+
+
+def _fetch(where: str = "", params: tuple = ()) -> list[dict]:
+    sql = _SELECT + (f" WHERE {where}" if where else "") + " ORDER BY updated_at DESC"
+    return [_to_dict(r) for r in store.query(sql, params)]
 
 
 def create_task(title: str, notes: str = "", associated_files: list[str] | None = None) -> str:
     """Create a new open task and return its short ID."""
-    with _lock:
-        tasks = _load()
-        task_id = str(uuid.uuid4())[:8]
-        now = time.time()
-        tasks[task_id] = {
-            "id": task_id,
-            "title": title,
-            "status": STATUS_OPEN,
-            "notes": notes,
-            "log": [],
-            "associated_files": associated_files or [],
-            "commands": [],
-            "created_at": now,
-            "updated_at": now,
-            "closed_at": None,
-        }
-        _save()
-        logger.info("Task created: %s — %s", task_id, title)
-        return task_id
+    task_id = str(uuid.uuid4())[:8]
+    now = time.time()
+    with store.transaction() as conn:
+        conn.execute(
+            f"INSERT INTO tasks ({', '.join(_COLUMNS)}) VALUES ({', '.join('?' * len(_COLUMNS))})",
+            (task_id, title, STATUS_OPEN, notes, "[]",
+             json.dumps(associated_files or []), "[]", now, now, None),
+        )
+    logger.info("Task created: %s — %s", task_id, title)
+    return task_id
 
 
 def update_task(task_id: str, **kwargs: Any) -> bool:
     """Update allowed task fields. Returns True if the task was found."""
-    with _lock:
-        tasks = _load()
-        if task_id not in tasks:
-            return False
-        allowed = {"title", "status", "notes", "associated_files", "commands"}
-        for k, v in kwargs.items():
-            if k in allowed:
-                tasks[task_id][k] = v
-        tasks[task_id]["updated_at"] = time.time()
-        _save()
-        return True
+    allowed = {"title", "status", "notes", "associated_files", "commands"}
+    changes = {k: (json.dumps(v) if k in _LIST_FIELDS else v)
+               for k, v in kwargs.items() if k in allowed}
+    changes["updated_at"] = time.time()
+    assigns = ", ".join(f"{k} = ?" for k in changes)
+    with store.transaction() as conn:
+        cur = conn.execute(f"UPDATE tasks SET {assigns} WHERE id = ?",
+                           (*changes.values(), task_id))
+        return cur.rowcount > 0
 
 
 def append_log(task_id: str, entry: str) -> bool:
     """Append a timestamped log note to a task."""
-    with _lock:
-        tasks = _load()
-        if task_id not in tasks:
+    now = time.time()
+    with store.transaction() as conn:
+        row = conn.execute("SELECT log FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if row is None:
             return False
-        tasks[task_id]["log"].append({"ts": time.time(), "entry": entry})
-        tasks[task_id]["updated_at"] = time.time()
-        _save()
+        log = json.loads(row["log"] or "[]")
+        log.append({"ts": now, "entry": entry})
+        conn.execute("UPDATE tasks SET log = ?, updated_at = ? WHERE id = ?",
+                     (json.dumps(log), now, task_id))
         return True
 
 
 def close_task(task_id: str, status: str = STATUS_CLOSED) -> bool:
     """Mark a task closed (or abandoned). Returns True if found."""
-    with _lock:
-        tasks = _load()
-        if task_id not in tasks:
-            return False
-        tasks[task_id]["status"] = status
-        tasks[task_id]["closed_at"] = time.time()
-        tasks[task_id]["updated_at"] = time.time()
-        _save()
-        return True
+    now = time.time()
+    with store.transaction() as conn:
+        cur = conn.execute(
+            "UPDATE tasks SET status = ?, closed_at = ?, updated_at = ? WHERE id = ?",
+            (status, now, now, task_id),
+        )
+        return cur.rowcount > 0
 
 
 def find_tasks(query: str, statuses: list[str] | None = None) -> list[dict]:
     """Return tasks whose title or notes contain query (case-insensitive), optionally filtered by status."""
-    with _lock:
-        tasks = _load()
-        q = query.lower()
-        results = []
-        for t in tasks.values():
-            if statuses and t["status"] not in statuses:
-                continue
-            if q in t["title"].lower() or q in t.get("notes", "").lower():
-                results.append(dict(t))
-        results.sort(key=lambda x: x["updated_at"], reverse=True)
-        return results
+    q = query.lower()
+    results = []
+    for t in _fetch():
+        if statuses and t["status"] not in statuses:
+            continue
+        if q in t["title"].lower() or q in (t.get("notes") or "").lower():
+            results.append(t)
+    return results
 
 
 def get_open_tasks() -> list[dict]:
     """Return all open/in_progress tasks sorted by most recently updated."""
-    with _lock:
-        tasks = _load()
-        result = [dict(t) for t in tasks.values()
-                  if t["status"] in (STATUS_OPEN, STATUS_IN_PROGRESS)]
-        result.sort(key=lambda x: x["updated_at"], reverse=True)
-        return result
+    return _fetch("status IN (?, ?)", (STATUS_OPEN, STATUS_IN_PROGRESS))
 
 
 def get_recent_tasks(n: int = 20, include_closed: bool = True) -> list[dict]:
     """Return the n most recently updated tasks."""
-    with _lock:
-        tasks = _load()
-        result = list(tasks.values())
-        if not include_closed:
-            result = [t for t in result if t["status"] not in (STATUS_CLOSED, STATUS_ABANDONED)]
-        result.sort(key=lambda x: x["updated_at"], reverse=True)
-        return [dict(t) for t in result[:n]]
+    if include_closed:
+        return _fetch()[:n]
+    return _fetch("status NOT IN (?, ?)", (STATUS_CLOSED, STATUS_ABANDONED))[:n]
 
 
 def get_task(task_id: str) -> dict | None:
-    with _lock:
-        tasks = _load()
-        t = tasks.get(task_id)
-        return dict(t) if t else None
+    found = _fetch("id = ?", (task_id,))
+    return found[0] if found else None
 
 
 def task_summary() -> dict[str, int]:
     """Return counts by status."""
-    with _lock:
-        tasks = _load()
-        counts: dict[str, int] = {}
-        for t in tasks.values():
-            counts[t["status"]] = counts.get(t["status"], 0) + 1
-        return counts
+    rows = store.query("SELECT status, COUNT(*) AS n FROM tasks GROUP BY status")
+    return {r["status"]: r["n"] for r in rows}

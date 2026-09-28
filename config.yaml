@@ -829,6 +829,21 @@ websocket_api:
   # browsers refuse programmatic playback without a user gesture first.
   relay_audio: true
 
+hub:
+  # Device Hub (NORA_DISTRIBUTED_PLAN.md §5): phones and laptops pair with the
+  # core and connect to ws://<host>:<port>/v1/device. Loopback only -- the hub
+  # refuses any other host. Other devices reach it through `tailscale serve`
+  # (real *.ts.net TLS, tailnet only), never a LAN address. Every device still
+  # authenticates with its own key; see `python -m nora.hub` for pairing.
+  enabled: false
+  host: "127.0.0.1"
+  port: 8770
+  # How long a device gets to run one capability before it counts as TIMEOUT.
+  invoke_deadline_ms: 8000
+  # Core-side tier floor per capability. Effective tier is the max of this and
+  # what the device declares (0 read, 1 act, 2 confirm on device, 3 + biometric).
+  capability_tiers: {}
+
 persona:
   # Persona Calibration — voice-tunable communication style.
   # Settings are stored in nora_persona.json and applied to every response.

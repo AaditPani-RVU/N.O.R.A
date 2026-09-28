@@ -162,16 +162,29 @@ async def run_plan(
     mem_ctx: dict[str, Any],
     listener: Any,
     max_steps: int = 15,
+    *,
+    speak: Any = None,
+    confirm: Any = None,
 ) -> list[StepResult]:
     """
     Execute a ReAct planning loop for an autonomous goal.
 
     Returns the list of StepResults from all executed actions.
     Pre-flight confirmation is solicited before the first act.
+
+    `speak` and `confirm` are the channel of the turn that asked
+    (`nora.channel`). Without them the plan talks through the local speaker
+    and listens on `listener` for a spoken yes, as it always has. With a
+    `speak` but no `confirm` — a channel that cannot ask its user — the plan
+    is refused at pre-flight rather than run unconfirmed.
     """
     import asyncio
     from nora import command_engine, context, speaker, transcriber
+    from nora.channel import ConfirmRequest
     from nora.config import get_config
+
+    remote = speak is not None
+    say = speak or speaker.speak
 
     max_steps = int(get_config().get("neurosym", {}).get("max_plan_steps", max_steps))
     history: list[dict[str, Any]] = []
@@ -220,18 +233,30 @@ async def run_plan(
         # 3. Pre-flight confirmation (once, before first action)
         if not preflight_done:
             summary = build_preflight_summary(goal, [{"action": action_name}])
-            speaker.speak(summary, mood="confirmation")
             preflight_done = True
-
-            audio = await listener.listen()
-            if audio is None:
-                speaker.speak("No response. Cancelling plan.")
-                break
-            voice_text = await loop.run_in_executor(None, transcriber.transcribe, audio)
-            if not any(w in voice_text.lower() for w in
-                       ["yes", "yeah", "yep", "sure", "go ahead", "confirm", "do it", "proceed"]):
-                speaker.speak("Plan cancelled.")
-                break
+            if remote:
+                if confirm is None:
+                    say("A multi-step plan needs confirming out loud, so I've left it. "
+                        "Ask me in the room.", mood="error")
+                    break
+                say(summary, mood="confirmation")
+                approved = await confirm(ConfirmRequest(
+                    turn_id="", rendered=summary,
+                    steps=[ActionStep(action=action_name, parameters=params)]))
+                if not approved:
+                    say("Plan cancelled.")
+                    break
+            else:
+                say(summary, mood="confirmation")
+                audio = await listener.listen()
+                if audio is None:
+                    say("No response. Cancelling plan.")
+                    break
+                voice_text = await loop.run_in_executor(None, transcriber.transcribe, audio)
+                if not any(w in voice_text.lower() for w in
+                           ["yes", "yeah", "yep", "sure", "go ahead", "confirm", "do it", "proceed"]):
+                    say("Plan cancelled.")
+                    break
 
         logger.info("Planner step %d: %s(%s) — %s", step_num, action_name, params, rationale)
 
@@ -277,7 +302,7 @@ async def run_plan(
                         break
 
             if not repaired and not result.success:
-                speaker.speak(
+                say(
                     f"Step {step_num} failed and I couldn't repair it: {result.message}",
                     mood="error",
                 )
@@ -294,7 +319,7 @@ async def run_plan(
 
         # Let user hear progress for long plans
         if step_num % 3 == 0:
-            speaker.speak(f"Step {step_num} done: {result.message}", mood="info")
+            say(f"Step {step_num} done: {result.message}", mood="info")
 
         # 6. Check done flag
         if _is_goal_complete(result, decide_resp):

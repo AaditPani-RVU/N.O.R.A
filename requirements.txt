@@ -25,6 +25,11 @@ Pillow>=10.0.0
 # Cognitive Memory System v2
 chromadb>=0.5.0
 sentence-transformers>=3.0.0
+# Remote surfaces: dashboard WebSocket API and the Device Hub (nora/hub/) —
+# device keys are P-256 (cryptography), capability params are JSON Schema.
+websockets>=16.0
+cryptography>=48.0
+jsonschema>=4.26
 # NeuroSym-AI: neuro-symbolic guardrails (input injection + action policy)
 neurosym-ai>=0.2.0
 # Sprint 1 — Wakeword detection (optional; only needed if wakeword.enabled: true)
