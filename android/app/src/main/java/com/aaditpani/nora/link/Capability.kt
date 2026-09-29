@@ -17,6 +17,12 @@ interface Capability {
     val tier: Int
     val paramsSchema: JSONObject
     val requiresLiveUser: Boolean get() = false
+    /**
+     * Its result carries text someone other than the user wrote (a
+     * notification). The core summarises it without tools, doesn't keep it,
+     * and asks before acting on anything decided after reading it (plan §7.5).
+     */
+    val untrustedOutput: Boolean get() = false
 
     suspend fun execute(params: JSONObject): CapabilityResult
 }
@@ -39,6 +45,7 @@ fun Capability.manifestEntry(): JSONObject = JSONObject()
     .put("params_schema", paramsSchema)
     .put("tier", tier)
     .put("requires_live_user", requiresLiveUser)
+    .put("untrusted_output", untrustedOutput)
     .put("available", true)
 
 /**

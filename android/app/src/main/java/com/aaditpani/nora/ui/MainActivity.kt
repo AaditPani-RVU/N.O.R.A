@@ -64,6 +64,7 @@ import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
 import com.aaditpani.nora.phone.LinkController
 import com.aaditpani.nora.phone.LinkService
+import com.aaditpani.nora.phone.NoraNotificationListener
 import com.aaditpani.nora.phone.Notifications
 import com.aaditpani.nora.phone.controller
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -188,11 +189,19 @@ private fun StatusTab(c: LinkController) {
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     var notifGranted by remember { mutableStateOf(false) }
     var batteryExempt by remember { mutableStateOf(false) }
+    var listenerGranted by remember { mutableStateOf(false) }
+    var locationGranted by remember { mutableStateOf(false) }
+    val hiddenApps by c.hiddenNoteApps.collectAsState()
+    var seenApps by remember { mutableStateOf(emptyMap<String, String>()) }
     LaunchedEffect(now / 5000) {
         notifGranted = ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         batteryExempt = ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
+        listenerGranted = NoraNotificationListener.hasAccess(ctx)
+        locationGranted = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        seenApps = NoraNotificationListener.seenApps()
     }
     LaunchedEffect(Unit) { if (!notifGranted) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
 
@@ -252,6 +261,34 @@ private fun StatusTab(c: LinkController) {
             @SuppressLint("BatteryLife")
             val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
             ctx.startActivity(i)
+        }
+        SettingRow("Read notifications and control media", listenerGranted, "Allow") {
+            ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                    NoraNotificationListener.component(ctx).flattenToString()))
+        }
+        SettingRow("Location, when you ask", locationGranted, "Allow") {
+            locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+        Text("Opening apps, links, Maps and the clock only works while this app is on screen; " +
+            "otherwise NORA leaves a notification to tap. Android's rule, not NORA's.",
+            style = MaterialTheme.typography.bodySmall)
+
+        if (listenerGranted) {
+            HorizontalDivider()
+            Text("Notifications NORA can read", style = MaterialTheme.typography.titleMedium)
+            Text("Read only when you ask, kept in memory for a day, never saved. Switch an app off " +
+                "and NORA never sees its notifications.", style = MaterialTheme.typography.bodySmall)
+            val apps = (seenApps + hiddenApps.filter { it !in seenApps }.associateWith { it })
+                .entries.sortedBy { it.value.lowercase() }
+            if (apps.isEmpty()) Text("No notifications seen yet.", style = MaterialTheme.typography.bodySmall)
+            for ((pkg, label) in apps) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, Modifier.weight(1f))
+                    Switch(checked = pkg !in hiddenApps, onCheckedChange = { c.setNoteAppHidden(pkg, !it) })
+                }
+            }
         }
 
         HorizontalDivider()

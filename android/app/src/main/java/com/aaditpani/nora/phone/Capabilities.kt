@@ -16,8 +16,16 @@ import com.aaditpani.nora.link.ErrorCode
 import org.json.JSONObject
 
 /** Everything compiled into this build. The user can switch each one off. */
-fun allCapabilities(context: Context): List<Capability> =
-    listOf(DeviceStatus(context.applicationContext), PhoneNotify(context.applicationContext))
+fun allCapabilities(context: Context, prefs: LinkPrefs): List<Capability> {
+    val app = context.applicationContext
+    return listOf(
+        DeviceStatus(app), PhoneNotify(app),
+        // Phase 4
+        OpenApp(app), OpenUrl(app), PlayMedia(app), MediaControl(app), Volume(app),
+        ReadNotifications(app) { prefs.hiddenNoteApps }, GetLocation(app), Navigate(app),
+        SetAlarm(app), SetTimer(app), Dial(app),
+    )
+}
 
 /** Battery, network and ringer. Tier 0: it reads, it doesn't act. */
 class DeviceStatus(private val context: Context) : Capability {

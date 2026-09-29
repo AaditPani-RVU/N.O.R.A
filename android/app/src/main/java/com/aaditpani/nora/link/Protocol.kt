@@ -98,6 +98,8 @@ object ErrorCode {
     const val CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
     const val POLICY_BLOCKED = "POLICY_BLOCKED"
     const val USER_DECLINED = "USER_DECLINED"
+    /** Android wouldn't let it happen from the background; the message says what was done instead. */
+    const val BACKGROUND_RESTRICTED = "BACKGROUND_RESTRICTED"
     const val EXPIRED = "EXPIRED"
     const val EXECUTION_FAILED = "EXECUTION_FAILED"
 }

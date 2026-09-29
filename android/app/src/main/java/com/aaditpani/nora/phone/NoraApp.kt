@@ -30,6 +30,7 @@ class NoraApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Notifications.createChannels(this)
+        registerActivityLifecycleCallbacks(Foreground)
         controller = LinkController(this)
     }
 }
@@ -45,7 +46,7 @@ class LinkController(private val app: Context) {
     val prefs = LinkPrefs(app)
     val db = PhoneDb(app)
     val signer = KeystoreSigner()
-    val capabilities: List<Capability> = allCapabilities(app)
+    val capabilities: List<Capability> = allCapabilities(app, prefs)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var link: DeviceLink? = null
@@ -57,6 +58,8 @@ class LinkController(private val app: Context) {
     val killed: StateFlow<Boolean> = _killed
     private val _disabled = MutableStateFlow(prefs.disabled)
     val disabled: StateFlow<Set<String>> = _disabled
+    private val _hiddenNoteApps = MutableStateFlow(prefs.hiddenNoteApps)
+    val hiddenNoteApps: StateFlow<Set<String>> = _hiddenNoteApps
     private val _paired = MutableStateFlow(prefs.deviceId != null && signer.hasKey())
     val paired: StateFlow<Boolean> = _paired
     /** Bumped on every audit row, so the audit screen re-reads. */
@@ -113,6 +116,12 @@ class LinkController(private val app: Context) {
         link?.refreshManifest()
     }
 
+    fun setNoteAppHidden(pkg: String, hidden: Boolean) {
+        val next = if (hidden) _hiddenNoteApps.value + pkg else _hiddenNoteApps.value - pkg
+        prefs.hiddenNoteApps = next
+        _hiddenNoteApps.value = next
+    }
+
     fun emitStatus() {
         link?.emitEvent("device.status", DeviceStatus.read(app))
     }
@@ -139,6 +148,8 @@ class LinkController(private val app: Context) {
         db.clear()
         _killed.value = false
         _disabled.value = emptySet()
+        _hiddenNoteApps.value = emptySet()
+        NoraNotificationListener.clear()
         _paired.value = false
     }
 

@@ -103,6 +103,10 @@ class LinkPrefs(context: Context) {
     var disabled: Set<String>
         get() = prefs.getStringSet("disabled", emptySet())!!.toSet()
         set(v) = prefs.edit().putStringSet("disabled", v).apply()
+    /** Apps whose notifications NORA may not read. Off-list: the phone's own choice, per app. */
+    var hiddenNoteApps: Set<String>
+        get() = prefs.getStringSet("hidden_note_apps", emptySet())!!.toSet()
+        set(v) = prefs.edit().putStringSet("hidden_note_apps", v).apply()
 
     fun clear() = prefs.edit().clear().apply()
 }

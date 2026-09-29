@@ -268,13 +268,19 @@ class DeviceLink(
         sock.send("result", reply, corr = id)
 
         val ok = reply.optBoolean("success")
+        val result = reply.optJSONObject("result")
+        // Notification text is read back, not kept: not in the core's logs, and
+        // not in this one either.
+        val kept = if (ok && caps[name]?.untrustedOutput == true)
+            "${result?.optJSONArray("items")?.length() ?: 0} item(s) read; text not kept"
+        else if (ok) result?.optString("message").orEmpty()
+        else reply.getJSONObject("error").optString("message")
         audit.record(AuditEntry(
             ts = started, invocationId = id, capability = name,
             params = (body.optJSONObject("params") ?: JSONObject()).toString(),
             origin = body.optString("origin"), tier = body.optInt("tier", -1),
             outcome = if (ok) "ok" else reply.getJSONObject("error").getString("code"),
-            message = if (ok) reply.getJSONObject("result").optString("message")
-            else reply.getJSONObject("error").optString("message"),
+            message = kept,
             durationMs = System.currentTimeMillis() - started))
     }
 

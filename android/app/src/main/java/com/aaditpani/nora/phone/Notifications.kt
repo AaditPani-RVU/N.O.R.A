@@ -68,6 +68,26 @@ object Notifications {
         context.getSystemService(NotificationManager::class.java).notify(nextId.getAndIncrement(), n)
     }
 
+    /**
+     * Something NORA was asked to open but Android wouldn't let it start from
+     * the background: one tap opens it (a tap is the user starting it).
+     */
+    fun tapToOpen(context: Context, title: String, body: String, target: Intent) {
+        if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val id = nextId.getAndIncrement()
+        val pending = PendingIntent.getActivity(context, id, target,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = Notification.Builder(context, MESSAGE_CHANNEL)
+            .setSmallIcon(R.drawable.ic_nora)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setAutoCancel(true)
+            .setTimeoutAfter(10 * 60 * 1000L)
+            .setContentIntent(pending)
+            .build()
+        context.getSystemService(NotificationManager::class.java).notify(id, n)
+    }
+
     fun describe(state: LinkState): String = when (state) {
         is LinkState.Connected -> "Connected to the core"
         LinkState.Connecting -> "Connecting…"
