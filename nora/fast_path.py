@@ -91,6 +91,44 @@ def _device_offers(action: str) -> bool:
     return meta is not None and bool(meta.device)
 
 
+def _from_phone(action: str) -> bool:
+    """True when this turn came from the device that offers `action` — "play
+    X" said to the phone means the phone, not the laptop in another room."""
+    from nora import channel, command_engine
+    ch = channel.current()
+    meta = command_engine.get_action_meta(action)
+    return (ch is not None and meta is not None and bool(meta.device)
+            and meta.device == ch.device_id)
+
+
+_NO_PHONE = "Your phone isn't connected right now."
+
+
+def _on_phone(action: str, intent: IntentResponse) -> IntentResponse:
+    """The request named the phone: its capability, or say it isn't there —
+    never quietly run the laptop's command of the same name instead."""
+    return intent if _device_offers(action) else _chat(_NO_PHONE)
+
+
+def _media_query(raw: str) -> dict:
+    """"my workout playlist" → {query: "workout", kind: "playlist"}."""
+    q = re.sub(r"\s+", " ", raw.strip())
+    kind = "any"
+    for pattern, k in (
+        (r"^(?:my\s+|the\s+)?(.+?)\s+playlist$", "playlist"),
+        (r"^(?:my\s+|the\s+)?playlist\s+(.+)$", "playlist"),
+        (r"^(?:the\s+)?album\s+(.+)$", "album"),
+        (r"^(?:something|anything|songs|music|stuff)\s+by\s+(.+)$", "artist"),
+        (r"^(?:the\s+)?(?:song|track)\s+(.+)$", "track"),
+    ):
+        m = re.match(pattern, q, re.I)
+        if m:
+            q, kind = m.group(1), k
+            break
+    q = re.sub(r"^(?:my|some|the)\s+", "", q, flags=re.I).strip()
+    return {"query": q[:100], "kind": kind}
+
+
 # ── Rule table ─────────────────────────────────────────────────────────────────
 
 _RULES: list[tuple[re.Pattern, object]] = []
@@ -102,8 +140,154 @@ def _rule(pattern: str, fn):
     _RULES.append((re.compile("^(?:" + pattern + ")$", re.I), fn))
 
 
+def _phone_rules() -> None:
+    """Requests for the paired phone (Phase 4). First in the table: "play X on
+    my phone" must not reach the laptop's "play X", and "open Spotify and play
+    …" must not become open_app("spotify and play …")."""
+    phone = r"(?:on|from|using)\s+(?:my|the)\s+(?:phone|mobile|pixel)"
+
+    # "open Spotify (on my phone) and play my workout playlist". The phone's
+    # media session does the searching, so the user's own private playlists
+    # are found, which the core's app-token search cannot see.
+    _rule(
+        r"(?:open|launch|start)\s+(?:up\s+)?spotify(?:\s+" + phone + r")?\s+and\s+play\s+(?P<q>.+?)"
+        r"(?:\s+" + phone + r")?",
+        lambda m: (_on_phone("phone.play_media", _intent(
+            "play on phone", "phone.play_media", {**_media_query(m.group("q")), "app": "spotify"}))
+            if re.search(phone, m.group(0), re.I) or _from_phone("phone.play_media")
+            or _yours(m.group("q")) else None),
+    )
+    # "play my workout playlist": the user's own playlists are private, which
+    # the core's search cannot see and the phone's Spotify can.
+    _rule(
+        r"play\s+(?P<q>my\s+.+?\s+playlist|my\s+playlist\s+.+)",
+        lambda m: (_intent("play on phone", "phone.play_media",
+                           {**_media_query(m.group("q")), "app": "spotify"})
+                   if _yours(m.group("q")) else None),
+    )
+    _rule(
+        r"play\s+(?P<q>.+?)\s+(?:on\s+spotify\s+)?" + phone + r"(?:\s+on\s+spotify)?",
+        lambda m: _on_phone("phone.play_media", _intent(
+            "play on phone", "phone.play_media", {**_media_query(m.group("q")), "app": "spotify"})),
+    )
+    _rule(
+        r"(?:open(?:\s+up)?|launch|start)\s+(?P<app>.+?)\s+" + phone,
+        lambda m: _on_phone("phone.open_app", _intent(
+            "open app on phone", "phone.open_app", {"app": _clean_name(m.group("app"))})),
+    )
+    _media_verbs = {"pause": "pause", "resume": "play", "unpause": "play", "play": "play",
+                    "stop": "stop", "skip": "next", "next": "next", "previous": "previous"}
+    _rule(
+        r"(?P<verb>pause|resume|unpause|stop|skip|next|previous)"
+        r"(?:\s+(?:the\s+)?(?:music|song|track|playback|this))?\s+" + phone,
+        lambda m: _on_phone("phone.media_control", _intent(
+            "phone media", "phone.media_control",
+            {"action": _media_verbs[m.group("verb").lower()]})),
+    )
+    _rule(
+        r"(?:set\s+)?(?:the\s+)?(?:(?:my\s+)?phone(?:'?s)?\s+volume|volume\s+" + phone + r")"
+        r"\s+(?:to\s+)?(?P<n>\d{1,3})\s*(?:%|percent)?"
+        r"|(?:set\s+)?(?:the\s+)?volume\s+(?:to\s+)?(?P<n2>\d{1,3})\s*(?:%|percent)?\s+" + phone,
+        lambda m: _on_phone("phone.volume", _intent(
+            "phone volume", "phone.volume",
+            {"action": "set", "level": min(100, int(m.group("n") or m.group("n2")))})),
+    )
+    _rule(
+        r"(?:turn\s+)?(?:the\s+)?(?:(?:my\s+)?phone(?:'?s)?\s+)?volume\s+(?P<d>up|down)\s*(?:" + phone + r")?"
+        r"|turn\s+(?:up|down)\s+(?:the\s+)?volume\s+" + phone
+        + r"|turn\s+(?:my\s+)?phone\s+(?P<d2>up|down)",
+        lambda m: (_on_phone("phone.volume", _intent(
+            "phone volume", "phone.volume",
+            {"action": (m.group("d") or m.group("d2")
+                        or ("up" if " up " in f" {m.group(0).lower()} " else "down")).lower()}))
+            if "phone" in m.group(0).lower() or _from_phone("phone.volume") else None),
+    )
+
+    # Spec example 2. Only the phone has notifications NORA can read.
+    _rule(
+        r"(?:what(?:'?s|\s+is|\s+are)?\s+(?:on\s+|in\s+)?my\s+notifications"
+        r"|(?:read|show|tell)\s+(?:me\s+)?my\s+notifications"
+        r"|(?:check|go\s+through)\s+my\s+notifications"
+        r"|(?:do\s+i\s+have|did\s+i\s+get|are\s+there|got)\s+any\s+(?:new\s+)?(?:notifications|messages)"
+        r"|any\s+(?:new\s+)?notifications"
+        r"|did\s+i\s+(?:get|miss)\s+anything(?:\s+important)?"
+        r"|anything\s+important(?:\s+on\s+my\s+phone)?"
+        r"|what\s+did\s+i\s+miss)"
+        r"(?:\s+" + phone + r"|\s+today|\s+lately|\s+recently)?",
+        lambda m: _on_phone("phone.read_notifications", _intent(
+            "read phone notifications", "phone.read_notifications", {})),
+    )
+
+    _rule(
+        r"where\s+am\s+i(?:\s+right\s+now)?|what(?:'?s|\s+is)\s+my\s+(?:current\s+)?location"
+        r"|where(?:'?s|\s+is)\s+my\s+phone",
+        lambda m: _on_phone("phone.get_location", _intent(
+            "phone location", "phone.get_location", {})),
+    )
+
+    # Spec example 4: "I'm going home".
+    how = r"(?:\s+(?P<how>by\s+car|on\s+foot|by\s+bike|by\s+metro|by\s+bus|walking|driving|cycling))?"
+    _rule(
+        r"(?:i'?m|i\s+am)\s+(?:going|heading|off|leaving|driving|walking|cycling)\s+(?:back\s+)?(?:to\s+)?"
+        r"(?P<place>home|college|work|the\s+office|uni(?:versity)?)" + how + r"(?:\s+now)?"
+        r"|(?:take\s+me|get\s+me|navigate(?:\s+me)?|directions|drive\s+me|route\s+me)\s+(?:back\s+)?(?:to\s+)?"
+        r"(?P<place2>home|college|work|the\s+office|uni(?:versity)?)" + how.replace("how>", "how2>"),
+        lambda m: _intent("navigate", "navigate_to", {
+            "destination": m.group("place") or m.group("place2"),
+            "mode": _travel_mode(m.group(0), m.group("how") or m.group("how2") or ""),
+        }),
+    )
+    _rule(
+        r"(?:navigate(?:\s+me)?|take\s+me|directions|give\s+me\s+directions|get\s+me\s+directions)"
+        r"\s+to\s+(?P<dest>.{2,100}?)" + how,
+        lambda m: _intent("navigate", "navigate_to", {
+            "destination": _clean_name(m.group("dest")),
+            "mode": _travel_mode(m.group(0), m.group("how") or ""),
+        }),
+    )
+
+    # Said to the phone, a bare "play X" / "open X" / "pause" means the phone.
+    _rule(
+        r"play\s+(?P<q>.{2,100})",
+        lambda m: (_intent("play on phone", "phone.play_media",
+                           {**_media_query(m.group("q")), "app": "spotify"})
+                   if _from_phone("phone.play_media") else None),
+    )
+    _rule(
+        r"(?:open(?:\s+up)?|launch|start)\s+(?P<app>.+)",
+        lambda m: (_intent("open app on phone", "phone.open_app",
+                           {"app": _clean_name(m.group("app"))})
+                   if _from_phone("phone.open_app") and " and " not in m.group("app") else None),
+    )
+    _rule(
+        r"(?P<verb>pause|resume|unpause|skip|next|previous)(?:\s+(?:the\s+)?(?:music|song|track|this))?",
+        lambda m: (_intent("phone media", "phone.media_control",
+                           {"action": _media_verbs[m.group("verb").lower()]})
+                   if _from_phone("phone.media_control") else None),
+    )
+
+
+def _yours(query: str) -> bool:
+    """"my X playlist" while a phone that can play it is connected."""
+    return (bool(re.match(r"my\s", query.strip(), re.I))
+            and "playlist" in query.lower() and _device_offers("phone.play_media"))
+
+
+def _travel_mode(text: str, how: str) -> str:
+    t = f"{text} {how}".lower()
+    if "walk" in t or "on foot" in t:
+        return "walking"
+    if "bike" in t or "cycl" in t:
+        return "bicycling"
+    if "metro" in t or "bus" in t:
+        return "transit"
+    return "driving"
+
+
 def _build_rules() -> None:
     global _BUILT
+
+    _phone_rules()
 
     # ─── Music: no-arg commands ───────────────────────────────────────────
     _rule(
@@ -285,13 +469,15 @@ def _build_rules() -> None:
     )
 
     # ─── App open / close ─────────────────────────────────────────────────
+    # "open X and play Y" is two steps: the planner splits it, so it is not
+    # fast-pathed into open_app("x and play y").
     _rule(
         r"(?:open(?:\s+up)?|launch|start)\s+(.+)",
-        lambda m: _intent(
+        lambda m: (None if re.search(r"\s(?:and|then)\s", m.group(1), re.I) else _intent(
             f"open {_clean_name(m.group(1))}",
             "open_app",
             {"name": _clean_name(m.group(1))},
-        ),
+        )),
     )
     _rule(
         r"(?:close|quit|exit|kill)\s+(.+)",

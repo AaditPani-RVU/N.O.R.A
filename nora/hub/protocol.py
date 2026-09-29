@@ -208,6 +208,9 @@ def check_manifest_entry(entry: Any) -> dict:
         "tier": tier,
         "requires_live_user": bool(entry.get("requires_live_user", False)),
         "available": bool(entry.get("available", True)),
+        # Its output is written by someone other than the user (a notification,
+        # a message): data to report, never instructions to follow (plan §7.5).
+        "untrusted_output": bool(entry.get("untrusted_output", False)),
     }
 
 

@@ -26,3 +26,5 @@ class StepResult(BaseModel):
     message: str = ""
     withheld: bool = False   # deliberately not run (e.g. guest mode) — not a failure
     error_code: str = ""     # device protocol error code (nora.hub.protocol), when one applies
+    untrusted: bool = False  # message carries third-party text (notifications): report it, never act on it
+    data: dict[str, Any] = {}  # a device's structured result, for core commands that build on it

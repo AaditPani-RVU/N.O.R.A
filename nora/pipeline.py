@@ -10,6 +10,7 @@ import numpy as np
 from nora import ambient, audit_log, autonomy, cognitive_memory, command_engine, confidence, consent_memory, context, conversation, dialogue, focus, intent_parser, memory, neurosym_guard, phrasing, post_action_cards, proactive, reversible, risk, security, session_briefing, speaker, text_input, tool_trust, transcriber
 from nora import channel as _channel
 from nora import delivery
+from nora import untrusted
 from nora import wiring
 from nora.channel import Channel, ConfirmRequest
 from nora.config import get_config
@@ -90,6 +91,31 @@ def summarize_results(results: list[StepResult]) -> str:
         else:
             messages.append(f"Failed: {r.message or 'unknown error'}")
     return ". ".join(messages) if messages else "Done."
+
+
+async def _respond(text: str, results: list[StepResult], speak) -> str:
+    """Speak the summary of a turn's results, and return it.
+
+    Untrusted results (notifications) are summarised by a model that cannot
+    act, and spoken inside `dialogue.private()` so their text stays out of
+    the transcript; see `nora.untrusted`.
+    """
+    from nora import ui_server
+
+    private = untrusted.any_untrusted(results)
+    if private:
+        ui_server.notify_stage("thinking")
+        results = await untrusted.for_speech(text, results)
+    summary = summarize_results(results)
+    if summary:
+        ui_server.notify_stage("speaking")
+        mood = "info" if all(r.success for r in results) else "error"
+        if private:
+            with dialogue.private():
+                speak(summary, mood=mood)
+        else:
+            speak(summary, mood=mood)
+    return summary
 
 
 def is_wake_phrase(text: str) -> bool:
@@ -461,10 +487,7 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
             results = await deps.run_plan(text, mem_ctx, speak=speak,
                                           confirm=channel.confirm)
         context.wake_triggered = False
-        summary = summarize_results(results)
-        if summary:
-            ui_server.notify_stage("speaking")
-            speak(summary, mood="info" if all(r.success for r in results) else "error")
+        summary = await _respond(text, results, speak)
         ui_server.notify_stage("idle")
         return TurnOutcome(kind="executed", text=text, intent=intent.intent, actions=_actions(intent), results=results, reply=summary, source="react_planner")
 
@@ -537,19 +560,19 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
         return TurnOutcome(kind="cancelled", text=text, stage="interrupted", intent=intent.intent, actions=_actions(intent))
 
     # 6. Respond
-    summary = summarize_results(results)
-    all_ok_early = all(r.success for r in results) if results else True
-    if summary:
-        ui_server.notify_stage("speaking")
-        speak(summary, mood="info" if all_ok_early else "error")
+    summary = await _respond(text, results, speak)
     ui_server.notify_stage("idle")
+
+    # From here on, what is kept: third-party text (the phone's notifications)
+    # was said, not remembered.
+    kept = untrusted.for_memory(results)
 
     # Record turn to session context buffer
     context.add_session_turn(
         text=text,
         intent=intent.intent,
         actions=[s.action for s in intent.steps],
-        result_summary=summary,
+        result_summary=summarize_results(kept) if untrusted.any_untrusted(results) else summary,
         success=all(r.success for r in results) if results else True,
     )
 
@@ -562,7 +585,7 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
 
     # Record full episode to cognitive memory (semantic + episodic)
     outcomes = [{"action": r.action, "success": r.success, "message": r.message}
-                for r in results]
+                for r in kept]
     active_apps = context.active_apps()
     cognitive_memory.record_episode(
         text=text,

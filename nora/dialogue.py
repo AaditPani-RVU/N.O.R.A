@@ -24,6 +24,8 @@ Dialogue-act classifier
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 import re
 import threading
@@ -90,6 +92,25 @@ def record_user(text: str, kind: str = "chat") -> None:
     _index(text, "user", kind)
 
 
+_private: contextvars.ContextVar[bool] = contextvars.ContextVar("nora_private_speech", default=False)
+
+PRIVATE_PLACEHOLDER = "(I read out the phone's notifications; their text isn't kept.)"
+
+
+@contextlib.contextmanager
+def private():
+    """Speech inside this block is third-party text read aloud — a summary of
+    the phone's notifications. It is said, not remembered: the transcript and
+    the session index get a placeholder instead (plan §7.9), which also keeps
+    it out of every later turn's prompt, where it could pose as instructions.
+    """
+    token = _private.set(True)
+    try:
+        yield
+    finally:
+        _private.reset(token)
+
+
 def record_nora(text: str, kind: str = "chat") -> None:
     """Append something NORA said.
 
@@ -99,6 +120,8 @@ def record_nora(text: str, kind: str = "chat") -> None:
     """
     if not text or not text.strip():
         return
+    if _private.get():
+        text = PRIVATE_PLACEHOLDER
     with _lock:
         _turns.append(Utterance(speaker="nora", text=text.strip(), kind=kind))
     _index(text, "nora", kind)

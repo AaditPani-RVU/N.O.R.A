@@ -273,7 +273,7 @@ class Hub:
             command_engine.register_device_capability(
                 name, self._proxy(session.device_id, name), device=session.device_id,
                 sig=protocol.signature_hint(entry), description=desc,
-                risk=_TIER_RISK.get(tier, "high"))
+                risk=_TIER_RISK.get(tier, "high"), tier=tier)
 
     def _sink(self, session: Session):
         def send(text: str, kind: str) -> bool:
@@ -420,6 +420,13 @@ class Hub:
             tier += 1
         return tier
 
+    @staticmethod
+    def _untrusted(name: str, entry: dict) -> bool:
+        """The device's word, or the core's list: either can mark a
+        capability's output untrusted, neither can clear the other's mark."""
+        listed = _cfg().get("untrusted_capabilities") or []
+        return bool(entry.get("untrusted_output")) or name in listed
+
     def _proxy(self, device_id: str, capability: str):
         hub = self
 
@@ -452,8 +459,11 @@ class Hub:
 
         def fail(code: str, message: str) -> StepResult:
             # A refusal is policy, not the capability misbehaving: withheld,
-            # so the trust ledger does not count it against the tool.
-            refused = code in (protocol.POLICY_BLOCKED, protocol.USER_DECLINED)
+            # so the trust ledger does not count it against the tool. The
+            # phone refusing to act from the background is the OS's policy,
+            # and the device has already said what it did instead.
+            refused = code in (protocol.POLICY_BLOCKED, protocol.USER_DECLINED,
+                               protocol.BACKGROUND_RESTRICTED)
             return StepResult(action=capability, success=False, message=message,
                               error_code=code, withheld=refused)
 
@@ -518,10 +528,15 @@ class Hub:
 
         if reply.get("success") is True:
             result = reply.get("result") or {}
-            self._finish(inv_id, "ok", result, None)
+            untrusted = self._untrusted(capability, entry)
+            # Third-party text (notifications) is answered from, not kept:
+            # the invocation row records that it ran and how much came back.
+            self._finish(inv_id, "ok", _redacted(result) if untrusted else result, None)
             message = result.get("message") if isinstance(result, dict) else None
-            return StepResult(action=capability, success=True,
-                              message=str(message or json.dumps(result, ensure_ascii=False))[:500])
+            limit = 4000 if untrusted else 500
+            return StepResult(action=capability, success=True, untrusted=untrusted,
+                              message=str(message or json.dumps(result, ensure_ascii=False))[:limit],
+                              data=result if isinstance(result, dict) else {})
         err = reply.get("error") or {}
         code = str(err.get("code") or protocol.EXECUTION_FAILED)
         self._finish(inv_id, "error", None, code)
@@ -565,11 +580,32 @@ class Hub:
                  error_code, time.time(), inv_id))
 
 
+def _redacted(result) -> dict:
+    count = None
+    if isinstance(result, dict):
+        items = result.get("items")
+        count = len(items) if isinstance(items, list) else result.get("count")
+    return {"redacted": True, "count": count}
+
+
 _hub: Hub | None = None
 
 
 def get() -> Hub | None:
     return _hub
+
+
+async def call_capability(name: str, params: dict | None = None) -> StepResult:
+    """Run `name` on whichever connected device offers it, on behalf of the
+    turn in progress — for core commands that need the phone for one part of
+    a job (where it is, before routing there). Same policy path as the LLM
+    calling it directly: tiers, origin, validation, the invocation log.
+    """
+    meta = command_engine.get_action_meta(name)
+    if _hub is None or meta is None or not meta.device:
+        return StepResult(action=name, success=False, error_code=protocol.DEVICE_OFFLINE,
+                          message="Your phone isn't connected right now.")
+    return await _hub.call(meta.device, name, params or {}, channel=_channel.current())
 
 
 def start() -> int | None:

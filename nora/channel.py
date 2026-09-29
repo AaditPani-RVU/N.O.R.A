@@ -55,6 +55,10 @@ class Channel:
     turn_id: str = field(default_factory=lambda: "t_" + uuid.uuid4().hex[:10])
     # Set by the turn once this channel's user approves; read by the audit log.
     confirmed_by: str = ""
+    # Set once a step returns text someone other than the user wrote (a phone
+    # notification). Every action decided after that point needs this
+    # channel's yes (plan §7.5): see `command_engine.execute`.
+    tainted: bool = False
 
     @property
     def can_confirm(self) -> bool:

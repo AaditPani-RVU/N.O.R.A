@@ -128,6 +128,16 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX invocations_device ON invocations(device_id, created_at);
     """,
+    # 3 — places the user has named: "home", "college" (Phase 4)
+    """
+    CREATE TABLE places (
+        name        TEXT PRIMARY KEY,       -- lower-case: "home", "college"
+        address     TEXT NOT NULL DEFAULT '',
+        lat         REAL,
+        lon         REAL,
+        updated_at  REAL NOT NULL
+    );
+    """,
 ]
 
 _local = threading.local()

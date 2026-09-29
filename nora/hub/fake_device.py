@@ -59,7 +59,8 @@ class FakeDevice:
     def __init__(self, url: str, *, name: str = "fake", key: ec.EllipticCurvePrivateKey | None = None,
                  device_id: str | None = None,
                  approve: Callable[[dict], bool] = lambda _req: True,
-                 capabilities: list[dict] | None = None) -> None:
+                 capabilities: list[dict] | None = None,
+                 replies: dict[str, Callable[[dict], dict]] | None = None) -> None:
         self.url = url
         self.name = name
         self.key = key or ec.generate_private_key(ec.SECP256R1())
@@ -68,6 +69,9 @@ class FakeDevice:
         self.capabilities = capabilities if capabilities is not None else CAPABILITIES
         self.tiers = {c["name"]: c["tier"] for c in self.capabilities}
         self.live_only = {c["name"] for c in self.capabilities if c.get("requires_live_user")}
+        # capability -> params -> reply body ({"success": …, "result"/"error": …}),
+        # for tests that need a capability to answer like the phone's would.
+        self.replies = replies or {}
         self.killed = False
 
         self.ws = None
@@ -235,6 +239,9 @@ class FakeDevice:
         return steps is not None and step in steps
 
     def _execute(self, cap: str, params: dict[str, Any]) -> dict:
+        if cap in self.replies:
+            return {"device": self.device_id, "action": cap, "duration_ms": 1,
+                    **self.replies[cap](params)}
         if cap == "test.echo":
             result = {"message": f"echo: {params.get('text', '')}"}
         elif cap == "test.secret":

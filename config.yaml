@@ -847,6 +847,17 @@ hub:
   # Core-side tier floor per capability. Effective tier is the max of this and
   # what the device declares (0 read, 1 act, 2 confirm on device, 3 + biometric).
   capability_tiers: {}
+  # Capabilities whose output other people wrote (plan §7.5). The core marks
+  # these untrusted whatever the device says: summarised by a model with no
+  # tools, never stored, and anything decided after reading them needs a yes.
+  untrusted_capabilities:
+    - phone.read_notifications
+
+places:
+  # "I'm going home": saved places live in the core store (nora/places.py).
+  # Free, keyless OpenStreetMap services; OSRM has no traffic data.
+  geocoder_url: "https://nominatim.openstreetmap.org/search"
+  router_url: "https://routing.openstreetmap.de"
 
 persona:
   # Persona Calibration — voice-tunable communication style.
