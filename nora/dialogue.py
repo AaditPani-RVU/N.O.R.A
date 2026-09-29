@@ -313,6 +313,14 @@ _LOOKUP_SIGNALS = (
     r"\bbattery\b", r"\bdisk\s+space\b", r"\b(?:cpu|gpu)\s+temp(?:erature)?\b",
     r"\b(?:cpu|ram|memory)\s+usage\b", r"\bhow\s+much\s+(?:ram|memory|disk)\b",
     r"\buptime\b",
+    # A paired phone's state (device.status). The chat model has no way to
+    # know it: asked "how much charge does my phone have", it answered "57
+    # percent" without ever asking the phone. "battery" above catches the
+    # obvious phrasing; these catch the rest.
+    r"\bhow\s+much\s+(?:charge|juice)\b", r"\bcharge\s+(?:level|left)\b",
+    r"\b(?:phone|laptop)\s+(?:is\s+|still\s+)?(?:charged|charging|plugged\s+in)\b",
+    r"\bphone\s+(?:on|in)\s+(?:silent|vibrate|do\s+not\s+disturb|dnd)\b",
+    r"\bphone'?s?\s+(?:ringer|signal|network|status)\b",
 )
 _LOOKUP_RE = re.compile("|".join(_LOOKUP_SIGNALS), re.I)
 

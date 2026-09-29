@@ -30,6 +30,8 @@ sentence-transformers>=3.0.0
 websockets>=16.0
 cryptography>=48.0
 jsonschema>=4.26
+# Pairing QR in the terminal (python -m nora.hub pair). Pure Python, no deps.
+segno>=1.6
 # NeuroSym-AI: neuro-symbolic guardrails (input injection + action policy)
 neurosym-ai>=0.2.0
 # Sprint 1 — Wakeword detection (optional; only needed if wakeword.enabled: true)

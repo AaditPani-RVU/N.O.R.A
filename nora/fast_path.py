@@ -82,6 +82,13 @@ def _clean_name(raw: str) -> str:
     return re.sub(r"^(?:the|a|an)\s+", "", raw.strip(), flags=re.I).strip()
 
 
+def _device_offers(action: str) -> bool:
+    """True while a connected device has registered `action`."""
+    from nora import command_engine
+    meta = command_engine.get_action_meta(action)
+    return meta is not None and bool(meta.device)
+
+
 # ── Rule table ─────────────────────────────────────────────────────────────────
 
 _RULES: list[tuple[re.Pattern, object]] = []
@@ -257,6 +264,22 @@ def _build_rules() -> None:
         r"|how(?:'s| is)\s+(?:the\s+)?(?:system|cpu|ram|memory)"
         r"|cpu\s+(?:usage|stats?)|ram\s+(?:usage|stats?)|resource\s+usage)",
         lambda m: _intent("get system info", "get_system_info", {}),
+    )
+
+    # ─── The paired phone's state ─────────────────────────────────────────
+    # A question about the phone's battery, charge or ringer, asked in any
+    # order ("what's my phone battery looking like", "how much charge does my
+    # phone have"). Deterministic because the model, shown both commands,
+    # answered with get_system_info and read out the *laptop's* battery.
+    # Only while a phone offering device.status is connected; otherwise the
+    # rule steps aside and the model says the phone isn't there.
+    _q = r"(?:what|how|is|does|has|did|check|tell\s+me|give\s+me)\b"
+    _thing = r"(?:battery|charge|charged|charging|plugged\s+in|silent|vibrate|ringer)"
+    _rule(
+        _q + r".*\bphone(?:'?s)?\b.*\b" + _thing + r"\b.*"
+        + r"|" + _q + r".*\b" + _thing + r"\b.*\bphone\b.*",
+        lambda m: (_intent("phone status", "device.status", {})
+                   if _device_offers("device.status") else None),
     )
 
     # ─── App open / close ─────────────────────────────────────────────────

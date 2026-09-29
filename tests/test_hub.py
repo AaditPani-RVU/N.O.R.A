@@ -474,5 +474,50 @@ class ProtocolTest(unittest.TestCase):
         self.assertFalse(protocol.verify(der, sig, protocol.auth_payload(os.urandom(32), "d_a")))
 
 
+
+class PhoneStatusRoutingTest(HubTestCase):
+    """Asked "what's my phone battery looking like", the model picked
+    get_system_info and read out the laptop's battery with the phone connected.
+    Phone-state questions resolve to device.status before the model sees them."""
+
+    STATUS = [{"name": "device.status", "tier": 0, "description": "The user's phone",
+               "params_schema": {"type": "object", "properties": {}}}]
+
+    def _action(self, text: str) -> str | None:
+        from nora import fast_path
+        r = fast_path.resolve(text)
+        return r.steps[0].action if r and r.steps else None
+
+    async def test_phone_questions_go_to_the_phone_while_it_is_connected(self) -> None:
+        dev = await self.paired(capabilities=self.STATUS)
+        for text in ["What's my phone battery looking like?", "what's my phone battery",
+                     "how much charge does my phone have", "is my phone charging",
+                     "is my phone on silent", "how much battery does my phone have left",
+                     "check my phone's battery"]:
+            with self.subTest(text=text):
+                self.assertEqual(self._action(text), "device.status")
+        for text in ["what's the laptop battery at", "how's the system", "charge my phone later"]:
+            with self.subTest(text=text):
+                self.assertNotEqual(self._action(text), "device.status")
+
+        await dev.close()
+        await self.until(lambda: dev.device_id not in self.hub.sessions())
+        self.assertIsNone(self._action("what's my phone battery"))
+
+    def test_laptop_stats_say_they_are_the_laptop(self) -> None:
+        import nora.commands.system_info  # noqa: F401  (registers it)
+        self.assertIn("laptop", command_engine.get_action_meta("get_system_info").description)
+
+
+class PairingQrTest(unittest.TestCase):
+    """The QR the Android app scans (`PairingInvite.parse` in the app)."""
+
+    def test_payload_carries_address_and_code_only(self) -> None:
+        from nora.hub.__main__ import pairing_payload
+        data = json.loads(pairing_payload("wss://core.ts.net:8443/v1/device", "ABCD-EFGH", 1789.9))
+        self.assertEqual(data, {"nora": 1, "url": "wss://core.ts.net:8443/v1/device",
+                                "code": "ABCD-EFGH", "exp": 1789})
+
+
 if __name__ == "__main__":
     unittest.main()

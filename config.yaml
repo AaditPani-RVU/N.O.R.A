@@ -838,6 +838,9 @@ hub:
   # Published as https://aaditsvictus-1.tailcbe88a.ts.net:8443 (tailscale serve).
   enabled: true
   host: "127.0.0.1"
+  # What devices dial, as the pairing QR gives it to them. Must be the
+  # tailscale serve address, never a LAN IP.
+  public_url: "wss://aaditsvictus-1.tailcbe88a.ts.net:8443/v1/device"
   port: 8770
   # How long a device gets to run one capability before it counts as TIMEOUT.
   invoke_deadline_ms: 8000

@@ -11,7 +11,11 @@ from nora.command_engine import register
 logger = logging.getLogger("nora.commands.system_info")
 
 
-@register("get_system_info", sig="get_system_info()", category="system")
+# The description says *this laptop* on purpose: with no hint the model saw a
+# battery in the output and answered "what's my phone battery looking like"
+# with the laptop's, while a paired phone offered device.status right below.
+@register("get_system_info", sig="get_system_info()", category="system",
+          description="this laptop (the core): CPU, RAM, disk, battery. Not the phone")
 def get_system_info() -> str:
     """Get current system information."""
     cpu = psutil.cpu_percent(interval=0.5)

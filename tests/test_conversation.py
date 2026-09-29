@@ -176,6 +176,11 @@ class DialogueActTest(unittest.TestCase):
             "what's apple trading at",
             "how much battery do i have", "how's my battery",
             "how much disk space do i have",
+            # The paired phone (device.status): asked in chat, the model
+            # invented a charge level instead of asking the phone.
+            "how much charge does my phone have", "is my phone charging",
+            "is my phone on silent", "what's my phone's charge level",
+            "what's my phone battery",
         ]:
             with self.subTest(text=text):
                 act = dialogue.classify(text, has_prior_turn=True)
