@@ -338,7 +338,8 @@ _BACK_REFERENCE_RE = re.compile(
 _FILLER_RE = re.compile(
     r"^(?:(?:uh+|um+|er+|ah+|hmm+|so|well|okay|ok|alright)[,.\s]+)+", re.I
 )
-_ADDRESS_RE = re.compile(r"^(?:hey\s+|okay\s+|ok\s+)?nora[,.\s]+", re.I)
+# "jarvis" is the wake word in use (hey_jarvis) and can survive into the transcript.
+_ADDRESS_RE = re.compile(r"^(?:hey\s+|hi\s+|okay\s+|ok\s+)?(?:nora|jarvis)[,.\s]+", re.I)
 
 _GREETING_RE = re.compile(
     r"^(?:hi|hello|hey|yo|hiya|howdy|greetings|good\s+(?:morning|afternoon|evening|day)"

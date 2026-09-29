@@ -493,7 +493,10 @@ class PhoneStatusRoutingTest(HubTestCase):
         for text in ["What's my phone battery looking like?", "what's my phone battery",
                      "how much charge does my phone have", "is my phone charging",
                      "is my phone on silent", "how much battery does my phone have left",
-                     "check my phone's battery"]:
+                     "check my phone's battery",
+                     # The wake word survived into the transcript, live:
+                     "Hey Jarvis What's my phone battery looking like?",
+                     "hey nora, is my phone charging"]:
             with self.subTest(text=text):
                 self.assertEqual(self._action(text), "device.status")
         for text in ["what's the laptop battery at", "how's the system", "charge my phone later"]:

@@ -57,7 +57,9 @@ def _chat_varied(category: str, fallback: str) -> IntentResponse:
 _FILLER_RE = re.compile(
     r"^(?:"
     r"uh+\s+|um+\s+|er+\s+|ah+\s+|"
-    r"hey\s+nora[,.\s]+|okay\s+nora[,.\s]+|ok\s+nora[,.\s]+|nora[,.\s]+"
+    # "jarvis" too: the wake word in use is hey_jarvis, and the phrase
+    # sometimes lands in the transcript, which then matched no rule at all.
+    r"(?:(?:hey|hi|okay|ok)\s+)?(?:nora|jarvis)[,.\s]+"
     r"(?:ok(?:ay)?\s+|right\s+|so\s+|well\s+)?"
     r"|(?:(?:can|could|would)\s+you\s+(?:please\s+)?)"
     r"|(?:(?:i(?:'d|\s+would)?(?:\s+like(?:\s+you)?)?|i\s+need(?:\s+you)?)\s+to\s+)"
