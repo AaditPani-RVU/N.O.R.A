@@ -335,8 +335,10 @@ CRITICAL: Return ONLY the JSON object. No explanation, no markdown fences, no ex
 def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None = None) -> str:
     # Exclude MCP tool names from the intent parser — they're not voice commands and
     # their signatures are hundreds of tokens each. Command engine routes to them after intent is parsed.
+    from nora.command_engine import device_signatures
+
     action_set = {a for a in get_available_actions() if not a.startswith("mcp_")}
-    all_sigs = get_action_signatures()
+    all_sigs = get_action_signatures(exclude_categories=("device",))
     # Strip MCP tools entirely — not voice-addressable and cost ~3k tokens each session
     native_sigs_lines = [
         line for line in all_sigs.splitlines()
@@ -347,6 +349,13 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
     native_sigs = "\n".join(native_sigs_lines)
     if len(native_sigs) > 4000:
         native_sigs = native_sigs[:4000] + "\n... (more actions available)"
+    # Device capabilities get their own place, past the cap: their parameters
+    # are validated strictly against the device's schema, so the model has to
+    # see them. Present only while a device is connected.
+    device = device_signatures()
+    if device:
+        native_sigs += ("\n\nOn the user's phone and devices (use these exact parameter names; "
+                        "\"on my phone\" means these, not the laptop commands):\n" + device)
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
         actions=", ".join(sorted(action_set)),
         action_signatures=native_sigs,

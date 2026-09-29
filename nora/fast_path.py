@@ -171,9 +171,26 @@ def _phone_rules() -> None:
             "play on phone", "phone.play_media", {**_media_query(m.group("q")), "app": "spotify"})),
     )
     _rule(
-        r"(?:open(?:\s+up)?|launch|start)\s+(?P<app>.+?)\s+" + phone,
-        lambda m: _on_phone("phone.open_app", _intent(
-            "open app on phone", "phone.open_app", {"app": _clean_name(m.group("app"))})),
+        r"(?:open(?:\s+up)?|launch|start|go\s+to)\s+(?P<app>.+?)\s+" + phone,
+        lambda m: (_on_phone("phone.open_url", _intent(
+            "open link on phone", "phone.open_url", {"url": m.group("app").strip()}))
+            if _looks_like_url(m.group("app")) else _on_phone("phone.open_app", _intent(
+            "open app on phone", "phone.open_app", {"app": _clean_name(m.group("app"))}))),
+    )
+    _rule(
+        r"what(?:'?s|\s+is)\s+(?:this\s+|the\s+)?(?:song\s+|track\s+|music\s+)?(?:that'?s\s+)?"
+        r"(?:playing|on)\s+" + phone
+        + r"|what\s+(?:song|track)\s+is\s+(?:this|playing)\s+" + phone,
+        lambda m: _on_phone("phone.media_control", _intent(
+            "phone now playing", "phone.media_control", {"action": "status"})),
+    )
+    _rule(
+        r"turn\s+(?:my\s+|the\s+)?phone(?:'?s)?\s+ringer\s+(?P<d>up|down)"
+        r"|turn\s+(?P<d2>up|down)\s+(?:my\s+|the\s+)?phone(?:'?s)?\s+ringer"
+        r"|turn\s+(?:the\s+)?ringer\s+(?P<d3>up|down)\s+" + phone,
+        lambda m: _on_phone("phone.volume", _intent(
+            "phone ringer", "phone.volume",
+            {"action": (m.group("d") or m.group("d2") or m.group("d3")).lower(), "stream": "ring"})),
     )
     _media_verbs = {"pause": "pause", "resume": "play", "unpause": "play", "play": "play",
                     "stop": "stop", "skip": "next", "next": "next", "previous": "previous"}
@@ -238,6 +255,29 @@ def _phone_rules() -> None:
         }),
     )
     _rule(
+        r"how\s+(?:long|far)\s+(?:will\s+it\s+take\s+(?:me\s+)?|does\s+it\s+take\s+(?:me\s+)?|is\s+(?:it\s+)?)?"
+        r"(?:to\s+(?:get|go|walk|drive|cycle|bike)\s+)?(?:back\s+)?(?:to\s+)?"
+        r"(?P<place>home|college|work|the\s+office|uni(?:versity)?)" + how + r"(?:\s+from\s+here)?",
+        lambda m: _intent("travel time", "travel_time", {
+            "destination": m.group("place"),
+            "mode": _travel_mode(m.group(0), m.group("how") or ""),
+        }),
+    )
+    # Setting a place, so "I'm going home" has somewhere to go.
+    _rule(
+        r"(?:remember\s+(?:that\s+)?)?my\s+(?P<place>home|house|college|university|uni|office|work|gym)"
+        r"(?:'s)?\s+(?:address\s+is(?:\s+at)?|is\s+at)\s+(?P<addr>.{4,200})",
+        lambda m: _intent("save place", "save_place",
+                          {"name": m.group("place"), "address": m.group("addr").strip()}),
+    )
+    _rule(
+        r"(?:save|remember|mark)\s+(?:this|here|this\s+place|this\s+spot|where\s+i\s+am)"
+        r"\s+as\s+(?:my\s+|the\s+)?(?P<place>[\w' -]{2,40})"
+        r"|this\s+is\s+(?:my\s+)?(?P<place2>home|college|work|gym|office)",
+        lambda m: _intent("save place", "save_place",
+                          {"name": (m.group("place") or m.group("place2")).strip()}),
+    )
+    _rule(
         r"(?:navigate(?:\s+me)?|take\s+me|directions|give\s+me\s+directions|get\s+me\s+directions)"
         r"\s+to\s+(?P<dest>.{2,100}?)" + how,
         lambda m: _intent("navigate", "navigate_to", {
@@ -265,6 +305,11 @@ def _phone_rules() -> None:
                            {"action": _media_verbs[m.group("verb").lower()]})
                    if _from_phone("phone.media_control") else None),
     )
+
+
+def _looks_like_url(text: str) -> bool:
+    t = text.strip().lower()
+    return bool(re.match(r"^(?:https?://)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:/\S*)?$", t))
 
 
 def _yours(query: str) -> bool:

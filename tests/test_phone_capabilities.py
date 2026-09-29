@@ -304,7 +304,8 @@ class PrivateSpeechTest(HubTestCase):
 
 PHONE = [
     {"name": n, "tier": t, "description": n, "params_schema": {"type": "object"}}
-    for n, t in [("phone.open_app", 1), ("phone.play_media", 1), ("phone.media_control", 1),
+    for n, t in [("phone.open_app", 1), ("phone.open_url", 1), ("phone.play_media", 1),
+                 ("phone.media_control", 1),
                  ("phone.volume", 1), ("phone.read_notifications", 0),
                  ("phone.get_location", 0), ("phone.navigate", 1)]
 ]
@@ -346,6 +347,20 @@ class PhoneRoutingTest(HubTestCase):
             "set my phone volume to 40": [("phone.volume", {"action": "set", "level": 40})],
             "turn the volume down on my phone": [("phone.volume", {"action": "down"})],
             "where am I": [("phone.get_location", {})],
+            "how long will it take me to get home by bike":
+                [("travel_time", {"destination": "home", "mode": "bicycling"})],
+            "how far is college": [("travel_time", {"destination": "college", "mode": "driving"})],
+            "my home address is Pattanagere, Bengaluru":
+                [("save_place", {"name": "home", "address": "Pattanagere, Bengaluru"})],
+            "remember my college is at RV University":
+                [("save_place", {"name": "college", "address": "RV University"})],
+            "save this place as college": [("save_place", {"name": "college"})],
+            "this is my gym": [("save_place", {"name": "gym"})],
+            # Found live: these went to the wrong place before their rules.
+            "open github.com on my phone": [("phone.open_url", {"url": "github.com"})],
+            "what song is playing on my phone": [("phone.media_control", {"action": "status"})],
+            "what's playing on my phone": [("phone.media_control", {"action": "status"})],
+            "turn my phone's ringer down": [("phone.volume", {"action": "down", "stream": "ring"})],
         }
         for text, want in cases.items():
             with self.subTest(text=text):
@@ -364,6 +379,8 @@ class PhoneRoutingTest(HubTestCase):
                          [("spotify_play_song", {"song": "blinding lights"})])
         self.assertEqual(self._steps("play the workout playlist"),
                          [("spotify_play_playlist", {"name": "workout"})])
+        steps = self._steps("my house is on fire")
+        self.assertTrue(steps is None or steps[0][0] != "save_place", steps)
 
     async def test_open_and_play_is_not_one_app_name(self) -> None:
         """It used to become open_app("spotify and play my workout playlist")."""
@@ -539,12 +556,115 @@ class PlacesTest(HubTestCase):
         self.assertNotIn("bounded", get.call_args.kwargs["params"])
         self.assertEqual(places.get("home").target, "12.920000,77.500000")
 
+    async def test_travel_time_does_not_start_directions(self) -> None:
+        dev = await self.phone()
+        places.save("home", lat=HOME[0], lon=HOME[1])
+        from nora.commands.places import travel_time
+        token = channel.bind(channel.Channel("local", "voice", print))
+        try:
+            with mock.patch("requests.get", return_value=_Resp(
+                    {"routes": [{"duration": 1620.0, "distance": 13000.0}]})):
+                r = await travel_time("home", "bicycling")
+        finally:
+            channel.unbind(token)
+        self.assertEqual(r.message, "Home is about 27 minutes by bike (13 km).")
+        self.assertNotIn("phone.navigate", [e["capability"] for e in dev.executed])
+
     async def test_no_phone(self) -> None:
         with mock.patch.object(hub_server, "_hub", None):
             places.save("home", lat=HOME[0], lon=HOME[1])
             r = await self.go("home")
         self.assertFalse(r.success)
         self.assertIn("isn't connected", r.message)
+
+
+class ParamFitTest(HubTestCase):
+    SCHEMA = {"type": "object", "required": ["app"], "additionalProperties": False,
+              "properties": {"app": {"type": "string"}, "note": {"type": "string"}}}
+
+    def test_one_wrong_name_is_taken_as_the_missing_one(self) -> None:
+        """The prompt's examples say open_app(name=…); the phone's is open_app(app)."""
+        self.assertEqual(protocol.fit_params(self.SCHEMA, {"name": "youtube"}), {"app": "youtube"})
+
+    def test_anything_more_is_left_for_validation_to_refuse(self) -> None:
+        for params in ({"name": "a", "other": "b"}, {"app": "a", "junk": 1}, {}):
+            with self.subTest(params=params):
+                self.assertEqual(protocol.fit_params(self.SCHEMA, params), params)
+                self.assertIsNotNone(protocol.validate_params(self.SCHEMA, params))
+
+    async def test_the_hub_applies_it(self) -> None:
+        caps = [{"name": "phone.open_app", "tier": 1, "description": "open",
+                 "params_schema": {"type": "object", "required": ["app"],
+                                   "properties": {"app": {"type": "string"}}}}]
+        dev = await self.paired(capabilities=caps)
+        r = await self.hub.call(dev.device_id, "phone.open_app", {"name": "youtube"},
+                                channel=channel.Channel("local", "voice", print))
+        self.assertTrue(r.success, r.message)
+        self.assertEqual(dev.executed[0]["params"], {"app": "youtube"})
+
+
+class IntentPromptTest(HubTestCase):
+    async def test_device_signatures_survive_the_prompt_cap(self) -> None:
+        """The action block is capped at 4000 characters and the device section
+        came last: the model saw phone.set_timer's name, never its `seconds`,
+        and sent {"duration": "10 minutes"}."""
+        from nora import intent_parser
+        command_engine.discover_commands()
+        caps = [{"name": "phone.set_timer", "tier": 1, "description": "A countdown timer on the phone",
+                 "params_schema": {"type": "object", "required": ["seconds"], "properties": {
+                     "seconds": {"type": "integer", "minimum": 1, "maximum": 86400}}}}]
+        await self.paired(capabilities=caps)
+        prompt = intent_parser._build_system_prompt()
+        self.assertIn("phone.set_timer(seconds: 1..86400)", prompt)
+        self.assertIn("navigate_to(destination", prompt)
+
+
+class ModelSlipsTest(HubTestCase):
+    """What the live model got wrong once it could see the phone."""
+
+    async def test_core_command_under_the_phone_prefix_resolves(self) -> None:
+        with mock.patch.dict(command_engine._registry, {"get_time": lambda: "noon"}):
+            [r] = await command_engine.execute(_steps(("phone.get_time", {})))
+        self.assertTrue(r.success)
+        self.assertEqual(r.action, "get_time")
+
+    async def test_but_never_to_anything_risky(self) -> None:
+        called = []
+        with mock.patch.dict(command_engine._registry,
+                             {"delete_file": lambda path: called.append(path)}):
+            [r] = await command_engine.execute(_steps(("phone.delete_file", {"path": "/x"})))
+        self.assertFalse(r.success)
+        self.assertEqual(called, [])
+
+    async def test_timer_minutes_are_not_a_bulk_operation(self) -> None:
+        """"set a 10 minute timer" asked for consent: 600 seconds scored as
+        600 things touched."""
+        from nora import autonomy, risk
+        caps = [{"name": "phone.set_timer", "tier": 1, "description": "timer",
+                 "params_schema": {"type": "object", "required": ["seconds"],
+                                   "properties": {"seconds": {"type": "integer"}}}}]
+        await self.paired(capabilities=caps)
+        intent = _steps(("phone.set_timer", {"seconds": 600}))
+        tier = autonomy.classify(intent, risk.assess(intent))
+        self.assertNotIn(tier, (autonomy.AutonomyTier.NEEDS_CONSENT, autonomy.AutonomyTier.SUGGEST))
+
+    def test_confirmations_say_the_phone(self) -> None:
+        self.assertEqual(command_engine.spoken_name("phone.set_alarm"), "set alarm on the phone")
+        self.assertEqual(command_engine.spoken_name("delete_file"), "delete file")
+
+
+class SignatureHintTest(HubTestCase):
+    def test_allowed_values_are_shown(self) -> None:
+        """Shown only the names, the model called phone.volume with no action."""
+        entry = protocol.check_manifest_entry({
+            "name": "phone.volume", "tier": 1, "params_schema": {
+                "type": "object", "required": ["action"], "properties": {
+                    "action": {"type": "string", "enum": ["up", "down"]},
+                    "level": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "stream": {"type": "string", "enum": ["media", "ring"]},
+                    "label": {"type": "string"}}}})
+        self.assertEqual(protocol.signature_hint(entry),
+                         "phone.volume(action: up|down, level=0..100, stream=media|ring, label=...)")
 
 
 class BackgroundRefusalTest(HubTestCase):

@@ -482,6 +482,7 @@ class Hub:
         if entry["requires_live_user"] and origin != _channel.ORIGIN_LIVE_USER:
             return fail(protocol.POLICY_BLOCKED,
                         f"{capability} only runs when you ask for it directly.")
+        params = protocol.fit_params(entry["params_schema"], params)
         problem = protocol.validate_params(entry["params_schema"], params)
         if problem:
             return fail(protocol.INVALID_PARAMS, f"Bad parameters for {capability}: {problem}")

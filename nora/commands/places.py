@@ -32,25 +32,43 @@ def _here(result: StepResult) -> tuple[float, float] | None:
         return None
 
 
-@register(
-    "navigate_to",
-    sig="navigate_to(destination: str, mode: str = 'driving')",
-    category="device",
-    description="directions on the user's phone to a saved place (home, college) or any "
-                "address, with travel time. mode: driving|walking|bicycling|transit. "
-                "Use for 'I'm going home', 'take me to X'",
-)
-async def navigate_to(destination: str, mode: str = "driving") -> StepResult:
+class _Trip:
+    """Where to, where from, and how long: the shared first half of
+    navigate_to and travel_time."""
+
+    def __init__(self, label: str, spoken: str, place, here, dest, eta):
+        self.label, self.spoken, self.place = label, spoken, place
+        self.here, self.dest, self.eta = here, dest, eta
+
+    @property
+    def target(self) -> str:
+        if self.place is not None:
+            return self.place.target
+        if self.dest is not None:
+            return f"{self.dest[0]:.6f},{self.dest[1]:.6f}"
+        return self.label
+
+    @property
+    def arrived(self) -> bool:
+        return (self.here is not None and self.dest is not None
+                and places.straight_line_km(self.here, self.dest) < _ARRIVED_KM)
+
+    def eta_sentence(self) -> str:
+        if self.eta is None:
+            return ""
+        return f"{self.spoken[:1].upper()}{self.spoken[1:]} is {self.eta.spoken()}."
+
+
+async def _plan_trip(action: str, destination: str, mode: str) -> _Trip | StepResult:
     mode = places.normalise_mode(mode)
     place = places.get(destination)
     key = places.canonical(destination)
     if place is None and key in _NAMED:
         return StepResult(
-            action="navigate_to", success=False,
+            action=action, success=False,
             message=f"I don't know where {key} is yet. Tell me \"my {key} address is …\", "
                     f"or say \"save this place as {key}\" when you're there.")
     label = place.name if place else destination.strip()
-    spoken = "home" if label == "home" else label
 
     # Where the phone is, for the estimate. Best effort: directions work without it.
     here = None
@@ -67,28 +85,64 @@ async def navigate_to(destination: str, mode: str = "driving") -> StepResult:
         if hit is not None:
             dest = hit[:2]
 
-    if here is not None and dest is not None and places.straight_line_km(here, dest) < _ARRIVED_KM:
-        return StepResult(action="navigate_to", success=True,
-                          message=f"You're already at {spoken}.")
-
     eta = None
-    if here is not None and dest is not None:
+    if here is not None and dest is not None and places.straight_line_km(here, dest) >= _ARRIVED_KM:
         eta = await loop.run_in_executor(None, places.route, here, dest, mode)
+    trip = _Trip(label, label, place, here, dest, eta)
+    trip.mode = mode
+    trip.location = loc
+    return trip
 
-    target = place.target if place is not None else (
-        f"{dest[0]:.6f},{dest[1]:.6f}" if dest is not None else destination.strip())
-    nav = await _phone("phone.navigate", {"destination": target[:200], "mode": mode,
-                                          "label": label[:60]})
-    parts = []
-    if eta is not None:
-        parts.append(f"{spoken[:1].upper()}{spoken[1:]} is {eta.spoken()}.")
-    if nav.success:
-        parts.append("Directions are up on your phone.")
-    else:
-        parts.append(nav.message)
+
+@register(
+    "navigate_to",
+    sig="navigate_to(destination: str, mode: str = 'driving')",
+    category="device",
+    description="directions on the user's phone to a saved place (home, college) or any "
+                "address, with travel time. mode: driving|walking|bicycling|transit. "
+                "Use for 'I'm going home', 'take me to X'",
+)
+async def navigate_to(destination: str, mode: str = "driving") -> StepResult:
+    trip = await _plan_trip("navigate_to", destination, mode)
+    if isinstance(trip, StepResult):
+        return trip
+    if trip.arrived:
+        return StepResult(action="navigate_to", success=True,
+                          message=f"You're already at {trip.spoken}.")
+    nav = await _phone("phone.navigate", {"destination": trip.target[:200], "mode": trip.mode,
+                                          "label": trip.label[:60]})
+    parts = [trip.eta_sentence()] if trip.eta is not None else []
+    parts.append("Directions are up on your phone." if nav.success else nav.message)
     return StepResult(action="navigate_to", success=nav.success,
                       withheld=nav.withheld, error_code=nav.error_code,
                       message=" ".join(parts))
+
+
+@register(
+    "travel_time",
+    sig="travel_time(destination: str, mode: str = 'driving')",
+    category="device",
+    description="how long it takes from where the user's phone is to a saved place or "
+                "address, without starting directions",
+)
+async def travel_time(destination: str, mode: str = "driving") -> StepResult:
+    trip = await _plan_trip("travel_time", destination, mode)
+    if isinstance(trip, StepResult):
+        return trip
+    if trip.arrived:
+        return StepResult(action="travel_time", success=True,
+                          message=f"You're already at {trip.spoken}.")
+    if trip.eta is not None:
+        return StepResult(action="travel_time", success=True, message=trip.eta_sentence())
+    if trip.here is None:
+        return StepResult(action="travel_time", success=False, withheld=trip.location.withheld,
+                          error_code=trip.location.error_code,
+                          message=f"I need your phone's location for that. {trip.location.message}".strip())
+    if places.normalise_mode(trip.mode) == "transit":
+        return StepResult(action="travel_time", success=False,
+                          message="I can't estimate public transport times; Maps can.")
+    return StepResult(action="travel_time", success=False,
+                      message=f"I couldn't work out a route to {trip.spoken}.")
 
 
 @register(

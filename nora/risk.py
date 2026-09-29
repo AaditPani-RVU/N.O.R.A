@@ -83,7 +83,13 @@ def assess(intent: IntentResponse) -> Risk:
     unknown = 0
     for step in intent.steps:
         r.destructiveness = max(r.destructiveness, _step_destructiveness(step.action))
-        r.scale = max(r.scale, _step_scale(step.parameters))
+        meta = command_engine.get_action_meta(step.action)
+        # A device capability's numbers are quantities its schema bounds (an
+        # alarm's minute, a timer's 600 seconds), not counts of things it
+        # touches; its declared tier already says how risky it is. Scored as
+        # scale they made "set a 10 minute timer" need consent.
+        if not (meta is not None and meta.device):
+            r.scale = max(r.scale, _step_scale(step.parameters))
         if command_engine.get_action_meta(step.action) is None:
             unknown += 1
 

@@ -191,7 +191,24 @@ def _fmt(name: str, meta: CommandMeta) -> str:
     return f"- {sig}"
 
 
-def get_action_signatures() -> str:
+def device_signatures(max_description: int = 90) -> str:
+    """The device section of the action block on its own, descriptions cut
+    short. The intent prompt caps the full block, and this section comes last,
+    so without its own place the model saw the phone's capability *names* and
+    never their parameters: it sent phone.set_timer {"duration": "10 minutes"}.
+    """
+    lines = []
+    for name, m in sorted(_meta.items()):
+        if m.category != "device":
+            continue
+        desc = m.description
+        if len(desc) > max_description:
+            desc = desc[:max_description].rsplit(" ", 1)[0] + "…"
+        lines.append(_fmt(name, CommandMeta(sig=m.sig, description=desc)))
+    return "\n".join(lines)
+
+
+def get_action_signatures(exclude_categories: tuple[str, ...] = ()) -> str:
     """Build the action signatures block for the system prompt from registered metadata."""
     lines: list[str] = []
 
@@ -207,6 +224,8 @@ def get_action_signatures() -> str:
             lines.append(_fmt(name, m))
 
     for cat, header in _OPTIONAL_CATEGORIES:
+        if cat in exclude_categories:
+            continue
         cat_actions = [(n, m) for n, m in sorted(_meta.items()) if m.category == cat]
         if cat_actions:
             lines.append(f"\n{header}")
@@ -269,7 +288,7 @@ async def execute(intent: IntentResponse) -> list[StepResult]:
             logger.info("Cancellation signal received — stopping execution.")
             break
 
-        action = step.action
+        action = _resolve_alias(step.action)
         params = step.parameters
 
         if is_blocked(action):
@@ -352,6 +371,31 @@ async def execute(intent: IntentResponse) -> list[StepResult]:
 
 
 
+def _resolve_alias(action: str) -> str:
+    """"phone.navigate_to" → "navigate_to": the model put a core command under
+    the phone's prefix. Resolved before any check runs, so the block list and
+    guest mode see the real name, and only to a low-risk core command that
+    needs no confirmation — never to anything the pipeline's guards, which saw
+    the prefixed name, would have stopped."""
+    if action in _registry or "." not in action:
+        return action
+    bare = action.rsplit(".", 1)[1]
+    meta = _meta.get(bare)
+    if (meta is not None and not meta.device and meta.risk == "low"
+            and not meta.requires_confirmation):
+        logger.info("Unknown action %s taken as %s", action, bare)
+        return bare
+    return action
+
+
+def spoken_name(action: str) -> str:
+    """How to say an action in a confirmation: "set alarm on the phone", not
+    "phone.set alarm"."""
+    if action.startswith("phone."):
+        return action[len("phone."):].replace("_", " ") + " on the phone"
+    return action.replace(".", " ").replace("_", " ")
+
+
 def _acts(action: str) -> bool:
     """Whether a step changes something, as opposed to only reading.
 
@@ -374,7 +418,7 @@ async def _confirm_after_untrusted(ch, step) -> StepResult | None:
     """
     from nora.channel import ConfirmRequest
 
-    label = step.action.replace("_", " ")
+    label = spoken_name(step.action)
     if not ch.can_confirm:
         return StepResult(action=step.action, success=False, withheld=True,
                           error_code="POLICY_BLOCKED",

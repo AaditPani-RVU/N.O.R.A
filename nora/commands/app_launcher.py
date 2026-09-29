@@ -39,12 +39,15 @@ def open_app(name: str) -> str:
     name_lower = name.lower().strip()
     executable = APP_MAP.get(name_lower, name_lower)
 
-    try:
-        # Try os.startfile first (works for registered file types and apps)
-        os.startfile(executable)
-        return f"Opened {name}."
-    except OSError:
-        pass
+    # os.startfile is Windows-only: on Linux it doesn't exist, and the
+    # AttributeError used to escape and fail every "open X" out loud.
+    if hasattr(os, "startfile"):
+        try:
+            # Works for registered file types and apps
+            os.startfile(executable)
+            return f"Opened {name}."
+        except OSError:
+            pass
 
     try:
         # Fallback: try running as a command

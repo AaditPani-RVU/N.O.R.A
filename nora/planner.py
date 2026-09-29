@@ -317,9 +317,11 @@ async def run_plan(
             "success": result.success,
         })
 
-        # Let user hear progress for long plans
+        # Let user hear progress for long plans. Third-party text (a phone
+        # notification) is said once, at the end, where it is kept private.
         if step_num % 3 == 0:
-            say(f"Step {step_num} done: {result.message}", mood="info")
+            done = "read" if result.untrusted else result.message
+            say(f"Step {step_num} done: {done}", mood="info")
 
         # 6. Check done flag
         if _is_goal_complete(result, decide_resp):

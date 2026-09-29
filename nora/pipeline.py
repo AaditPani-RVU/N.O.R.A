@@ -527,7 +527,7 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
             ui_server.notify_stage("idle")
             return TurnOutcome(kind="cancelled", text=text, stage="unconfirmable",
                                intent=intent.intent, actions=_actions(intent))
-        step_labels = " → ".join(s.action.replace("_", " ") for s in intent.steps[:6])
+        step_labels = " → ".join(command_engine.spoken_name(s.action) for s in intent.steps[:6])
         speak(f"{step_labels}. Confirm?", mood="confirmation")
         confirmed = await channel.confirm(ConfirmRequest(
             turn_id=channel.turn_id, steps=list(intent.steps),

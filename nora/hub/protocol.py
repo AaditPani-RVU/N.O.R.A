@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 from typing import Any
@@ -27,6 +28,8 @@ MAX_FRAME = 256 * 1024
 
 # What a signature covers besides the nonce, so a signature made for some
 # other purpose with the same key can never be replayed as a login.
+logger = logging.getLogger("nora.hub.protocol")
+
 AUTH_CONTEXT = b"nora-v1"
 
 # Messages a device may send once authenticated.
@@ -214,6 +217,28 @@ def check_manifest_entry(entry: Any) -> dict:
     }
 
 
+def fit_params(schema: dict, params: dict) -> dict:
+    """Repair the one slip the model makes most: the right value under the
+    wrong name. The intent prompt's examples say `open_app(name=…)`, so the
+    phone's `open_app(app)` arrived as {"name": "youtube"} and was refused.
+
+    Only when exactly one required field is missing and exactly one unknown
+    field is present is the unknown one renamed. Anything else is left for
+    validation to refuse, so unknown fields are still rejected (plan §7.6).
+    """
+    if not isinstance(params, dict):
+        return params
+    props = schema.get("properties") or {}
+    missing = [r for r in schema.get("required", []) if r not in params]
+    extra = [k for k in params if k not in props]
+    if len(missing) == 1 and len(extra) == 1:
+        logger.info("Capability param %r taken as %r", extra[0], missing[0])
+        fixed = dict(params)
+        fixed[missing[0]] = fixed.pop(extra[0])
+        return fixed
+    return params
+
+
 def validate_params(schema: dict, params: dict) -> str | None:
     """None if `params` fit `schema`, else the first problem, for the LLM to read."""
     from jsonschema import Draft202012Validator
@@ -227,10 +252,23 @@ def validate_params(schema: dict, params: dict) -> str | None:
 
 
 def signature_hint(entry: dict) -> str:
-    """`name(param, param=...)` for the action block of the system prompt."""
+    """`name(param, param=...)` for the action block of the system prompt.
+
+    Allowed values are spelled out (`action: up|down`, `level=0..100`): shown
+    only the names, the model called phone.volume with no `action` at all.
+    """
     schema = entry["params_schema"]
     required = set(schema.get("required", []))
     parts = []
-    for prop in schema.get("properties", {}):
-        parts.append(prop if prop in required else f"{prop}=...")
+    for prop, spec in (schema.get("properties") or {}).items():
+        spec = spec if isinstance(spec, dict) else {}
+        values = None
+        if isinstance(spec.get("enum"), list):
+            values = "|".join(str(v) for v in spec["enum"])
+        elif spec.get("type") == "integer" and "minimum" in spec and "maximum" in spec:
+            values = f"{spec['minimum']}..{spec['maximum']}"
+        if prop in required:
+            parts.append(f"{prop}: {values}" if values else prop)
+        else:
+            parts.append(f"{prop}={values or '...'}")
     return f"{entry['name']}({', '.join(parts)})"
