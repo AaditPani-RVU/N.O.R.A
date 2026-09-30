@@ -138,6 +138,11 @@ _MIGRATIONS: list[str] = [
         updated_at  REAL NOT NULL
     );
     """,
+    # 4 — a task can be due on a day: "I have to submit it tomorrow" (Phase 5)
+    """
+    ALTER TABLE tasks ADD COLUMN due_on TEXT;        -- ISO date, local; NULL = no date
+    CREATE INDEX tasks_due ON tasks(status, due_on);
+    """,
 ]
 
 _local = threading.local()

@@ -290,6 +290,10 @@ def _deliver(job: Job) -> None:
         else:
             logger.info("Job %s held for %s (not connected)", job.id, job.device)
         return
+    if job.kind == "reminder":
+        # The core stays at home; the user may not. A reminder set by voice
+        # is said in the room and also lands on every connected phone.
+        delivery.broadcast(text, kind=job.kind)
     if _speak is None:
         return
     try:
@@ -307,7 +311,7 @@ def _phrase_answer(job: Job) -> str:
     Dropping straight into the answer with no referent is disorienting, so
     every delivery re-states what it is answering first.
     """
-    if job.kind == "cron":
+    if job.kind in ("cron", "reminder"):
         return job.result
     return f"Back to {job.title} — {job.result}"
 

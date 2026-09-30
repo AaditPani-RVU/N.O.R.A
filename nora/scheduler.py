@@ -416,7 +416,7 @@ def _fire(sched: Schedule) -> None:
     jobs.submit(
         what[:60],
         lambda: runner(what),
-        kind="cron",
+        kind="reminder" if what.startswith(_REMINDER_PREFIX) else "cron",
         device=sched.device,
     )
     with _lock:

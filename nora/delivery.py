@@ -78,6 +78,19 @@ def deliver(text: str, *, device: str, kind: str = "job") -> bool:
         return False
 
 
+def broadcast(text: str, *, kind: str = "reminder") -> list[str]:
+    """Send `text` to every connected device. Returns the ones that took it.
+
+    For what must reach the user wherever they are — a reminder set on the
+    core's own microphone — and not for answers, which go to who asked.
+    Off with `hub.reminders_to_devices: false`.
+    """
+    from nora.config import get_config
+    if not (get_config().get("hub", {}) or {}).get("reminders_to_devices", True):
+        return []
+    return [d for d in connected() if deliver(text, device=d, kind=kind)]
+
+
 def reset_for_tests() -> None:
     with _lock:
         _sinks.clear()

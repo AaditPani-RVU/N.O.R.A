@@ -875,6 +875,10 @@ hub:
   # tools, never stored, and anything decided after reading them needs a yes.
   untrusted_capabilities:
     - phone.read_notifications
+  # A reminder set on the core's own microphone is said in the room and also
+  # sent to every connected phone, because the core stays home and you may
+  # not. Reminders set from a phone only ever go to that phone.
+  reminders_to_devices: true
 
 places:
   # "I'm going home": saved places live in the core store (nora/places.py).

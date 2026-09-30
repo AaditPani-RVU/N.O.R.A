@@ -74,7 +74,8 @@ _SUFFIX_RE = re.compile(
 
 def _normalise(text: str) -> str:
     """Strip leading fillers, trailing noise, and punctuation."""
-    t = _FILLER_RE.sub("", text.strip())
+    # Phone keyboards type curly apostrophes; every rule is written with '.
+    t = _FILLER_RE.sub("", text.strip().replace("\u2019", "'"))
     t = _SUFFIX_RE.sub("", t)
     return t.rstrip(".,!?;").strip()
 
@@ -587,6 +588,38 @@ def _build_rules() -> None:
         r"(?:press\s+)?enter",
         lambda m: _intent("press enter", "press_keys", {"keys": "enter"}),
     )
+
+    # ─── Tasks and the day's agenda (Phase 5) ─────────────────────────────
+    # "Remember I have to submit the assignment tomorrow", typed on the phone,
+    # has to be a dated task that "what do I need to do today" finds the next
+    # day on the laptop. Left to the model, "remember" went to chat or
+    # quick_note (a file nothing reads back), and the day stayed a word.
+    _rule(
+        r"(?:remember|don'?t\s+(?:let\s+me\s+)?forget|note\s+down|make\s+a\s+note)\s+(?:that\s+)?"
+        r"(?:i(?:\s+have|\s+need|\s+got|'ve\s+got|\s+ve\s+got|\s+have\s+got)\s+to\s+"
+        r"|i\s+(?:must|should|gotta)\s+|to\s+)"
+        r"(?P<what>.{3,200})",
+        lambda m: _intent("add task", "add_task", {"title": m.group("what").strip()}),
+    )
+    _rule(
+        r"add\s+(?:a\s+)?(?:task|to-?do)\s*(?::|to\s+)?\s*(?P<what>.{3,200})"
+        r"|(?:add|put)\s+(?P<what2>.{3,200}?)\s+(?:to|on)\s+my\s+(?:to-?do\s+|task\s+)?list",
+        lambda m: _intent("add task", "add_task",
+                          {"title": (m.group("what") or m.group("what2")).strip()}),
+    )
+    day = (r"(?:\s+(?:for\s+|on\s+)?(?P<day>today|tonight|tomorrow|this\s+(?:morning|afternoon|evening)"
+           r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday))")
+    # (head, whether the day may be left out, meaning today)
+    for head, optional in (
+        (r"what\s+do\s+i\s+(?:need|have|got)\s+to\s+(?:do|get\s+done|finish)", True),
+        (r"what(?:'?s|\s+is)\s+on\s+(?:my\s+)?(?:plate|agenda|to-?do\s+list|list)", True),
+        (r"what(?:'?s|\s+is)\s+(?:my\s+|the\s+)?(?:agenda|plan)", False),
+        (r"(?:what(?:'?s|\s+is)|is\s+anything|anything)\s+due", False),
+        (r"what\s+(?:have\s+i\s+got|do\s+i\s+have)(?:\s+on)?", False),
+        (r"what\s+are\s+my\s+(?:tasks|to-?dos)", False),
+    ):
+        _rule(head + day + ("?" if optional else ""),
+              lambda m: _intent("agenda", "agenda", {"day": (m.group("day") or "today").lower()}))
 
     # ─── Briefing ─────────────────────────────────────────────────────────
     # Deterministic because the planner would not hold still: asked to route

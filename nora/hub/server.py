@@ -279,7 +279,8 @@ class Hub:
         def send(text: str, kind: str) -> bool:
             if session.killed:
                 return False
-            session.send_nowait("notify", {"title": "NORA", "body": text,
+            title = "Reminder" if kind == "reminder" else "NORA"
+            session.send_nowait("notify", {"title": title, "body": text,
                                            "priority": "default", "kind": kind})
             return True
         return send
