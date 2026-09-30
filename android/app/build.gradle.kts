@@ -11,8 +11,8 @@ android {
         applicationId = "com.aaditpani.nora"
         minSdk = 35
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.5.1"
+        versionCode = 5
+        versionName = "0.5.2"
     }
 
     buildTypes {

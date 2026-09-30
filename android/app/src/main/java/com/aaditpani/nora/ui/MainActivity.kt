@@ -19,6 +19,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -33,6 +36,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -253,6 +260,7 @@ private fun Tabs(tab: Int, onTab: (Int) -> Unit, accent: Color, waiting: Int) {
 
 // ── paired ───────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>,
                          authenticate: (() -> Unit) -> Unit) {
@@ -271,11 +279,19 @@ private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>
 
     HudBackground(accent) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-            Header(state, killed, accent)
-            Tabs(tab, { tab = it }, accent, confirms.size)
+            // Typing in the chat: the keyboard takes half the screen, so the
+            // header and tabs fold away and the chat's own strip stands in.
+            val typing = WindowInsets.isImeVisible && tab == 0
+            AnimatedVisibility(!typing, enter = expandVertically(tween(250)) + fadeIn(tween(250)),
+                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))) {
+                Column {
+                    Header(state, killed, accent)
+                    Tabs(tab, { tab = it }, accent, confirms.size)
+                }
+            }
             Box(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                 when (tab) {
-                    0 -> ChatTab(c, orb, state is LinkState.Connected, messages, confirms, authenticate)
+                    0 -> ChatTab(c, orb, state is LinkState.Connected, messages, confirms, authenticate, typing)
                     1 -> SystemTab(c, state, killed)
                     else -> LogTab(c)
                 }
@@ -304,7 +320,7 @@ private val suggestions = listOf(
 
 @Composable
 private fun ChatTab(c: LinkController, orb: OrbState, connected: Boolean, messages: List<ChatMessage>,
-                    confirms: List<ConfirmPrompt>, authenticate: (() -> Unit) -> Unit) {
+                    confirms: List<ConfirmPrompt>, authenticate: (() -> Unit) -> Unit, typing: Boolean) {
     val ctx = LocalContext.current
     var draft by rememberSaveable { mutableStateOf("") }
     val list = rememberLazyListState()
@@ -333,15 +349,20 @@ private fun ChatTab(c: LinkController, orb: OrbState, connected: Boolean, messag
     }
     val thinking = orb == OrbState.THINKING && confirms.isEmpty()
     val rows = messages.size + confirms.size + (if (thinking) 1 else 0)
-    LaunchedEffect(rows) { if (rows > 0) list.animateScrollToItem(rows - 1) }
+    // Also when the keyboard opens, so the latest line stays in view above it.
+    LaunchedEffect(rows, typing) { if (rows > 0) list.animateScrollToItem(rows + 1) }
 
     fun send(text: String) { if (c.send(text)) draft = "" }
 
     Column(Modifier.fillMaxSize()) {
         val empty = messages.isEmpty() && confirms.isEmpty()
-        AnimatedContent(empty, Modifier.fillMaxWidth(), label = "stage",
-            transitionSpec = { fadeIn(tween(500)) togetherWith fadeOut(tween(300)) }) { hero ->
-            if (hero) Hero(orb) else CompactStage(orb)
+        AnimatedContent(if (typing) 2 else if (empty) 0 else 1, Modifier.fillMaxWidth(), label = "stage",
+            transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(200)) }) { stage ->
+            when (stage) {
+                0 -> Hero(orb)
+                1 -> CompactStage(orb, 64.dp)
+                else -> CompactStage(orb, 44.dp, Modifier.padding(top = 4.dp))
+            }
         }
 
         // The transcript frame: glass, brackets, and a reticle when empty.
@@ -386,8 +407,12 @@ private fun ChatTab(c: LinkController, orb: OrbState, connected: Boolean, messag
             if (orb != OrbState.IDLE && orb != OrbState.OFFLINE) FlowLine(orb.color, Modifier.align(Alignment.BottomCenter))
         }
 
-        LazyRow(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(suggestions) { s -> Chip(s, { send(s) }, enabled = connected) }
+        // Chips are a shortcut for not typing; once you are, they give the room back.
+        AnimatedVisibility(!(typing && draft.isNotEmpty()), enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()) {
+            LazyRow(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(suggestions) { s -> Chip(s, { send(s) }, enabled = connected) }
+            }
         }
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             HudField(draft, { draft = it.take(2000) }, if (connected) "Type a command" else "Link down",
@@ -414,9 +439,9 @@ private fun Hero(orb: OrbState) {
 
 /** Once there's a conversation: the orb shrinks into a strip above it. */
 @Composable
-private fun CompactStage(orb: OrbState) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Orb(orb, 64.dp)
+private fun CompactStage(orb: OrbState, orbSize: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Orb(orb, orbSize)
         Spacer(Modifier.width(6.dp))
         Column(Modifier.weight(1f)) {
             Tracked("N.O.R.A", color = orb.color, size = 16.sp, spacing = 6.sp, glow = true,
@@ -456,7 +481,13 @@ private fun StageBar(orb: OrbState) {
 
 @Composable
 private fun AwaitingInput(accent: Color, connected: Boolean) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // With the keyboard up there may be no room for the reticle: say it in one line.
+        if (maxHeight < 150.dp) {
+            Tracked(if (connected) "[ AWAITING INPUT ]" else "[ LINK DOWN ]", color = Hud.Light.copy(alpha = 0.6f),
+                size = 10.sp, spacing = 4.sp)
+            return@BoxWithConstraints
+        }
         Column(Modifier
             .background(Brush.radialGradient(listOf(accent.copy(alpha = 0.06f), Color.Transparent)))
             .brackets(accent.copy(alpha = 0.42f), arm = 18.dp, all = true, width = 1.dp)
