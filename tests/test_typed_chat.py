@@ -71,13 +71,18 @@ class DaysTest(unittest.TestCase):
             "the day after tomorrow meet raj": ("meet raj", date(2026, 10, 2)),
             "renew passport in 2 weeks": ("renew passport", date(2026, 10, 14)),
             "renew passport by 2026-12-01": ("renew passport", date(2026, 12, 1)),
+            # Typed on a phone: the first live run was "Tommorow".
+            "submit the assignment Tommorow": ("submit the assignment", date(2026, 10, 1)),
+            "submit it tomorow": ("submit it", date(2026, 10, 1)),
+            "submit it tmrw": ("submit it", date(2026, 10, 1)),
+            "meet raj the day after tommorrow": ("meet raj", date(2026, 10, 2)),
         }
         for text, want in cases.items():
             with self.subTest(text):
                 self.assertEqual(days.split(text, WED), want)
 
     def test_nothing_is_guessed(self) -> None:
-        for text in ("buy milk", "the cat sat", "wash the sun", "tomorrow", "finish the may report"):
+        for text in ("buy milk", "buy tomatoes", "call tom", "the cat sat", "wash the sun", "tomorrow", "finish the may report"):
             with self.subTest(text):
                 self.assertEqual(days.split(text, WED), (text, None))
         self.assertIsNone(days.parse("someday", WED))
@@ -193,6 +198,7 @@ class FastPathTest(unittest.TestCase):
             "what do I need to do today?": "today",
             "What do I need to do": "today",
             "what do I have to do tomorrow": "tomorrow",
+            "what do I need to do tommorow": "tommorow",
             "what's on my plate today": "today",
             "what's on my agenda": "today",
             "what is due tomorrow": "tomorrow",

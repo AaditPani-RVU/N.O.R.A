@@ -33,11 +33,14 @@ _WD = "|".join(sorted(_WEEKDAY, key=len, reverse=True))
 _MON = "|".join(sorted(_MONTH, key=len, reverse=True))
 _ORD = r"(?P<{0}>\d{{1,2}})(?:st|nd|rd|th)?"
 
+_TOMORROW = r"t(?:o|u)?m+o?r+o?w+|tmr|2mor+o?w?|tomoz"
+
 # One day expression, without the "on"/"by" in front of it.
 _DAY = (
     r"(?P<rel>today|tonight|this\s+(?:morning|afternoon|evening)|end\s+of\s+(?:the\s+)?day"
-    r"|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tmrw|tmr"
-    r"|(?:the\s+)?day\s+after\s+tomorrow)"
+    # Typed on a phone, "tomorrow" is often "tommorow", "tomorow", "tmrw".
+    rf"|(?:{_TOMORROW})(?:\s+(?:morning|afternoon|evening|night))?"
+    rf"|(?:the\s+)?day\s+after\s+(?:{_TOMORROW}))"
     rf"|(?P<which>this\s+|next\s+|coming\s+)?(?P<wd>{_WD})"
     rf"(?:\s+(?:morning|afternoon|evening|night))?"
     rf"|(?:the\s+)?{_ORD.format('d1')}\s+(?:of\s+)?(?P<m1>{_MON})"
@@ -61,7 +64,7 @@ def _from_match(m: re.Match, today: date) -> date | None:
         rel = g["rel"].lower()
         if "after" in rel:
             return today + timedelta(days=2)
-        if rel.startswith(("tomorrow", "tmr")):
+        if re.match(_TOMORROW, rel, re.I):
             return today + timedelta(days=1)
         return today
     if g.get("wd"):

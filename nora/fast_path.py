@@ -607,7 +607,8 @@ def _build_rules() -> None:
         lambda m: _intent("add task", "add_task",
                           {"title": (m.group("what") or m.group("what2")).strip()}),
     )
-    day = (r"(?:\s+(?:for\s+|on\s+)?(?P<day>today|tonight|tomorrow|this\s+(?:morning|afternoon|evening)"
+    from nora.days import _TOMORROW
+    day = (r"(?:\s+(?:for\s+|on\s+)?(?P<day>today|tonight|" + _TOMORROW + r"|this\s+(?:morning|afternoon|evening)"
            r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday))")
     # (head, whether the day may be left out, meaning today)
     for head, optional in (
