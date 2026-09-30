@@ -116,6 +116,18 @@ class TasksAndAgendaTest(_Store):
         [task] = task_ledger.get_open_tasks()
         self.assertEqual((task["title"], task["due_on"]), ("Submit the assignment", "2026-10-01"))
 
+    def test_saying_it_twice_is_one_task(self) -> None:
+        with self.on(WED):
+            task_commands.add_task("submit the assignment tomorrow")
+            self.assertEqual(task_commands.add_task("Submit the assignment tomorrow"),
+                             "That's already on your list, due tomorrow.")
+            self.assertEqual(task_commands.add_task("submit the assignment on friday"),
+                             "That's already on your list. Moved it to Friday, 2 October.")
+            self.assertEqual(task_commands.add_task("submit the assignment"),
+                             "That's already on your list, due Friday, 2 October.")
+        [task] = task_ledger.get_open_tasks()
+        self.assertEqual(task["due_on"], "2026-10-02")
+
     def test_the_model_can_pass_the_day_separately(self) -> None:
         with self.on(WED):
             self.assertIn("due Monday, 5 October", task_commands.add_task("Pay rent", due="the 5th"))

@@ -40,6 +40,15 @@ def add_task(title: str, notes: str = "", due: str = "") -> str:
     title = _tidy_title(title)
     if not title:
         return "What's the task?"
+    # Said twice (typed again, or once on each device) is one task, not two.
+    same = [t for t in task_ledger.get_open_tasks() if t["title"].casefold() == title.casefold()]
+    if same:
+        task = same[0]
+        if when is not None and task["due_on"] != when.isoformat():
+            task_ledger.update_task(task["id"], due_on=when)
+            return f"That's already on your list. Moved it to {days.say(when, today)}."
+        due = f", due {days.say(date.fromisoformat(task['due_on']), today)}" if task["due_on"] else ""
+        return f"That's already on your list{due}."
     task_ledger.create_task(title, notes=notes, due_on=when)
     if when is None:
         return f"Added to your list: {title}."
