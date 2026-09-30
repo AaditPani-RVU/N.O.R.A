@@ -1,7 +1,7 @@
 # ADR-0005: Typed chat, confirmations and messages on the phone (Phase 5)
 
 - **Date:** 2026-09-30
-- **Status:** built and tested off-device; **not yet verified on the Pixel**
+- **Status:** implemented; verified on the Pixel 10 on 2026-09-30 (the on-phone checklist below)
 - **Author:** Aadit Pani (with Claude Code)
 - **Scope:** Android `link/Chat.kt` (new), `link/DeviceLink.kt`, `phone/{NoraApp,Notifications,PhoneStore,ReplyReceiver}.kt`, `ui/MainActivity.kt`, manifest; core `nora/days.py` (new), `nora/task_ledger.py`, `nora/commands/task_commands.py`, `nora/fast_path.py`, `nora/store.py` (schema v4), `nora/jobs.py`, `nora/scheduler.py`, `nora/delivery.py`, `nora/hub/server.py`, `config.yaml`; `android/tools/hub_harness.py`; tests
 
@@ -180,7 +180,7 @@ Two things on the core were missing for the exit criterion:
     messages.
 - `assembleDebug` and `lintDebug` are clean (0 errors; the 17 warnings are
   existing KTX-style ones).
-- **Not verified: anything on the Pixel.** See the checklist.
+- **On the Pixel (2026-09-30):** the checklist below passed. Two bugs turned up and were fixed the same evening: "Tommorow" wasn't read as a day, and remembering a task twice listed it twice.
 
 ## The look (app 0.5.1)
 

@@ -1,7 +1,7 @@
 # ADR-0004: Basic phone capabilities, with untrusted-text handling (Phase 4)
 
 - **Date:** 2026-09-30
-- **Status:** implemented and tested off-device; **not yet verified on the Pixel** (built overnight without phone access)
+- **Status:** implemented; verified on the Pixel 10 on 2026-09-30 (the on-phone checklist below)
 - **Author:** Aadit Pani (with Claude Code)
 - **Scope:** Android `phone/` (new capabilities, notification listener, foreground tracking), `link/PhoneLogic.kt`; core `nora/untrusted.py`, `nora/places.py`, `nora/commands/places.py`; changed `nora/command_engine.py`, `nora/channel.py`, `nora/dialogue.py`, `nora/pipeline.py`, `nora/planner.py`, `nora/fast_path.py`, `nora/hub/{protocol,server,fake_device}.py`, `nora/store.py` (schema v3), `nora/schemas.py`, `nora/intent_parser.py`, `nora/risk.py`, `nora/commands/app_launcher.py`, `config.yaml`, tests
 
