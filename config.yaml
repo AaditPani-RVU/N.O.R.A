@@ -863,6 +863,10 @@ hub:
   port: 8770
   # How long a device gets to run one capability before it counts as TIMEOUT.
   invoke_deadline_ms: 8000
+  # Per-capability overrides. play_media waits for Spotify to really switch
+  # tracks (up to 10s, retrying once) before it answers, so it needs longer.
+  invoke_deadlines_ms:
+    phone.play_media: 14000
   # Core-side tier floor per capability. Effective tier is the max of this and
   # what the device declares (0 read, 1 act, 2 confirm on device, 3 + biometric).
   capability_tiers: {}

@@ -126,6 +126,62 @@ object SpotifyUri {
     fun autoplay(uri: String): String = "$uri:play"
 }
 
+/**
+ * Whether Spotify really switched to what `play_media` asked for, and what to
+ * do next. Fed a snapshot of the media session every poll.
+ *
+ * Found on the Pixel: pressing play before the new item has loaded resumes
+ * the *old* track, and "something is playing" was then reported as success
+ * ("starting with Risk It All by Bruno Mars" for a Deftones request). So play
+ * is only pressed once the session shows the new item, and only a changed
+ * item counts.
+ */
+class PlayWatch(
+    private val beforeId: String?,
+    private val beforeTitle: String?,
+    /** The track URI asked for, when it is one: then the session's media id must equal it. */
+    private val expectId: String?,
+    private val resendAtMs: Long = 4000,
+    private val giveUpAtMs: Long = 10000,
+    private val settleMs: Long = 600,
+) {
+    sealed class Next {
+        object Wait : Next()
+        object PressPlay : Next()
+        object Resend : Next()
+        data class Done(val title: String) : Next()
+        data class GiveUp(val switched: Boolean) : Next()
+    }
+
+    private var switchedAt = -1L
+    private var pressed = false
+    private var resent = false
+
+    fun switched(id: String?, title: String?): Boolean = when {
+        expectId != null && id != null && id.startsWith("spotify:") -> id == expectId
+        id != null && beforeId != null -> id != beforeId
+        else -> title != null && title != beforeTitle
+    }
+
+    fun step(elapsedMs: Long, id: String?, title: String?, playing: Boolean): Next {
+        val sw = switched(id, title)
+        if (sw && switchedAt < 0) switchedAt = elapsedMs
+        return when {
+            sw && playing && title != null -> Next.Done(title)
+            elapsedMs >= giveUpAtMs -> Next.GiveUp(sw)
+            sw && !playing && !pressed && elapsedMs - switchedAt >= settleMs -> {
+                pressed = true
+                Next.PressPlay
+            }
+            !sw && !resent && elapsedMs >= resendAtMs -> {
+                resent = true
+                Next.Resend
+            }
+            else -> Next.Wait
+        }
+    }
+}
+
 object VolumeMath {
     /** 0–100 → a stream index in 0..max, rounding to nearest. */
     fun toIndex(percent: Int, max: Int): Int =

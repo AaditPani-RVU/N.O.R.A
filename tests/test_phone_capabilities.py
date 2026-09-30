@@ -614,6 +614,23 @@ class ParamFitTest(HubTestCase):
         self.assertEqual(dev.executed[0]["params"], {"app": "youtube"})
 
 
+class DeadlineTest(HubTestCase):
+    async def test_play_media_gets_its_own_deadline(self) -> None:
+        """play_media waits up to 10s for Spotify to really switch; under the
+        default 8s the core gave up first and said it ran out of time."""
+        caps = [{"name": n, "tier": 1, "description": n, "params_schema": {
+                    "type": "object", "properties": {p: {"type": "string"}}}}
+                for n, p in (("phone.play_media", "query"), ("phone.volume", "action"))]
+        dev = await self.paired(capabilities=caps)
+        cfg = {"invoke_deadline_ms": 8000, "invoke_deadlines_ms": {"phone.play_media": 14000}}
+        with mock.patch.object(hub_server, "_cfg", return_value=cfg):
+            await self.hub.call(dev.device_id, "phone.play_media", {"query": "x"},
+                                channel=channel.Channel("local", "voice", print))
+            await self.hub.call(dev.device_id, "phone.volume", {"action": "up"},
+                                channel=channel.Channel("local", "voice", print))
+        self.assertEqual([e["deadline_ms"] for e in dev.executed], [14000, 8000])
+
+
 class IntentPromptTest(HubTestCase):
     async def test_device_signatures_survive_the_prompt_cap(self) -> None:
         """The action block is capped at 4000 characters and the device section

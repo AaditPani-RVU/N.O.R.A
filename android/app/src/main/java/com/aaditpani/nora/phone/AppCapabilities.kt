@@ -4,9 +4,12 @@ import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaMetadata
 import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import com.aaditpani.nora.link.AppEntry
@@ -16,9 +19,11 @@ import com.aaditpani.nora.link.CapabilityResult
 import com.aaditpani.nora.link.Directions
 import com.aaditpani.nora.link.ErrorCode
 import com.aaditpani.nora.link.MediaFocus
+import com.aaditpani.nora.link.PlayWatch
 import com.aaditpani.nora.link.SpotifyUri
 import com.aaditpani.nora.link.UrlPolicy
 import kotlinx.coroutines.delay
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Launch an installed app. Tier 1: acts, logged. */
@@ -213,14 +218,15 @@ class PlayMedia(private val context: Context) : Capability {
         val controller = Media.controllerFor(context, pkg)
         if (controller != null &&
             (controller.playbackState?.actions ?: 0L) and PlaybackState.ACTION_PLAY_FROM_SEARCH != 0L) {
-            val before = Media.title(controller)
-            val wasPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-            controller.transportControls.playFromSearch(query, extras)
-            val title = startedPlaying(controller, before, wasPlaying)
-                ?: return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED,
-                    "$label didn't start playing $what.")
+            val (title, trace) = watch(controller, null) {
+                controller.transportControls.playFromSearch(query, extras)
+            }
+            if (title == null) {
+                return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED,
+                    "$label didn't start playing $what. ${trace.optString("summary")}".trim())
+            }
             return CapabilityResult.Ok(JSONObject()
-                .put("message", "Playing $title on $label.").put("title", title))
+                .put("message", "Playing $title on $label.").put("title", title).put("trace", trace))
         }
 
         val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).setPackage(pkg).putExtras(extras)
@@ -243,16 +249,63 @@ class PlayMedia(private val context: Context) : Capability {
             val done = "Playing $what on Spotify." + if (shuffle) " Turn shuffle on in Spotify if you want it." else ""
             return Launcher.open(context, intent, "Spotify", done)
         }
-        val before = Media.title(controller)
-        val wasPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING
         if (shuffle) setShuffle(controller)
-        controller.transportControls.playFromUri(Uri.parse(uri), Bundle())
-        val title = startedPlaying(controller, before, wasPlaying)
-            ?: return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED, "Spotify didn't start playing $what.")
+        val send = { controller.transportControls.playFromUri(Uri.parse(uri), Bundle()) }
+        val expect = if (uri.startsWith("spotify:track:")) uri else null
+        val (title, trace) = watch(controller, expect, send)
+        if (title == null) {
+            return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED,
+                "Spotify didn't switch to $what. ${trace.optString("summary")}".trim())
+        }
         if (shuffle) setShuffle(controller)    // some builds reset it when the context changes
         val how = if (shuffle) "Shuffling" else "Playing"
         return CapabilityResult.Ok(JSONObject()
-            .put("message", "$how $what on Spotify, starting with $title.").put("title", title))
+            .put("message", "$how $what on Spotify, starting with $title.")
+            .put("title", title).put("trace", trace))
+    }
+
+    /**
+     * Send the request, then poll the session until it plays what was asked
+     * ([PlayWatch]). Returns (the new title or null, a trace for the core's
+     * log). Every poll is also logged under NORA.play for `adb logcat`.
+     */
+    private suspend fun watch(
+        controller: android.media.session.MediaController, expectId: String?, send: () -> Unit,
+    ): Pair<String?, JSONObject> {
+        fun id() = controller.metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+        fun playing() = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+        val beforeId = id()
+        val beforeTitle = Media.title(controller)
+        val w = PlayWatch(beforeId, beforeTitle, expectId)
+        val steps = JSONArray()
+        val start = SystemClock.elapsedRealtime()
+        fun note(what: String) {
+            val ms = SystemClock.elapsedRealtime() - start
+            val line = "${ms}ms $what id=${id()} title=${Media.title(controller)} playing=${playing()}"
+            Log.i(TAG, line)
+            if (steps.length() < 12) steps.put(line)
+        }
+        note("before (expect=$expectId)")
+        send()
+        while (true) {
+            delay(300)
+            val ms = SystemClock.elapsedRealtime() - start
+            when (val next = w.step(ms, id(), Media.title(controller), playing())) {
+                is PlayWatch.Next.Wait -> Unit
+                is PlayWatch.Next.PressPlay -> { note("press play"); controller.transportControls.play() }
+                is PlayWatch.Next.Resend -> { note("resend"); send() }
+                is PlayWatch.Next.Done -> {
+                    note("done")
+                    return next.title to JSONObject().put("steps", steps)
+                }
+                is PlayWatch.Next.GiveUp -> {
+                    note("give up")
+                    val summary = if (next.switched) "It loaded it but wouldn't start playing."
+                                  else "It stayed on ${beforeTitle ?: "what it had"}."
+                    return null to JSONObject().put("steps", steps).put("summary", summary)
+                }
+            }
+        }
     }
 
     /**
@@ -266,31 +319,6 @@ class PlayMedia(private val context: Context) : Capability {
             Bundle().apply { putInt("android.support.v4.media.session.action.ARGUMENT_SHUFFLE_MODE", 1) })
     }
 
-    /**
-     * Wait for the session to play something new; its title, or null.
-     *
-     * Spotify with NORA in the background loads what play-from-URI asked for
-     * and leaves it paused, so once the new track is in (or after 2s, in case
-     * it starts with the same one) press play. At most 4.8s: the core gives
-     * the whole call `invoke_deadline_ms` (8s), and answering "didn't start"
-     * beats the core giving up with a timeout.
-     */
-    private suspend fun startedPlaying(
-        controller: android.media.session.MediaController, before: String?, wasPlaying: Boolean,
-    ): String? {
-        var nudged = false
-        for (i in 1..12) {
-            delay(400)
-            val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-            val title = Media.title(controller)
-            if (playing && title != null && (title != before || !wasPlaying)) return title
-            if (!playing && !nudged && (title != before || i >= 5)) {
-                controller.transportControls.play()
-                nudged = true
-            }
-        }
-        return null
-    }
 
     private fun searchExtras(query: String, kind: String): Bundle = Bundle().apply {
         putString(SearchManager.QUERY, query)
@@ -305,6 +333,7 @@ class PlayMedia(private val context: Context) : Capability {
 
     private companion object {
         const val SPOTIFY = "com.spotify.music"
+        const val TAG = "NORA.play"
     }
 }
 

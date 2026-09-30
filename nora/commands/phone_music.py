@@ -116,6 +116,12 @@ async def play_on_phone(query: str, kind: str = "any", shuffle: bool = False) ->
     if shuffle:
         params["shuffle"] = True
     res = await _phone(params)
+    trace = (res.data or {}).get("trace") if isinstance(res.data, dict) else None
+    if trace:
+        # What Spotify's session did, poll by poll: the phone's side of a
+        # "played the wrong song" report.
+        logger.info("play_media %s -> %s: %s", uri or query, "ok" if res.success else "failed",
+                    "; ".join(trace.get("steps") or []))
     message = " ".join(p for p in (note, res.message) if p)
     return StepResult(action="play_on_phone", success=res.success, withheld=res.withheld,
                       error_code=res.error_code, data=res.data, message=message)

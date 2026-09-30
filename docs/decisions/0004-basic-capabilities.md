@@ -297,6 +297,15 @@ the `…:play` deep link when no session exists. So the split is now:
   with the compat `SET_SHUFFLE_MODE` custom action. It claims success only
   once the session reports something new playing (8s), and says so when not.
 
+Second round on the Pixel: with Spotify open, play-from-URI loads the new item
+slowly, and pressing play before it arrives resumes the *old* track, which was
+then reported as success ("starting with Risk It All by Bruno Mars" for a
+Deftones request). `PlayWatch` now only counts a changed item (the session's
+media id, or its title), presses play only after the new item is in, re-sends
+once at 4s and gives up honestly at 10s. `phone.play_media` gets its own 14s
+deadline (`hub.invoke_deadlines_ms`), and every poll is logged on the phone
+under `NORA.play` and returned to the core as a trace.
+
 Spotify Connect is still not used: the phone plays, so offline downloads work.
 Since March 2026 Spotify only serves development-mode apps whose owner has
 Premium; the user's account does.

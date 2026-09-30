@@ -84,6 +84,40 @@ class PhoneLogicTest {
     }
 
     @Test
+    fun oldTrackResumingIsNotSuccess() {
+        // What the Pixel did: nothing switched, and the old song was playing.
+        val w = PlayWatch("spotify:track:bruno", "Risk It All by Bruno Mars", "spotify:track:deftones")
+        assertEquals(PlayWatch.Next.Wait, w.step(300, "spotify:track:bruno", "Risk It All by Bruno Mars", true))
+        assertEquals(PlayWatch.Next.Resend, w.step(4000, "spotify:track:bruno", "Risk It All by Bruno Mars", true))
+        assertEquals(PlayWatch.Next.Wait, w.step(4300, "spotify:track:bruno", "Risk It All by Bruno Mars", true))
+        assertEquals(PlayWatch.Next.GiveUp(false),
+            w.step(10000, "spotify:track:bruno", "Risk It All by Bruno Mars", true))
+    }
+
+    @Test
+    fun playIsPressedOnlyOnceTheNewTrackIsIn() {
+        val w = PlayWatch("spotify:track:bruno", "Risk It All by Bruno Mars", "spotify:track:deftones")
+        assertEquals(PlayWatch.Next.Wait, w.step(300, "spotify:track:bruno", "Risk It All by Bruno Mars", false))
+        assertEquals(PlayWatch.Next.Wait, w.step(2000, "spotify:track:bruno", "Risk It All by Bruno Mars", false))
+        assertEquals(PlayWatch.Next.Wait, w.step(2300, "spotify:track:deftones", "Risk by Deftones", false))
+        assertEquals(PlayWatch.Next.PressPlay, w.step(2900, "spotify:track:deftones", "Risk by Deftones", false))
+        assertEquals(PlayWatch.Next.Wait, w.step(3200, "spotify:track:deftones", "Risk by Deftones", false))
+        assertEquals(PlayWatch.Next.Done("Risk by Deftones"),
+            w.step(3500, "spotify:track:deftones", "Risk by Deftones", true))
+    }
+
+    @Test
+    fun aPlaylistCountsAsSwitchedWhenTheItemChanges() {
+        val w = PlayWatch("spotify:track:bruno", "Risk It All by Bruno Mars", null)
+        assertEquals(PlayWatch.Next.Done("Comfortably Numb by Pink Floyd"),
+            w.step(1200, "spotify:track:floyd", "Comfortably Numb by Pink Floyd", true))
+        // No media ids at all: fall back to the title.
+        val t = PlayWatch(null, "Risk It All by Bruno Mars", null)
+        assertFalse(t.switched(null, "Risk It All by Bruno Mars"))
+        assertTrue(t.switched(null, "Money by Pink Floyd"))
+    }
+
+    @Test
     fun volumeRoundTrips() {
         assertEquals(6, VolumeMath.toIndex(40, 15))
         assertEquals(0, VolumeMath.toIndex(-5, 15))

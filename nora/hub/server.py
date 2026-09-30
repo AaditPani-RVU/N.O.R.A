@@ -492,7 +492,8 @@ class Hub:
             return fail(protocol.POLICY_BLOCKED, f"{capability} can't run from {origin}.")
 
         inv_id = protocol.new_id()
-        deadline_ms = int(_cfg().get("invoke_deadline_ms", 8000))
+        deadline_ms = int((_cfg().get("invoke_deadlines_ms") or {}).get(
+            capability, _cfg().get("invoke_deadline_ms", 8000)))
         self._record(inv_id, device_id, capability, params, origin, turn_id, tier)
 
         confirmation = None
