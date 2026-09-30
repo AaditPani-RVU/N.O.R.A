@@ -300,9 +300,11 @@ phrases can't mean anything else.
 ## Consequences & follow-ups
 
 1. The prompt budget: the intent prompt is about 7k tokens against Groq's 8k
-   a minute and 200k a day, and the fallback chain behind it is broken (a 20b
-   model that fails JSON validation, a retired NVIDIA model). Worth fixing
-   before Phase 6, when voice sends more turns.
+   a minute and 200k a day. Worth trimming before Phase 6, when voice sends
+   more turns. The fallback chain behind it is fixed (2026-09-30): the
+   retired NVIDIA models are replaced by `nemotron-3-super-120b` (6/6 on the
+   intent prompt with the phone connected) and NVIDIA's `gpt-oss-20b`, and
+   Groq's `gpt-oss-20b` moves behind them for intent.
 2. A background location fix needs "Allow all the time". That comes with
    Phase 8 geofences.
 3. Confirmation UI on the phone arrives with the first tier-2 capability
