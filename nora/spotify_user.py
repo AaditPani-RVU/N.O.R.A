@@ -4,16 +4,17 @@
 "play my workout playlist" found strangers' playlists called "Workout". This
 module holds a token for the user themself, minted once by a browser login,
 and uses it for one thing: listing their playlists so a name said out loud
-becomes the right `spotify:playlist:…` URI. The phone does the playing
-(`phone.play_media`), so nothing here controls playback.
+becomes the right `spotify:playlist:…` URI, and to start it on the phone
+through Spotify Connect (see "Playback on the phone" below).
 
 Setup, once:
   1. In the Spotify developer dashboard, add the redirect URI
      http://127.0.0.1:8888/callback to the app whose SPOTIFY_CLIENT_ID is in .env.
   2. `python -m nora.spotify_user login` on the core, and approve in the browser.
 
-The login is Authorization Code with PKCE, scopes playlist-read-private and
-playlist-read-collaborative only. Since March 2026 Spotify only serves
+The login is Authorization Code with PKCE, scopes playlist-read-private,
+playlist-read-collaborative, user-read-playback-state and
+user-modify-playback-state. Since March 2026 Spotify only serves
 development-mode apps whose owner has Premium; the user's account does.
 The token lands in spotify_user_token.json (0600, gitignored) and refreshes
 itself; `python -m nora.spotify_user logout` deletes it.
@@ -43,7 +44,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 TOKEN_PATH = Path(os.environ.get("NORA_SPOTIFY_TOKEN_PATH", _ROOT / "spotify_user_token.json"))
 
 AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
-SCOPES = "playlist-read-private playlist-read-collaborative"
+SCOPES = ("playlist-read-private playlist-read-collaborative "
+          "user-read-playback-state user-modify-playback-state")
+_PLAYBACK_SCOPE = "user-modify-playback-state"
 DEFAULT_REDIRECT = "http://127.0.0.1:8888/callback"
 
 _HTTP_TIMEOUT = 8.0
@@ -221,6 +224,95 @@ def find_playlist(query: str, strict: bool = False) -> dict[str, Any] | None:
     return hit
 
 
+# ── Playback on the phone (Spotify Connect) ───────────────────────────────────
+#
+# Found on the Pixel: Spotify's Android media session ignores play-from-URI
+# from NORA's app (it logged no change at all, twice, over 10s), and the
+# deep link needs NORA on screen. Connect goes through Spotify's servers to
+# the phone's Spotify, so it works with both apps in the background. It needs
+# Premium, which the user has, and Spotify running on the phone — otherwise the
+# phone isn't a Connect device and play_on_phone falls back to the phone.
+
+class PlaybackError(RuntimeError):
+    """Spotify refused or failed to play; the message is for the user."""
+
+
+def can_play() -> bool:
+    """Linked with the playback scopes (a login from before they were asked
+    for has only the playlist ones)."""
+    return _PLAYBACK_SCOPE in str(_load().get("scope", "")).split()
+
+
+def _send(method: str, path: str, params: dict | None = None, body: dict | None = None):
+    import requests
+    try:
+        return requests.request(method, f"{spotify_api.API_BASE}{path}", params=params, json=body,
+                                timeout=_HTTP_TIMEOUT,
+                                headers={"Authorization": f"Bearer {_access_token()}"})
+    except NotLoggedIn:
+        raise
+    except Exception as exc:
+        raise PlaybackError(f"I couldn't reach Spotify: {exc}") from exc
+
+
+def phone_device() -> dict[str, Any] | None:
+    """The phone as a Connect device: {id, name, active}, or None when its
+    Spotify isn't running. `spotify.phone_device` in config picks one by name."""
+    resp = _send("GET", "/me/player/devices")
+    if resp.status_code != 200:
+        return None
+    want = str(spotify_api._cfg().get("phone_device") or "").casefold()
+    phones = [d for d in (resp.json().get("devices") or [])
+              if d.get("id") and (d.get("name", "").casefold() == want if want
+                                  else d.get("type") == "Smartphone")]
+    if not phones:
+        return None
+    d = sorted(phones, key=lambda d: not d.get("is_active"))[0]
+    return {"id": d["id"], "name": d.get("name", "phone"), "active": bool(d.get("is_active"))}
+
+
+def _now_playing() -> dict[str, Any] | None:
+    resp = _send("GET", "/me/player")
+    if resp.status_code != 200 or not resp.content:
+        return None
+    return resp.json()
+
+
+def _describe(item: dict[str, Any]) -> str:
+    artists = ", ".join(a.get("name", "") for a in item.get("artists") or [] if isinstance(a, dict))
+    return f"{item.get('name', '')} by {artists}" if artists else str(item.get("name", ""))
+
+
+def play_on_device(uri: str, device_id: str, shuffle: bool = False,
+                   settle_sec: float = 4.0) -> str:
+    """Play `uri` (a track, or a playlist/album/artist context) on the device
+    and confirm it took. Returns what is playing ("Risk by Deftones")."""
+    body = {"uris": [uri]} if uri.startswith("spotify:track:") else {"context_uri": uri}
+    resp = _send("PUT", "/me/player/play", {"device_id": device_id}, body)
+    if resp.status_code == 403:
+        raise PlaybackError("Spotify says playback control needs Premium on this account.")
+    if resp.status_code == 404:
+        raise PlaybackError("Spotify couldn't find the phone. Open Spotify on it and try again.")
+    if resp.status_code not in (200, 202, 204):
+        raise PlaybackError(f"Spotify refused to play it (HTTP {resp.status_code}).")
+    if shuffle:
+        # After play, not before: shuffle applies to the device that is playing.
+        _send("PUT", "/me/player/shuffle", {"state": "true", "device_id": device_id})
+
+    deadline = time.time() + settle_sec
+    while True:
+        state = _now_playing() or {}
+        item = state.get("item") or {}
+        ctx = (state.get("context") or {}).get("uri")
+        on_it = item.get("uri") == uri or ctx == uri
+        if on_it and state.get("is_playing") and (state.get("device") or {}).get("id") == device_id:
+            return _describe(item)
+        if time.time() >= deadline:
+            what = _describe(item) if item else "nothing"
+            raise PlaybackError(f"Spotify accepted it, but the phone is still on {what}.")
+        time.sleep(0.5)
+
+
 # ── Login (run once, by hand) ─────────────────────────────────────────────────
 
 def login(open_browser: bool = True, timeout_sec: float = 300.0) -> str:
@@ -319,6 +411,11 @@ def _main(argv: list[str]) -> int:
             return 1
         for p in playlists(refresh=True):
             print(("  * " if p["mine"] else "    ") + p["name"])
+        if not can_play():
+            print("Playback control not granted: run login again.")
+        else:
+            d = phone_device()
+            print(f"Phone as a Connect device: {d['name'] if d else 'not visible (open Spotify on it)'}")
     else:
         print("usage: python -m nora.spotify_user [login|status|logout]")
         return 2

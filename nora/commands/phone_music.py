@@ -3,8 +3,12 @@
 Spotify on Android turned play-from-search into "open the search page": it
 never started anything, and it only searched the public catalogue. So the core
 works out *what* to play — the user's own playlist through `nora.spotify_user`,
-else a track, artist or album through the app-token search — and hands the
-phone a `spotify:` URI, which it plays through Spotify's media session.
+else a track, artist or album through the app-token search.
+
+Then it plays it through Spotify Connect when the phone's Spotify is running:
+Spotify's media session on the phone ignored play-from-URI sent by NORA's app.
+When the phone isn't a Connect device, the phone gets the `spotify:` URI and
+opens it (or leaves a tap-to-open notification when NORA isn't on screen).
 """
 from __future__ import annotations
 
@@ -90,6 +94,28 @@ def _resolve(query: str, kind: str) -> tuple[str | None, str, str]:
     return None, query, note
 
 
+def _via_connect(uri: str, label: str, shuffle: bool) -> tuple[bool, str] | None:
+    """Play through Spotify Connect: (ok, what to say), or None when Connect
+    can't be used here (not linked for playback, or the phone's Spotify isn't
+    running) and the phone should try itself. Blocking."""
+    try:
+        if not spotify_user.can_play():
+            return None
+        device = spotify_user.phone_device()
+        if device is None:
+            return None
+        now = spotify_user.play_on_device(uri, device["id"], shuffle)
+    except spotify_user.NotLoggedIn:
+        return None
+    except spotify_user.PlaybackError as exc:
+        logger.warning("Connect play of %s failed: %s", uri, exc)
+        return False, str(exc)
+    how = "Shuffling" if shuffle else "Playing"
+    if now.casefold() == label.casefold():
+        return True, f"{how} {label} on your phone."
+    return True, f"{how} {label} on your phone, starting with {now}."
+
+
 @register(
     "play_on_phone",
     sig="play_on_phone(query: str, kind: str = 'any', shuffle: bool = False)",
@@ -109,6 +135,13 @@ async def play_on_phone(query: str, kind: str = "any", shuffle: bool = False) ->
     uri, label, note = await loop.run_in_executor(None, _resolve, query, kind)
     if uri is None and spotify_user.canonical(query) == _OFFLINE:
         return StepResult(action="play_on_phone", success=False, message=note)
+
+    if uri:
+        played = await loop.run_in_executor(None, _via_connect, uri, label, shuffle)
+        if played is not None:
+            ok, said = played
+            return StepResult(action="play_on_phone", success=ok,
+                              message=" ".join(p for p in (note, said) if p))
 
     params: dict = {"query": query, "kind": kind, "app": "spotify", "label": label[:100]}
     if uri:

@@ -306,7 +306,18 @@ once at 4s and gives up honestly at 10s. `phone.play_media` gets its own 14s
 deadline (`hub.invoke_deadlines_ms`), and every poll is logged on the phone
 under `NORA.play` and returned to the core as a trace.
 
-Spotify Connect is still not used: the phone plays, so offline downloads work.
+Third round, with the trace: Spotify's session **ignores play-from-URI from
+NORA's app entirely**. The media id never changed, not after a re-send, not in
+10s, though the session advertises `ACTION_PLAY_FROM_URI` (it presumably
+honours it only for callers it trusts, like Assistant and Android Auto). So
+**Spotify Connect is now the main path**: the core plays the URI on the phone as
+a Connect device through the Web API (`spotify_user.play_on_device`, the user
+has Premium; login gains `user-read-playback-state` and
+`user-modify-playback-state`), sets shuffle, and confirms from `/me/player`
+that the phone is playing that item. When the phone's Spotify isn't running it
+isn't a Connect device, and `phone.play_media` opens the `…:play` link (on
+screen) or leaves a notification. The phone still plays the audio, so offline
+downloads work.
 Since March 2026 Spotify only serves development-mode apps whose owner has
 Premium; the user's account does.
 

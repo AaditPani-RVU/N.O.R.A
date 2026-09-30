@@ -85,7 +85,9 @@ class PlayOnPhoneTest(unittest.TestCase):
             self.sent.append(params)
             return StepResult(action="phone.play_media", success=True,
                               message=f"Playing {params.get('label')} on Spotify.")
-        self.patches = [mock.patch.object(phone_music, "_phone", phone)]
+        self.patches = [mock.patch.object(phone_music, "_phone", phone),
+                        # The phone path; ConnectTest covers Spotify Connect.
+                        mock.patch.object(spotify_user, "can_play", return_value=False)]
         for p in self.patches:
             p.start()
 
@@ -171,6 +173,101 @@ class PlayOnPhoneTest(unittest.TestCase):
              mock.patch.object(phone_music.spotify_api, "find_track", return_value=None):
             self.run_(query="some obscure thing", kind="any")
         self.assertNotIn("uri", self.sent[0])
+
+
+class _Resp:
+    def __init__(self, status: int, body: dict | None = None):
+        self.status_code, self._body = status, body
+        self.content = b"x" if body is not None else b""
+
+    def json(self):
+        return self._body
+
+
+class ConnectTest(unittest.TestCase):
+    """Spotify's Android session ignored play-from-URI from NORA's app, so a
+    phone that is a Connect device is played through Spotify's servers."""
+
+    PHONE = {"id": "dev-pixel", "type": "Smartphone", "name": "Pixel 10", "is_active": False}
+    LAPTOP = {"id": "dev-laptop", "type": "Computer", "name": "laptop", "is_active": True}
+    DEFTONES = "spotify:track:0lqHgjNrXmtFroWDqwV1iQ"
+
+    def setUp(self):
+        self.calls: list[tuple] = []
+        self.player: dict = {}
+
+        def send(method, path, params=None, body=None):
+            self.calls.append((method, path, params, body))
+            if path == "/me/player/devices":
+                return _Resp(200, {"devices": [self.LAPTOP, self.PHONE]})
+            if path == "/me/player" and method == "GET":
+                return _Resp(200, self.player) if self.player else _Resp(204)
+            return _Resp(204)
+        self.p = mock.patch.object(spotify_user, "_send", send)
+        self.p.start()
+        self.sleep = mock.patch.object(spotify_user.time, "sleep")
+        self.sleep.start()
+
+    def tearDown(self):
+        self.p.stop()
+        self.sleep.stop()
+
+    def test_the_phone_is_the_smartphone(self):
+        self.assertEqual(spotify_user.phone_device()["id"], "dev-pixel")
+
+    def test_a_track_plays_and_is_confirmed(self):
+        self.player = {"is_playing": True, "device": {"id": "dev-pixel"},
+                       "item": {"uri": self.DEFTONES, "name": "Risk",
+                                "artists": [{"name": "Deftones"}]}}
+        self.assertEqual(spotify_user.play_on_device(self.DEFTONES, "dev-pixel"), "Risk by Deftones")
+        put = [c for c in self.calls if c[0] == "PUT"]
+        self.assertEqual(put[0], ("PUT", "/me/player/play", {"device_id": "dev-pixel"},
+                                  {"uris": [self.DEFTONES]}))
+
+    def test_a_playlist_is_a_context_and_shuffles_after_play(self):
+        pl = "spotify:playlist:1dqEsSy2VZ5q5u7SKVbm07"
+        self.player = {"is_playing": True, "device": {"id": "dev-pixel"}, "context": {"uri": pl},
+                       "item": {"uri": "spotify:track:x", "name": "Song", "artists": []}}
+        spotify_user.play_on_device(pl, "dev-pixel", shuffle=True)
+        put = [(c[1], c[3]) for c in self.calls if c[0] == "PUT"]
+        self.assertEqual(put, [("/me/player/play", {"context_uri": pl}), ("/me/player/shuffle", None)])
+
+    def test_the_old_song_is_not_success(self):
+        self.player = {"is_playing": True, "device": {"id": "dev-pixel"},
+                       "item": {"uri": "spotify:track:bruno", "name": "Risk It All",
+                                "artists": [{"name": "Bruno Mars"}]}}
+        with mock.patch.object(spotify_user.time, "time", side_effect=[0, 0, 1, 2, 5, 5]):
+            with self.assertRaises(spotify_user.PlaybackError) as e:
+                spotify_user.play_on_device(self.DEFTONES, "dev-pixel")
+        self.assertIn("Risk It All by Bruno Mars", str(e.exception))
+
+    def test_play_on_phone_uses_connect_and_skips_the_phone(self):
+        self.player = {"is_playing": True, "device": {"id": "dev-pixel"},
+                       "item": {"uri": self.DEFTONES, "name": "Risk",
+                                "artists": [{"name": "Deftones"}]}}
+        phone = mock.AsyncMock()
+        with mock.patch.object(spotify_user, "can_play", return_value=True), \
+             mock.patch.object(phone_music, "_phone", phone), \
+             mock.patch.object(phone_music.spotify_api, "find_track",
+                               return_value={"uri": self.DEFTONES, "title": "Risk",
+                                             "artist": "Deftones", "album": "x"}):
+            r = asyncio.run(phone_music.play_on_phone("Risk by Deftones"))
+        self.assertTrue(r.success, r.message)
+        self.assertEqual(r.message, "Playing Risk by Deftones on your phone.")
+        phone.assert_not_called()
+
+    def test_no_connect_device_falls_back_to_the_phone(self):
+        self.PHONE = dict(self.PHONE, type="Computer")          # phone's Spotify not running
+        phone = mock.AsyncMock(return_value=StepResult(action="phone.play_media", success=False,
+                                                       message="notification"))
+        with mock.patch.object(spotify_user, "can_play", return_value=True), \
+             mock.patch.object(phone_music, "_phone", phone), \
+             mock.patch.object(phone_music.spotify_api, "find_track",
+                               return_value={"uri": self.DEFTONES, "title": "Risk",
+                                             "artist": "Deftones", "album": "x"}):
+            asyncio.run(phone_music.play_on_phone("Risk by Deftones"))
+        phone.assert_called_once()
+        self.assertEqual(phone.call_args[0][0]["uri"], self.DEFTONES)
 
 
 if __name__ == "__main__":
