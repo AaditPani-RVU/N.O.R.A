@@ -112,6 +112,20 @@ object MediaFocus {
     }
 }
 
+/**
+ * The Spotify URIs the core may hand `play_media`: a playlist, album, artist
+ * or track by its base-62 id. Anything else (a web link, `spotify:user:…`,
+ * a URI with extra segments) is refused rather than passed to Spotify.
+ */
+object SpotifyUri {
+    private val SHAPE = Regex("^spotify:(playlist|album|artist|track):[A-Za-z0-9]{10,40}$")
+
+    fun isValid(uri: String): Boolean = SHAPE.matches(uri)
+
+    /** The deep link that opens it *and* starts it, for when Spotify has no session yet. */
+    fun autoplay(uri: String): String = "$uri:play"
+}
+
 object VolumeMath {
     /** 0–100 → a stream index in 0..max, rounding to nearest. */
     fun toIndex(percent: Int, max: Int): Int =

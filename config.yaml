@@ -356,6 +356,13 @@ spotify:
   client_id: ""
   client_secret: ""
 
+  # The user's own playlists ("play my workout playlist" on the phone) need a
+  # one-time login as the user: nora/spotify_user.py. Add this exact redirect
+  # URI to the app in the developer dashboard, then run
+  #     python -m nora.spotify_user login
+  # Since March 2026 development-mode apps only work for Premium owners.
+  redirect_uri: "http://127.0.0.1:8888/callback"
+
   # ISO country code used to relink search results to a playable version.
   market: "US"
 

@@ -129,6 +129,21 @@ def _media_query(raw: str) -> dict:
     return {"query": q[:100], "kind": kind}
 
 
+_SHUFFLE_RE = re.compile(r"\s+(?:on\s+shuffle|shuffled|in\s+shuffle(?:\s+mode)?)$", re.I)
+
+
+def _play_on_phone(raw: str, shuffle: bool = False) -> IntentResponse:
+    """play_on_phone for "my workout playlist (on shuffle)": the core finds the
+    user's playlist, the phone plays it."""
+    q = raw.strip()
+    if _SHUFFLE_RE.search(q):
+        q, shuffle = _SHUFFLE_RE.sub("", q), True
+    params = _media_query(q)
+    if shuffle:
+        params["shuffle"] = True
+    return _intent("play on phone", "play_on_phone", params)
+
+
 # ── Rule table ─────────────────────────────────────────────────────────────────
 
 _RULES: list[tuple[re.Pattern, object]] = []
@@ -146,29 +161,36 @@ def _phone_rules() -> None:
     …" must not become open_app("spotify and play …")."""
     phone = r"(?:on|from|using)\s+(?:my|the)\s+(?:phone|mobile|pixel)"
 
-    # "open Spotify (on my phone) and play my workout playlist". The phone's
-    # media session does the searching, so the user's own private playlists
-    # are found, which the core's app-token search cannot see.
+    # "shuffle my downloads": Spotify keeps the songs downloaded on the phone
+    # in a playlist it makes itself, "Offline Backup".
+    _rule(
+        r"(?:(?P<sh>shuffle)(?:\s+play)?|play|put\s+on|start)\s+(?:my\s+|the\s+)?"
+        r"(?:downloads|downloaded\s+(?:songs|music|tracks)|offline\s+(?:songs|music|tracks)"
+        r"|offline\s+backup(?:\s+playlist)?)(?P<sh2>\s+on\s+shuffle|\s+shuffled)?(?:\s+" + phone + r")?",
+        lambda m: _on_phone("phone.play_media", _intent(
+            "play on phone", "play_on_phone",
+            {"query": "offline backup", "kind": "playlist", "shuffle": True})),
+    )
+    # "open Spotify (on my phone) and play my workout playlist". The core finds
+    # the user's own playlist (nora.spotify_user); the phone plays it.
     _rule(
         r"(?:open|launch|start)\s+(?:up\s+)?spotify(?:\s+" + phone + r")?\s+and\s+play\s+(?P<q>.+?)"
         r"(?:\s+" + phone + r")?",
-        lambda m: (_on_phone("phone.play_media", _intent(
-            "play on phone", "phone.play_media", {**_media_query(m.group("q")), "app": "spotify"}))
+        lambda m: (_on_phone("phone.play_media", _play_on_phone(m.group("q")))
             if re.search(phone, m.group(0), re.I) or _from_phone("phone.play_media")
             or _yours(m.group("q")) else None),
     )
-    # "play my workout playlist": the user's own playlists are private, which
-    # the core's search cannot see and the phone's Spotify can.
+    # "play my workout playlist": the user's own playlists, which only the
+    # user's Spotify login can see.
     _rule(
-        r"play\s+(?P<q>my\s+.+?\s+playlist|my\s+playlist\s+.+)",
-        lambda m: (_intent("play on phone", "phone.play_media",
-                           {**_media_query(m.group("q")), "app": "spotify"})
+        r"(?P<sh>shuffle(?:\s+play)?|play)\s+(?P<q>my\s+.+?\s+playlist(?:\s+on\s+shuffle|\s+shuffled)?"
+        r"|my\s+playlist\s+.+)",
+        lambda m: (_play_on_phone(m.group("q"), m.group("sh").lower().startswith("shuffle"))
                    if _yours(m.group("q")) else None),
     )
     _rule(
         r"play\s+(?P<q>.+?)\s+(?:on\s+spotify\s+)?" + phone + r"(?:\s+on\s+spotify)?",
-        lambda m: _on_phone("phone.play_media", _intent(
-            "play on phone", "phone.play_media", {**_media_query(m.group("q")), "app": "spotify"})),
+        lambda m: _on_phone("phone.play_media", _play_on_phone(m.group("q"))),
     )
     _rule(
         r"(?:open(?:\s+up)?|launch|start|go\s+to)\s+(?P<app>.+?)\s+" + phone,
@@ -289,9 +311,7 @@ def _phone_rules() -> None:
     # Said to the phone, a bare "play X" / "open X" / "pause" means the phone.
     _rule(
         r"play\s+(?P<q>.{2,100})",
-        lambda m: (_intent("play on phone", "phone.play_media",
-                           {**_media_query(m.group("q")), "app": "spotify"})
-                   if _from_phone("phone.play_media") else None),
+        lambda m: (_play_on_phone(m.group("q")) if _from_phone("phone.play_media") else None),
     )
     _rule(
         r"(?:open(?:\s+up)?|launch|start)\s+(?P<app>.+)",

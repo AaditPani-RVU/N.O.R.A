@@ -322,14 +322,26 @@ class PhoneRoutingTest(HubTestCase):
     async def test_spec_examples_resolve_to_the_phone(self) -> None:
         await self.paired(capabilities=PHONE)
         cases = {
-            # Example 1: "my … playlist" is private — only the phone's Spotify sees it.
+            # Example 1: "my … playlist" is private — the core finds it with the
+            # user's Spotify login, the phone plays it.
             "EV, open Spotify and play my workout playlist": None,   # "EV" isn't NORA's name
             "Nora, open Spotify and play my workout playlist":
-                [("phone.play_media", {"query": "workout", "kind": "playlist", "app": "spotify"})],
+                [("play_on_phone", {"query": "workout", "kind": "playlist"})],
             "open spotify on my phone and play lofi":
-                [("phone.play_media", {"query": "lofi", "kind": "any", "app": "spotify"})],
+                [("play_on_phone", {"query": "lofi", "kind": "any"})],
             "play my gym playlist":
-                [("phone.play_media", {"query": "gym", "kind": "playlist", "app": "spotify"})],
+                [("play_on_phone", {"query": "gym", "kind": "playlist"})],
+            "play my gym playlist on shuffle":
+                [("play_on_phone", {"query": "gym", "kind": "playlist", "shuffle": True})],
+            "shuffle my workout playlist":
+                [("play_on_phone", {"query": "workout", "kind": "playlist", "shuffle": True})],
+            # Spotify's own playlist of the songs downloaded on the phone.
+            "shuffle my downloads":
+                [("play_on_phone", {"query": "offline backup", "kind": "playlist", "shuffle": True})],
+            "play my downloaded songs":
+                [("play_on_phone", {"query": "offline backup", "kind": "playlist", "shuffle": True})],
+            "play my offline backup playlist on my phone":
+                [("play_on_phone", {"query": "offline backup", "kind": "playlist", "shuffle": True})],
             # Example 2
             "what's on my notifications": [("phone.read_notifications", {})],
             "did I get anything important?": [("phone.read_notifications", {})],
@@ -366,7 +378,7 @@ class PhoneRoutingTest(HubTestCase):
             with self.subTest(text=text):
                 got = self._steps(text)
                 if want is None:
-                    self.assertTrue(got is None or got[0][0] != "phone.play_media", got)
+                    self.assertTrue(got is None or got[0][0] not in ("phone.play_media", "play_on_phone"), got)
                 else:
                     self.assertEqual(got, want)
 
@@ -389,7 +401,7 @@ class PhoneRoutingTest(HubTestCase):
 
     async def test_naming_the_phone_without_one_says_so(self) -> None:
         for text in ["open whatsapp on my phone", "what's on my notifications",
-                     "play lofi on my phone", "where am I"]:
+                     "play lofi on my phone", "shuffle my downloads", "where am I"]:
             with self.subTest(text=text):
                 self.assertEqual(self._steps(text), "Your phone isn't connected right now.")
 
@@ -399,8 +411,7 @@ class PhoneRoutingTest(HubTestCase):
         token = channel.bind(ch)
         try:
             self.assertEqual(self._steps("play blinding lights"),
-                             [("phone.play_media", {"query": "blinding lights", "kind": "any",
-                                                    "app": "spotify"})])
+                             [("play_on_phone", {"query": "blinding lights", "kind": "any"})])
             self.assertEqual(self._steps("open maps"), [("phone.open_app", {"app": "maps"})])
             self.assertEqual(self._steps("pause"), [("phone.media_control", {"action": "pause"})])
         finally:

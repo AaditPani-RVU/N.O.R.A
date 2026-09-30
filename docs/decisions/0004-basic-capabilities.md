@@ -274,6 +274,33 @@ phrases can't mean anything else.
   morning checklist below.
 - **Not verified: anything on the Pixel.** The overnight build had no phone.
 
+## Revised on the phone (2026-09-30): playing the user's playlist
+
+Example 1 failed on the Pixel. Spotify's current Android build treats
+play-from-search (media session or intent) as "open the search page": it
+started nothing, and the search only showed Spotify's public playlists. The
+phone still reported "Asked Spotify to play …" as a success.
+
+What does work, verified with adb: a `spotify:playlist:…` URI, which Spotify's
+session accepts as play-from-URI (it advertises `ACTION_PLAY_FROM_URI`), and
+the `…:play` deep link when no session exists. So the split is now:
+
+- **Core** — `play_on_phone(query, kind, shuffle)` resolves what to play. The
+  user's own playlists come from `nora/spotify_user.py`, a one-time PKCE login
+  (`python -m nora.spotify_user login`, scopes `playlist-read-private` and
+  `playlist-read-collaborative`, token in `spotify_user_token.json`, 0600).
+  Tracks, artists, albums and public playlists come from the existing
+  app-token search. "My downloads" / "offline songs" is Spotify's generated
+  **Offline Backup** playlist, shuffled.
+- **Phone** — `phone.play_media` takes `uri`, `shuffle` and `label`, checks the
+  URI's shape (`SpotifyUri`), plays it through the session, and sets shuffle
+  with the compat `SET_SHUFFLE_MODE` custom action. It claims success only
+  once the session reports something new playing (8s), and says so when not.
+
+Spotify Connect is still not used: the phone plays, so offline downloads work.
+Since March 2026 Spotify only serves development-mode apps whose owner has
+Premium; the user's account does.
+
 ## On-phone checklist (to close Phase 4)
 
 1. `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`. The

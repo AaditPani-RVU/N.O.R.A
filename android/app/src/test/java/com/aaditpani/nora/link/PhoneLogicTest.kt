@@ -72,6 +72,18 @@ class PhoneLogicTest {
     }
 
     @Test
+    fun onlyPlainSpotifyUrisArePlayed() {
+        assertTrue(SpotifyUri.isValid("spotify:playlist:37i9dQZF1DX76Wlfdnj7AP"))
+        assertTrue(SpotifyUri.isValid("spotify:track:0VjIjW4GlUZAMYd2vXMi3b"))
+        assertFalse(SpotifyUri.isValid("spotify:playlist:37i9dQZF1DX76Wlfdnj7AP:play"))
+        assertFalse(SpotifyUri.isValid("spotify:user:someone:collection"))
+        assertFalse(SpotifyUri.isValid("https://open.spotify.com/playlist/37i9dQZF1DX76Wlfdnj7AP"))
+        assertFalse(SpotifyUri.isValid("intent://evil#Intent;end"))
+        assertEquals("spotify:track:0VjIjW4GlUZAMYd2vXMi3b:play",
+            SpotifyUri.autoplay("spotify:track:0VjIjW4GlUZAMYd2vXMi3b"))
+    }
+
+    @Test
     fun volumeRoundTrips() {
         assertEquals(6, VolumeMath.toIndex(40, 15))
         assertEquals(0, VolumeMath.toIndex(-5, 15))

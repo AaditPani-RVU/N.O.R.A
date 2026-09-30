@@ -100,3 +100,6 @@ client_secret*.json
 
 # Rotated logs: *.log above does not cover nora.log.1 and friends.
 *.log.[0-9]
+
+# Spotify user login (nora/spotify_user.py): reads the user's playlists until revoked.
+spotify_user_token.json

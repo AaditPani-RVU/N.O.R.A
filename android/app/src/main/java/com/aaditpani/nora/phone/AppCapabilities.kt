@@ -16,6 +16,7 @@ import com.aaditpani.nora.link.CapabilityResult
 import com.aaditpani.nora.link.Directions
 import com.aaditpani.nora.link.ErrorCode
 import com.aaditpani.nora.link.MediaFocus
+import com.aaditpani.nora.link.SpotifyUri
 import com.aaditpani.nora.link.UrlPolicy
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -164,21 +165,29 @@ class Navigate(private val context: Context) : Capability {
 }
 
 /**
- * Play something in Spotify (or YouTube Music) by search, through the app's
- * own media session when it has one — which works with NORA in the
- * background — else through Android's play-from-search intent. Spotify
- * searches the user's own library, so "my workout playlist" finds theirs; the
- * core's Web API search only ever sees public playlists.
+ * Play something in Spotify (or YouTube Music).
+ *
+ * With a `uri` — the core resolves "my workout playlist" to the user's own
+ * playlist through their Spotify login — it goes to Spotify's media session
+ * as play-from-URI, which works with NORA in the background. Without a
+ * session yet, the `…:play` deep link opens and starts it.
+ *
+ * Without one it falls back to play-from-search. Spotify's current build
+ * treats that as "open the search page" and starts nothing, so success is
+ * only claimed once the session reports something new playing.
  */
 class PlayMedia(private val context: Context) : Capability {
     override val name = "phone.play_media"
-    override val description = "Play music on the phone by search, in Spotify; finds the user's own playlists"
+    override val description = "Play a Spotify link on the phone (NORA finds it with play_on_phone)"
     override val tier = 1
     override val paramsSchema: JSONObject = JSONObject("""
         {"type":"object","required":["query"],
          "properties":{"query":{"type":"string","maxLength":100},
                        "kind":{"type":"string","enum":["any","track","artist","album","playlist"]},
-                       "app":{"type":"string","enum":["spotify","youtube music"]}}}""")
+                       "app":{"type":"string","enum":["spotify","youtube music"]},
+                       "uri":{"type":"string","maxLength":60},
+                       "shuffle":{"type":"boolean"},
+                       "label":{"type":"string","maxLength":100}}}""")
 
     override suspend fun execute(params: JSONObject): CapabilityResult {
         val query = params.getString("query").trim()
@@ -189,27 +198,29 @@ class PlayMedia(private val context: Context) : Capability {
         if (!installed(context, pkg)) {
             return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED, "$label isn't installed on the phone.")
         }
-        val extras = searchExtras(query, kind)
-        val what = if (kind == "playlist") "your $query playlist" else query
+        val what = params.optString("label").ifBlank {
+            if (kind == "playlist") "your $query playlist" else query
+        }
+        val uri = params.optString("uri")
+        if (uri.isNotEmpty() && pkg == SPOTIFY) {
+            if (!SpotifyUri.isValid(uri)) {
+                return CapabilityResult.Failed(ErrorCode.INVALID_PARAMS, "That isn't a Spotify link I can play.")
+            }
+            return playUri(uri, what, params.optBoolean("shuffle", false))
+        }
 
+        val extras = searchExtras(query, kind)
         val controller = Media.controllerFor(context, pkg)
         if (controller != null &&
             (controller.playbackState?.actions ?: 0L) and PlaybackState.ACTION_PLAY_FROM_SEARCH != 0L) {
             val before = Media.title(controller)
             val wasPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING
             controller.transportControls.playFromSearch(query, extras)
-            // Give the app a moment to find it, then say what actually started
-            // (not whatever was already playing).
-            repeat(8) {
-                delay(400)
-                val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-                val title = Media.title(controller)
-                if (playing && title != null && (title != before || !wasPlaying)) {
-                    return CapabilityResult.Ok(JSONObject()
-                        .put("message", "Playing $title on $label.").put("title", title))
-                }
-            }
-            return CapabilityResult.Ok(JSONObject().put("message", "Asked $label to play $what."))
+            val title = startedPlaying(controller, before, wasPlaying)
+                ?: return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED,
+                    "$label didn't start playing $what.")
+            return CapabilityResult.Ok(JSONObject()
+                .put("message", "Playing $title on $label.").put("title", title))
         }
 
         val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).setPackage(pkg).putExtras(extras)
@@ -219,7 +230,53 @@ class PlayMedia(private val context: Context) : Capability {
             intent.data = Uri.parse("spotify:search:" + Uri.encode(query))
             intent.replaceExtras(null as Bundle?)
         }
-        return Launcher.open(context, intent, label, "Playing $what on $label.")
+        return Launcher.open(context, intent, label, "Opened $label's search for $what.")
+    }
+
+    private suspend fun playUri(uri: String, what: String, shuffle: Boolean): CapabilityResult {
+        val controller = Media.controllerFor(context, SPOTIFY)
+        if (controller == null ||
+            (controller.playbackState?.actions ?: 0L) and PlaybackState.ACTION_PLAY_FROM_URI == 0L) {
+            // Spotify isn't running: the deep link starts it and plays. Shuffle
+            // can't ride along; say so rather than pretend.
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(SpotifyUri.autoplay(uri))).setPackage(SPOTIFY)
+            val done = "Playing $what on Spotify." + if (shuffle) " Turn shuffle on in Spotify if you want it." else ""
+            return Launcher.open(context, intent, "Spotify", done)
+        }
+        val before = Media.title(controller)
+        val wasPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (shuffle) setShuffle(controller)
+        controller.transportControls.playFromUri(Uri.parse(uri), Bundle())
+        val title = startedPlaying(controller, before, wasPlaying)
+            ?: return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED, "Spotify didn't start playing $what.")
+        if (shuffle) setShuffle(controller)    // some builds reset it when the context changes
+        val how = if (shuffle) "Shuffling" else "Playing"
+        return CapabilityResult.Ok(JSONObject()
+            .put("message", "$how $what on Spotify, starting with $title.").put("title", title))
+    }
+
+    /**
+     * Shuffle on, not toggled. The framework controller has no setShuffleMode;
+     * this is the custom action MediaControllerCompat sends for it, which
+     * compat and media3 sessions (Spotify's) answer.
+     */
+    private fun setShuffle(controller: android.media.session.MediaController) {
+        controller.transportControls.sendCustomAction(
+            "android.support.v4.media.session.action.SET_SHUFFLE_MODE",
+            Bundle().apply { putInt("android.support.v4.media.session.action.ARGUMENT_SHUFFLE_MODE", 1) })
+    }
+
+    /** Wait up to 8s for the session to play something new; its title, or null. */
+    private suspend fun startedPlaying(
+        controller: android.media.session.MediaController, before: String?, wasPlaying: Boolean,
+    ): String? {
+        repeat(20) {
+            delay(400)
+            val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+            val title = Media.title(controller)
+            if (playing && title != null && (title != before || !wasPlaying)) return title
+        }
+        return null
     }
 
     private fun searchExtras(query: String, kind: String): Bundle = Bundle().apply {
