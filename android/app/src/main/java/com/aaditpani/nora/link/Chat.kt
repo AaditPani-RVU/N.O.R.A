@@ -41,6 +41,15 @@ data class ConfirmPrompt(
 interface ChatListener {
     /** One line of the answer to a typed message; [replyTo] is that message's id. */
     fun onSay(replyTo: String?, text: String)
+    /**
+     * The same, for a spoken turn: [audio] says which stream of PCM carries
+     * this line in NORA's voice, when the core is sending it.
+     */
+    fun onSay(replyTo: String?, text: String, audio: AudioSpec?) = onSay(replyTo, text)
+    /** A piece of the PCM for [stream]. */
+    fun onAudio(stream: Int, pcm: ByteArray) {}
+    /** No more PCM for [stream]; [sent] false means none came at all. */
+    fun onAudioEnd(stream: Int, ok: Boolean, sent: Boolean) {}
     /** The turn [replyTo] started has finished; [outcome] is the core's `TurnOutcome.kind`. */
     fun onTurnDone(replyTo: String?, outcome: String)
     /** Something said unprompted: a reminder or a finished job. */

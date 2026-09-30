@@ -169,8 +169,19 @@ class HubIntegrationTest {
         val notes = Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
         val asked = Collections.synchronizedList(mutableListOf<ConfirmPrompt>())
         @Volatile var answer: Boolean? = true   // null: never answers
+        val audioFor = Collections.synchronizedMap(HashMap<String, AudioSpec?>())   // line -> its audio
+        val pcm = Collections.synchronizedMap(HashMap<Int, java.io.ByteArrayOutputStream>())
+        val ended = Collections.synchronizedMap(HashMap<Int, Pair<Boolean, Boolean>>())
 
         override fun onSay(replyTo: String?, text: String) { said += replyTo to text }
+        override fun onSay(replyTo: String?, text: String, audio: AudioSpec?) {
+            audioFor[text] = audio
+            onSay(replyTo, text)
+        }
+        override fun onAudio(stream: Int, pcm: ByteArray) {
+            this.pcm.getOrPut(stream) { java.io.ByteArrayOutputStream() }.write(pcm)
+        }
+        override fun onAudioEnd(stream: Int, ok: Boolean, sent: Boolean) { ended[stream] = ok to sent }
         override fun onTurnDone(replyTo: String?, outcome: String) { done += replyTo to outcome }
         override fun onNotify(title: String, body: String, kind: String) { notes += Triple(title, body, kind) }
         override suspend fun onConfirm(prompt: ConfirmPrompt): Boolean {
@@ -234,6 +245,53 @@ class HubIntegrationTest {
         until("messages") { chat.notes.size == 2 }
         assertEquals(Triple("Reminder", "Reminder, sir: call mom", "reminder"), chat.notes[0])
         assertEquals("NORA", chat.notes[1].first)
+        link.stop()
+    }
+
+    /**
+     * Phase 6: a spoken turn asking for NORA's own voice gets each answer
+     * line announced with its stream and then the PCM for it, as binary
+     * frames through the same socket; asking for the phone's voice gets text
+     * only. The harness's fake synthesiser makes one sample per character.
+     */
+    @Test
+    fun voiceTurnStreamsPcm() = runBlocking {
+        val url = harness.hello.getString("url")
+        val signer = JvmSigner()
+        val deviceId = (DeviceLink.pair(url, harness.hello.getString("code"), "voice-test",
+            signer.publicKeyDer()) as PairResult.Paired).deviceId
+        assertTrue(harness.cmd("approve $deviceId").getBoolean("ok"))
+        val chat = Recorder()
+        val link = DeviceLink(LinkConfig(url, deviceId, "test", "17"), signer, { listOf(ping) },
+            { false }, MemOutbox(), {}, chat, scope)
+        link.start()
+        until("connected") { link.state.value is LinkState.Connected }
+
+        val id = link.sendUtterance("what's up", voiceTts = "core")!!
+        until("turn done") { chat.done.any { it.first == id } }
+        val lines = listOf("You said: what's up", "That's all.")
+        assertEquals(lines.map { id to it }, chat.said.toList())
+        val specs = lines.map { chat.audioFor[it]!! }
+        assertEquals(24_000, specs[0].rate)
+        until("audio ended") { specs.all { chat.ended[it.stream] != null } }
+        for ((line, spec) in lines.zip(specs)) {
+            assertEquals(true to true, chat.ended[spec.stream])
+            val bytes = chat.pcm[spec.stream]!!.toByteArray()
+            // Little-endian 16-bit, one sample per character of the line
+            // (split into chunks, rejoined without the spaces between them).
+            val heard = (bytes.indices step 2).map {
+                ((bytes[it].toInt() and 0xFF) or (bytes[it + 1].toInt() shl 8)).toChar() }.joinToString("")
+            assertEquals(line.replace(" ", ""), heard.replace(" ", ""))
+        }
+
+        // The phone's own voice: text only.
+        val plain = link.sendUtterance("again", voiceTts = "phone")!!
+        until("phone-voice turn done") { chat.done.any { it.first == plain } }
+        assertEquals(null, chat.audioFor["You said: again"])
+        link.sendBargeIn(plain)   // harmless after the turn; the socket stays up
+        link.emitEvent("voice.turn", JSONObject().put("first_audio_ms", 900).put("tts", "phone"))
+        Thread.sleep(200)
+        assertTrue(link.state.value is LinkState.Connected)
         link.stop()
     }
 }

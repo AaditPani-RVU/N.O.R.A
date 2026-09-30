@@ -21,7 +21,8 @@ Protocol: one JSON object per line on stdout. The first line is
     quit
 
 Typed turns (`utterance`) don't reach a model here: `_fake_turn` echoes them,
-and "confirm …" asks the device first.
+and "confirm …" asks the device first. A voice turn asking for the core's
+voice gets fake PCM: one sample per character of each line.
 """
 from __future__ import annotations
 
@@ -79,6 +80,14 @@ def _stub_turns() -> None:
         from nora import pipeline, wiring
     pipeline.handle_turn = _fake_turn
     wiring.build = lambda **_kw: None
+    # Voice turns asking for the core's voice get fake PCM instead of Kokoro:
+    # one 16-bit sample per character, value = the character, so the app's
+    # test can check what it played.
+    from nora.hub import voice
+    voice.LATENCY_PATH = _tmp / "voice_latency.jsonl"
+    voice.core_voice_available = lambda: True
+    voice._kokoro = lambda text, rate: (b"".join(ord(c).to_bytes(2, "little") for c in text),
+                                        voice.KOKORO_RATE)
 
 
 _channel_mod = channel

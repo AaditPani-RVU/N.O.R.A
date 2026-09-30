@@ -32,6 +32,7 @@ from typing import Any
 from nora import channel as _channel, command_engine, delivery, store
 from nora.config import get_config
 from nora.hub import protocol, registry
+from nora.hub import voice as _voice
 from nora.schemas import StepResult
 
 logger = logging.getLogger("nora.hub")
@@ -58,6 +59,9 @@ class Session:
     _seq: int = 0
     _turns: set = field(default_factory=set)
     frustration: Any = None
+    _stream: int = 0
+    # utterance id -> the VoiceOut speaking its answer (voice turns only)
+    voices: dict[str, Any] = field(default_factory=dict)
 
     @property
     def device_id(self) -> str:
@@ -71,11 +75,22 @@ class Session:
         self.loop.call_soon_threadsafe(self._outbox.put_nowait, msg)
         return msg["id"]
 
+    def send_bytes_nowait(self, frame: bytes) -> None:
+        """Queue a binary frame (voice audio) behind whatever is already queued."""
+        self.loop.call_soon_threadsafe(self._outbox.put_nowait, frame)
+
+    def next_stream(self) -> int:
+        self._stream += 1
+        return self._stream
+
     async def writer(self) -> None:
         # The only place frames are written, so `seq` is assigned here: one
         # task, strictly increasing, whichever thread queued the frame.
         while True:
             msg = await self._outbox.get()
+            if isinstance(msg, bytes):
+                await self.ws.send(msg)
+                continue
             self._seq += 1
             msg["seq"] = self._seq
             await self.ws.send(protocol.encode(msg))
@@ -301,6 +316,8 @@ class Hub:
 
         from nora import jobs
         await asyncio.get_running_loop().run_in_executor(None, jobs.flush, session.device_id)
+        # Load Kokoro now (~1.5 s once), not on this device's first spoken turn.
+        asyncio.get_running_loop().run_in_executor(None, _voice.core_voice_available)
 
         writer = asyncio.create_task(session.writer())
         watchdog = asyncio.create_task(self._watch_revocation(session))
@@ -317,6 +334,8 @@ class Hub:
             writer.cancel()
             watchdog.cancel()
             session.fail_pending()
+            for out in list(session.voices.values()):
+                out.cancel()
             with self._lock:
                 current = self._sessions.get(session.device_id) is session
                 if current:
@@ -357,10 +376,21 @@ class Hub:
         elif kind == "event":
             # Events feed the trigger engine in Phase 8; for now, ack and log.
             session.send_nowait("ack", {"seq": msg.get("seq", 0)}, corr=msg["id"])
-            logger.info("%s event %s", session.device_id, msg["body"].get("name"))
+            name = msg["body"].get("name")
+            if name == "voice.turn" and isinstance(msg["body"].get("data"), dict):
+                _voice.record_turn(session.device_id, msg["body"]["data"])
+            else:
+                logger.info("%s event %s", session.device_id, name)
+        elif kind == "voice.barge_in":
+            out = session.voices.get(msg.get("corr") or "")
+            if out is not None:
+                out.cancel()
+                logger.info("%s barged in; stopped speaking", session.device_id)
         elif kind == "utterance":
             text = str(msg["body"].get("text", ""))[:2000]
-            task = asyncio.create_task(self._turn(session, text, msg["id"]))
+            voice = msg["body"].get("voice")
+            core_tts = isinstance(voice, dict) and voice.get("tts") == "core"
+            task = asyncio.create_task(self._turn(session, text, msg["id"], core_tts=core_tts))
             session._turns.add(task)
             task.add_done_callback(session._turns.discard)
         elif kind == "manifest":
@@ -370,14 +400,24 @@ class Hub:
                 self._register(session)
 
     # ── turns from the device ────────────────────────────────────────────────
-    async def _turn(self, session: Session, text: str, corr: str) -> None:
+    async def _turn(self, session: Session, text: str, corr: str, *, core_tts: bool = False) -> None:
         from nora import pipeline, wiring
         from nora.frustration import FrustrationTracker
 
+        out = None
+        if core_tts:
+            ready = await asyncio.get_running_loop().run_in_executor(None, _voice.core_voice_available)
+            if ready:
+                out = _voice.VoiceOut(session)
+                session.voices[corr] = out
+
         def speak(line: str, *_a, mood: str | None = None, **_kw) -> None:
             if line:
-                session.send_nowait("say", {"text": line, "mood": mood or "",
-                                            "turn_id": ch.turn_id}, corr=corr)
+                body = {"text": line, "mood": mood or "", "turn_id": ch.turn_id}
+                audio = out.line(line, mood) if out is not None else None
+                if audio is not None:
+                    body["audio"] = audio
+                session.send_nowait("say", body, corr=corr)
 
         async def confirm(req: _channel.ConfirmRequest) -> bool:
             return await self._ask(session, req.turn_id, req.rendered,
@@ -398,6 +438,9 @@ class Hub:
             logger.exception("Device turn failed: %s", e)
             speak("Something went wrong on my side.")
             kind = "error"
+        if out is not None:
+            # Synthesis usually runs past the turn; barge-in must still reach it.
+            out.close(on_done=lambda: session.voices.pop(corr, None))
         session.send_nowait("turn.done", {"turn_id": ch.turn_id, "outcome": kind}, corr=corr)
 
     async def _ask(self, session: Session, ref: str, rendered: str, steps: list,

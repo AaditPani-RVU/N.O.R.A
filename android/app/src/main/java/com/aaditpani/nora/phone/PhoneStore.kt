@@ -161,5 +161,23 @@ class LinkPrefs(context: Context) {
         get() = prefs.getStringSet("hidden_note_apps", emptySet())!!.toSet()
         set(v) = prefs.edit().putStringSet("hidden_note_apps", v).apply()
 
+    /**
+     * Whose voice answers a spoken turn: "phone" (the default: starts in
+     * ~0.2 s) or "core" (NORA's own Kokoro voice, ~1 s later on the core's CPU).
+     */
+    var voiceTts: String
+        get() = prefs.getString("voice_tts", "phone") ?: "phone"
+        set(v) = prefs.edit().putString("voice_tts", v).apply()
+    var bargeIn: Boolean
+        get() = prefs.getBoolean("barge_in", true)
+        set(v) = prefs.edit().putBoolean("barge_in", v).apply()
+    /** Listen again after NORA answers, until the user goes quiet. */
+    var followUp: Boolean
+        get() = prefs.getBoolean("follow_up", true)
+        set(v) = prefs.edit().putBoolean("follow_up", v).apply()
+    var voiceStats: String?
+        get() = prefs.getString("voice_stats", null)
+        set(v) = prefs.edit().putString("voice_stats", v).apply()
+
     fun clear() = prefs.edit().clear().apply()
 }

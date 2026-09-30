@@ -144,10 +144,18 @@ class DeviceLink(
      * and `turn.done` carry as `corr`; null when not connected. Not queued: a
      * command run minutes after it was typed is a surprise, not a service.
      */
-    fun sendUtterance(text: String): String? {
+    fun sendUtterance(text: String, voiceTts: String? = null): String? {
         val sock = current ?: return null
-        val env = Protocol.envelope("utterance", JSONObject().put("text", text.take(ChatLog.MAX_TEXT)))
+        val body = JSONObject().put("text", text.take(ChatLog.MAX_TEXT))
+        // Spoken, not typed: "core" asks for the answer in NORA's own voice as well.
+        if (voiceTts != null) body.put("voice", JSONObject().put("tts", voiceTts))
+        val env = Protocol.envelope("utterance", body)
         return if (sock.resend(env)) env.getString("id") else null
+    }
+
+    /** The user talked over NORA's answer to [utteranceId]: the core stops making audio for it. */
+    fun sendBargeIn(utteranceId: String) {
+        current?.send("voice.barge_in", corr = utteranceId)
     }
 
     /** Queue an event; it is sent now if connected, else on the next connection. */
@@ -219,7 +227,12 @@ class DeviceLink(
             _state.value = LinkState.Connected(sessionId)
             for ((_, frame) in outbox.pending()) sock.resend(JSONObject(frame))
 
-            while (true) dispatch(sock, sock.next(null))
+            while (true) {
+                when (val m = sock.nextAny()) {
+                    is ByteArray -> audio(m)
+                    is JSONObject -> dispatch(sock, m)
+                }
+            }
         } catch (e: LinkClosed) {
             return Outcome.Dropped(e.message ?: "closed", wasConnected = current === sock)
         } finally {
@@ -243,12 +256,19 @@ class DeviceLink(
             "confirm_request" -> scope.launch { confirm(sock, msg) }
             "notify" -> chat?.onNotify(body.optString("title", "NORA"), body.optString("body"),
                 body.optString("kind", "answer"))
-            "say" -> chat?.onSay(Protocol.corr(msg), body.optString("text"))
+            "say" -> chat?.onSay(Protocol.corr(msg), body.optString("text"), AudioSpec.parse(body.optJSONObject("audio")))
+            "audio.end" -> chat?.onAudioEnd(body.optInt("stream", -1), body.optBoolean("ok"), body.optBoolean("sent"))
             "turn.done" -> chat?.onTurnDone(Protocol.corr(msg), body.optString("outcome"))
             "ping" -> sock.send("pong", corr = msg.getString("id"))
             "ack" -> Protocol.corr(msg)?.let(outbox::remove)
             else -> Unit
         }
+    }
+
+    /** A binary frame: a piece of NORA's voice. Anything else is dropped. */
+    private fun audio(frame: ByteArray) {
+        val (stream, pcm) = PcmFrame.parse(frame) ?: return
+        chat?.onAudio(stream, pcm)
     }
 
     /**
@@ -363,6 +383,7 @@ class DeviceLink(
 
     private sealed class Incoming {
         data class Text(val text: String) : Incoming()
+        class Binary(val bytes: ByteArray) : Incoming()
         data class Closed(val reason: String) : Incoming()
     }
 
@@ -381,6 +402,10 @@ class DeviceLink(
             val item = if (timeoutMs == null) incoming.receive()
             else withTimeoutOrNull(timeoutMs) { incoming.receive() } ?: throw LinkClosed("core did not answer")
             return when (item) {
+                is Incoming.Binary -> {
+                    ws.close(1008, "protocol error")
+                    throw LinkClosed("binary frame from core during the handshake")
+                }
                 is Incoming.Text -> try {
                     Protocol.decode(item.text)
                 } catch (e: ProtocolException) {
@@ -389,6 +414,18 @@ class DeviceLink(
                 }
                 is Incoming.Closed -> throw LinkClosed(item.reason)
             }
+        }
+
+        /** The next frame once connected: a JSONObject, or a ByteArray for binary. */
+        suspend fun nextAny(): Any = when (val item = incoming.receive()) {
+            is Incoming.Binary -> item.bytes
+            is Incoming.Text -> try {
+                Protocol.decode(item.text)
+            } catch (e: ProtocolException) {
+                ws.close(1008, "protocol error")
+                throw LinkClosed("bad frame from core: ${e.message}")
+            }
+            is Incoming.Closed -> throw LinkClosed(item.reason)
         }
 
         companion object {
@@ -400,7 +437,8 @@ class DeviceLink(
                     }
 
                     override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                        // Binary is voice (Phase 6); nothing sends it yet.
+                        // NORA's voice (Phase 6), in order with the text frames around it.
+                        incoming.trySend(Incoming.Binary(bytes.toByteArray()))
                     }
 
                     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

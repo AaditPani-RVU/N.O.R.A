@@ -8,3 +8,4 @@
 | [0004](0004-basic-capabilities.md) | Basic phone capabilities, with untrusted-text handling (Phase 4) | 2026-09-30 | implemented |
 | [0005](0005-typed-chat.md) | Typed chat, confirmations and messages on the phone (Phase 5) | 2026-09-30 | implemented |
 | [0006](0006-turn-latency.md) | Turn latency on Groq's free tier | 2026-09-30 | implemented |
+| [0007](0007-voice.md) | Voice on the phone (Phase 6) | 2026-09-30 | implemented, awaiting on-phone check |

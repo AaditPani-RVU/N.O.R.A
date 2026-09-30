@@ -112,3 +112,27 @@ def synth_if_enabled(text: str, rate: str, out_path: str) -> bool:
     except Exception as e:
         logger.warning("Kokoro synthesis failed (%s) — falling back to edge-tts", e)
         return False
+
+
+def available() -> bool:
+    """Kokoro is selected and loads. The first call loads the model (~1.5 s)."""
+    return enabled() and _get_engine() is not None
+
+
+def synth_pcm(text: str, rate: str) -> tuple[bytes, int] | None:
+    """One chunk as raw 16-bit mono PCM and its sample rate, or None.
+
+    For the phone's voice sessions (`nora.hub.voice`): no container, so the
+    phone can play it as it arrives and cut it off mid-word on barge-in.
+    """
+    engine = _get_engine() if enabled() else None
+    if engine is None:
+        return None
+    try:
+        voice = _kokoro_cfg().get("voice", "bf_emma")
+        with _synth_lock:   # see synth_if_enabled
+            samples, sample_rate = engine.create(text, voice=voice, speed=_rate_to_speed(rate))
+        return (samples.clip(-1.0, 1.0) * 32767).astype("<i2").tobytes(), int(sample_rate)
+    except Exception as e:
+        logger.warning("Kokoro synthesis for a device failed: %s", e)
+        return None

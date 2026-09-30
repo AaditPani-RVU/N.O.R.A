@@ -35,7 +35,7 @@ AUTH_CONTEXT = b"nora-v1"
 # Messages a device may send once authenticated.
 DEVICE_TYPES = frozenset({
     "manifest", "result", "confirm_response", "event", "utterance",
-    "ping", "pong", "kill",
+    "ping", "pong", "kill", "voice.barge_in",
 })
 
 # Error codes (plan §5). DEVICE_OFFLINE is core-side only.

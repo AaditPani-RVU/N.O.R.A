@@ -77,6 +77,9 @@ class FakeDevice:
         self.ws = None
         self.session_id: str | None = None
         self.said: list[str] = []
+        self.says: list[dict] = []              # full `say` bodies, with their corr
+        self.audio: dict[int, bytearray] = {}   # stream -> PCM received
+        self.audio_end: dict[int, dict] = {}    # stream -> audio.end body
         self.notified: list[dict] = []
         self.confirm_requests: list[dict] = []
         self.executed: list[dict] = []          # invocations actually run
@@ -149,9 +152,16 @@ class FakeDevice:
             await self.ws.close()
 
     # ── user actions ─────────────────────────────────────────────────────────
-    async def say(self, text: str, timeout: float = 30.0) -> list[str]:
-        """Type something to NORA; return what she said back during that turn."""
-        msg_id = await self._send("utterance", {"text": text})
+    async def say(self, text: str, timeout: float = 30.0, *, voice: dict | None = None,
+                  on_sent: Callable[[str], Any] | None = None) -> list[str]:
+        """Type (or, with `voice`, speak) something to NORA; return what she
+        said back during that turn."""
+        body: dict[str, Any] = {"text": text}
+        if voice is not None:
+            body["voice"] = voice
+        msg_id = await self._send("utterance", body)
+        if on_sent is not None:
+            on_sent(msg_id)
         fut = asyncio.get_running_loop().create_future()
         self._turns[msg_id] = fut
         start = len(self.said)
@@ -161,6 +171,9 @@ class FakeDevice:
             self._turns.pop(msg_id, None)
         return self.said[start:]
 
+    async def barge_in(self, utterance_id: str) -> None:
+        await self._send("voice.barge_in", {}, corr=utterance_id)
+
     async def set_kill(self, active: bool) -> None:
         self.killed = active
         await self._send("kill", {"active": active})
@@ -169,10 +182,18 @@ class FakeDevice:
     async def _read_loop(self) -> None:
         try:
             async for frame in self.ws:
+                if isinstance(frame, bytes):
+                    from nora.hub import voice
+                    stream, pcm = voice.parse_frame(frame)
+                    self.audio.setdefault(stream, bytearray()).extend(pcm)
+                    continue
                 msg = protocol.decode(frame)
                 kind, body = msg["type"], msg["body"]
                 if kind == "say":
                     self.said.append(body.get("text", ""))
+                    self.says.append({**body, "corr": msg.get("corr")})
+                elif kind == "audio.end":
+                    self.audio_end[body.get("stream", 0)] = body
                 elif kind == "turn.done":
                     fut = self._turns.get(msg.get("corr") or "")
                     if fut is not None and not fut.done():

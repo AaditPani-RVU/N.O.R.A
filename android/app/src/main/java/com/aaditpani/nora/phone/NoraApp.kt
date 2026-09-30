@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.TileService
 import com.aaditpani.nora.BuildConfig
+import com.aaditpani.nora.link.AudioSpec
 import com.aaditpani.nora.link.Capability
 import com.aaditpani.nora.link.ChatListener
 import com.aaditpani.nora.link.ChatLog
@@ -18,6 +19,7 @@ import com.aaditpani.nora.link.LinkState
 import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
 import com.aaditpani.nora.link.Protocol
+import com.aaditpani.nora.voice.VoiceController
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -81,13 +83,40 @@ class LinkController(private val app: Context) {
     val confirms: StateFlow<List<ConfirmPrompt>> = _confirms
     private val answers = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
+    val voice = VoiceController(app, object : VoiceController.Host {
+        override fun sendVoice(text: String, tts: String): String? {
+            val t = text.trim().take(ChatLog.MAX_TEXT)
+            val id = link?.sendUtterance(t, tts) ?: return null
+            chat.mine(id, t, Delivery.SENT)
+            return id
+        }
+        override fun bargeIn(utteranceId: String) { link?.sendBargeIn(utteranceId) }
+        override fun emitTiming(data: JSONObject) { link?.emitEvent("voice.turn", data) }
+        override val connected: Boolean get() = _state.value is LinkState.Connected
+        override var tts: String by prefs::voiceTts
+        override var bargeInOn: Boolean by prefs::bargeIn
+        override var followUp: Boolean by prefs::followUp
+        override var savedStats: String? by prefs::voiceStats
+    })
+
     private val chatListener = object : ChatListener {
         override fun onSay(replyTo: String?, text: String) {
             if (text.isNotBlank()) chat.nora(replyTo, text)
         }
 
+        override fun onSay(replyTo: String?, text: String, audio: AudioSpec?) {
+            onSay(replyTo, text)
+            if (text.isNotBlank()) voice.onSay(replyTo, text, audio)
+        }
+
+        override fun onAudio(stream: Int, pcm: ByteArray) = voice.onAudio(stream, pcm)
+
+        override fun onAudioEnd(stream: Int, ok: Boolean, sent: Boolean) = voice.onAudioEnd(stream, ok, sent)
+
         override fun onTurnDone(replyTo: String?, outcome: String) {
             chat.done(replyTo)
+            // A spoken answer was heard; it doesn't need a notification as well.
+            if (voice.onTurnDone(replyTo)) return
             if (replyTo == null || chatVisible.value) return
             val said = chat.answersTo(replyTo)
             if (said.isNotEmpty()) Notifications.reply(app, said.joinToString(" "))
@@ -137,7 +166,10 @@ class LinkController(private val app: Context) {
         mirror = scope.launch {
             l.state.collect {
                 _state.value = it
-                if (it !is LinkState.Connected) chat.dropInFlight()
+                if (it !is LinkState.Connected) {
+                    chat.dropInFlight()
+                    voice.linkDropped()
+                }
             }
         }
         l.start()
@@ -218,6 +250,8 @@ class LinkController(private val app: Context) {
     }
 
     fun unpair() {
+        voice.stop()
+        voice.clearStats()
         LinkService.stop(app)
         stopLink()
         signer.deleteKey()

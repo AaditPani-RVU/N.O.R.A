@@ -108,6 +108,10 @@ import com.aaditpani.nora.phone.LinkService
 import com.aaditpani.nora.phone.NoraNotificationListener
 import com.aaditpani.nora.phone.Notifications
 import com.aaditpani.nora.phone.controller
+import com.aaditpani.nora.voice.Talk
+import com.aaditpani.nora.voice.VoicePhase
+import com.aaditpani.nora.voice.VoiceUi
+import com.aaditpani.nora.voice.VoiceController
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
@@ -122,6 +126,12 @@ class MainActivity : ComponentActivity() {
     /** A tab a notification asked for; the paired screen consumes it. */
     private val requestedTab = MutableStateFlow<Int?>(null)
 
+    // Lint assumes a FragmentActivity; this is a plain ComponentActivity with no fragments.
+    @SuppressLint("InvalidFragmentVersionForActivityResult")
+    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) controller.voice.start()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -129,10 +139,11 @@ class MainActivity : ComponentActivity() {
         val c = controller
         if (c.paired.value) LinkService.start(this)
         requestTab(intent)
+        if (savedInstanceState == null && Talk.wants(intent)) talk()
         setContent {
             MaterialTheme(colorScheme = hudScheme) {
                 val paired by c.paired.collectAsState()
-                if (paired) PairedScreen(c, requestedTab, ::authenticate)
+                if (paired) PairedScreen(c, requestedTab, ::authenticate, ::talk)
                 else PairScreen(c, onScan = ::scan)
             }
         }
@@ -141,6 +152,19 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         requestTab(intent)
+        if (Talk.wants(intent)) talk()
+    }
+
+    /**
+     * Start a voice session, from this screen: the mic button, the Talk tile,
+     * the assistant gesture or a headset button all land here.
+     */
+    private fun talk() {
+        val c = controller
+        if (!c.paired.value) return
+        requestedTab.value = TAB_CHAT
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) c.voice.toggle()
+        else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     private fun requestTab(intent: Intent?) {
@@ -263,7 +287,7 @@ private fun Tabs(tab: Int, onTab: (Int) -> Unit, accent: Color, waiting: Int) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>,
-                         authenticate: (() -> Unit) -> Unit) {
+                         authenticate: (() -> Unit) -> Unit, talk: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(MainActivity.TAB_CHAT) }
     val requested by requestedTab.collectAsState()
     LaunchedEffect(requested) { requested?.let { tab = it; requestedTab.value = null } }
@@ -272,8 +296,9 @@ private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>
     val killed by c.killed.collectAsState()
     val messages by c.chat.messages.collectAsState()
     val confirms by c.confirms.collectAsState()
+    val voice by c.voice.ui.collectAsState()
     val now = rememberNow(250)
-    val orb = orbState(state, messages, confirms, now)
+    val orb = orbState(state, messages, confirms, now, voice.phase)
     val accent by animateColorAsState(if (confirms.isNotEmpty()) Hud.Amber
         else if (orb == OrbState.OFFLINE) Hud.Cyan.copy(alpha = 0.7f) else orb.color, tween(900), label = "accent")
 
@@ -291,7 +316,7 @@ private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>
             }
             Box(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                 when (tab) {
-                    0 -> ChatTab(c, orb, state is LinkState.Connected, messages, confirms, authenticate, typing)
+                    0 -> ChatTab(c, orb, state is LinkState.Connected, messages, confirms, authenticate, typing, voice, talk)
                     1 -> SystemTab(c, state, killed)
                     else -> LogTab(c)
                 }
@@ -301,8 +326,15 @@ private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>
 }
 
 /** What NORA is doing, read from the link and the chat: the dashboard's orb states. */
-private fun orbState(state: LinkState, messages: List<ChatMessage>, confirms: List<ConfirmPrompt>, now: Long): OrbState {
+private fun orbState(state: LinkState, messages: List<ChatMessage>, confirms: List<ConfirmPrompt>, now: Long,
+                     voice: VoicePhase): OrbState {
     if (state !is LinkState.Connected) return OrbState.OFFLINE
+    when (voice) {
+        VoicePhase.LISTENING -> return OrbState.LISTENING
+        VoicePhase.SPEAKING -> return OrbState.SPEAKING
+        VoicePhase.THINKING -> return OrbState.THINKING
+        VoicePhase.OFF -> Unit
+    }
     val last = messages.lastOrNull()
     if (last != null && last.sender != Sender.ME && now - last.ts < 1800) return OrbState.SPEAKING
     if (confirms.isNotEmpty()) return OrbState.THINKING
@@ -320,7 +352,8 @@ private val suggestions = listOf(
 
 @Composable
 private fun ChatTab(c: LinkController, orb: OrbState, connected: Boolean, messages: List<ChatMessage>,
-                    confirms: List<ConfirmPrompt>, authenticate: (() -> Unit) -> Unit, typing: Boolean) {
+                    confirms: List<ConfirmPrompt>, authenticate: (() -> Unit) -> Unit, typing: Boolean,
+                    voice: VoiceUi, talk: () -> Unit) {
     val ctx = LocalContext.current
     var draft by rememberSaveable { mutableStateOf("") }
     val list = rememberLazyListState()
@@ -359,9 +392,9 @@ private fun ChatTab(c: LinkController, orb: OrbState, connected: Boolean, messag
         AnimatedContent(if (typing) 2 else if (empty) 0 else 1, Modifier.fillMaxWidth(), label = "stage",
             transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(200)) }) { stage ->
             when (stage) {
-                0 -> Hero(orb)
-                1 -> CompactStage(orb, 64.dp)
-                else -> CompactStage(orb, 44.dp, Modifier.padding(top = 4.dp))
+                0 -> Hero(orb, voice.phase)
+                1 -> CompactStage(orb, 64.dp, voice = voice.phase)
+                else -> CompactStage(orb, 44.dp, Modifier.padding(top = 4.dp), voice.phase)
             }
         }
 
@@ -407,6 +440,14 @@ private fun ChatTab(c: LinkController, orb: OrbState, connected: Boolean, messag
             if (orb != OrbState.IDLE && orb != OrbState.OFFLINE) FlowLine(orb.color, Modifier.align(Alignment.BottomCenter))
         }
 
+        // While talking, the command bar is the voice panel.
+        if (voice.phase != VoicePhase.OFF) {
+            VoicePanel(voice, onTap = { c.voice.toggle() }, onStop = { c.voice.stop() })
+            return@Column
+        }
+        voice.note?.let { note ->
+            Tracked(note.uppercase(), Modifier.padding(top = 8.dp), color = Hud.Amber, size = 9.sp, spacing = 2.sp)
+        }
         // Chips are a shortcut for not typing; once you are, they give the room back.
         AnimatedVisibility(!(typing && draft.isNotEmpty()), enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()) {
@@ -418,14 +459,16 @@ private fun ChatTab(c: LinkController, orb: OrbState, connected: Boolean, messag
             HudField(draft, { draft = it.take(2000) }, if (connected) "Type a command" else "Link down",
                 Modifier.weight(1f), onSend = { if (connected && draft.isNotBlank()) send(draft) })
             Spacer(Modifier.width(8.dp))
-            HudButton("↵", { send(draft) }, enabled = connected && draft.isNotBlank(), strong = true, textSize = 20.sp)
+            // Empty field: the mic. Something typed: send it.
+            if (draft.isBlank()) MicButton(connected, talk)
+            else HudButton("↵", { send(draft) }, enabled = connected, strong = true, textSize = 20.sp)
         }
     }
 }
 
 /** The empty chat: the whole orb, the name, the state, the pipeline. */
 @Composable
-private fun Hero(orb: OrbState) {
+private fun Hero(orb: OrbState, voice: VoicePhase) {
     Column(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Orb(orb, 196.dp)
         Text("N.O.R.A", fontFamily = Hud.Disp, fontWeight = FontWeight.Bold, fontSize = 28.sp,
@@ -433,13 +476,14 @@ private fun Hero(orb: OrbState) {
         Tracked(orb.label, color = if (orb == OrbState.IDLE) Hud.Dim else orb.color, size = 10.sp,
             spacing = 6.sp, glow = orb != OrbState.IDLE)
         Spacer(Modifier.height(8.dp))
-        StageBar(orb)
+        StageBar(orb, voice)
     }
 }
 
 /** Once there's a conversation: the orb shrinks into a strip above it. */
 @Composable
-private fun CompactStage(orb: OrbState, orbSize: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+private fun CompactStage(orb: OrbState, orbSize: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier,
+                         voice: VoicePhase = VoicePhase.OFF) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Orb(orb, orbSize)
         Spacer(Modifier.width(6.dp))
@@ -448,7 +492,7 @@ private fun CompactStage(orb: OrbState, orbSize: androidx.compose.ui.unit.Dp, mo
                 font = Hud.Disp, weight = FontWeight.Bold)
             Tracked(orb.label, color = if (orb == OrbState.IDLE) Hud.Dim else orb.color, size = 9.sp, spacing = 4.sp)
         }
-        StageBar(orb)
+        StageBar(orb, voice)
     }
 }
 
@@ -458,14 +502,17 @@ private fun CompactStage(orb: OrbState, orbSize: androidx.compose.ui.unit.Dp, mo
  * and the answer coming back.
  */
 @Composable
-private fun StageBar(orb: OrbState) {
+private fun StageBar(orb: OrbState, voice: VoicePhase = VoicePhase.OFF) {
     val active = when (orb) {
         OrbState.THINKING -> 1
         OrbState.SPEAKING -> 2
+        OrbState.LISTENING -> 0
         else -> -1
     }
+    // A spoken turn: the phone hears, the core works, NORA speaks.
+    val stages = if (voice != VoicePhase.OFF) listOf("LISTEN", "CORE", "SPEAK") else listOf("UPLINK", "CORE", "REPLY")
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        listOf("UPLINK", "CORE", "REPLY").forEachIndexed { i, s ->
+        stages.forEachIndexed { i, s ->
             if (i > 0) Tracked("·", color = Hud.Cyan.copy(alpha = 0.25f), size = 9.sp)
             val on = i == active || (i == 0 && active > 0)
             val col = when (i) { 1 -> Hud.Violet; 2 -> Hud.Teal; else -> Hud.Cyan }
@@ -617,6 +664,143 @@ private fun Authorize(p: ConfirmPrompt, onYes: () -> Unit, onNo: () -> Unit) {
     }
 }
 
+// ── voice ────────────────────────────────────────────────────────────────────
+
+/** The command bar's microphone: a capsule, its cradle and stand, drawn in the accent. */
+@Composable
+private fun MicButton(enabled: Boolean, onClick: () -> Unit) {
+    val c = if (enabled) Hud.Cyan else Hud.Faint
+    Box(Modifier.size(46.dp)
+        .background(c.copy(alpha = 0.10f), RoundedCornerShape(2.dp))
+        .border(1.dp, c.copy(alpha = 0.7f), RoundedCornerShape(2.dp))
+        .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
+            val w = size.width
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(1.8.dp.toPx())
+            drawRoundRect(c, Offset(w * 0.34f, w * 0.04f), Size(w * 0.32f, w * 0.52f),
+                androidx.compose.ui.geometry.CornerRadius(w * 0.16f))
+            drawArc(c, 0f, 180f, false, Offset(w * 0.2f, w * 0.2f), Size(w * 0.6f, w * 0.52f), style = stroke)
+            drawLine(c, Offset(w * 0.5f, w * 0.72f), Offset(w * 0.5f, w * 0.9f), 1.8.dp.toPx())
+            drawLine(c, Offset(w * 0.34f, w * 0.92f), Offset(w * 0.66f, w * 0.92f), 1.8.dp.toPx())
+        }
+    }
+}
+
+/**
+ * The command bar during a voice session: what's being heard, live, and
+ * what a tap does now (stop listening, or stop NORA and speak).
+ */
+@Composable
+private fun VoicePanel(v: VoiceUi, onTap: () -> Unit, onStop: () -> Unit) {
+    val color = when (v.phase) {
+        VoicePhase.LISTENING -> OrbState.LISTENING.color
+        VoicePhase.THINKING -> Hud.Violet
+        VoicePhase.SPEAKING -> Hud.Teal
+        VoicePhase.OFF -> Hud.Cyan
+    }
+    val level by androidx.compose.animation.core.animateFloatAsState(v.level, tween(90), label = "level")
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp).glass(color).brackets(color)
+        .clickable(onClick = onTap).padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Dot(color)
+            Spacer(Modifier.width(8.dp))
+            Tracked(when (v.phase) {
+                VoicePhase.LISTENING -> "LISTENING"
+                VoicePhase.THINKING -> "PROCESSING"
+                VoicePhase.SPEAKING -> "SPEAKING · TAP OR TALK TO INTERRUPT"
+                VoicePhase.OFF -> ""
+            }, Modifier.weight(1f), color = color, size = 10.sp, spacing = 3.sp, glow = true)
+            Box(Modifier.border(1.dp, Hud.Red.copy(alpha = 0.5f)).clickable(onClick = onStop)
+                .padding(horizontal = 8.dp, vertical = 3.dp)) { Tracked("END", color = Hud.Red, size = 9.sp) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(when {
+            v.partial.isNotBlank() -> v.partial
+            v.phase == VoicePhase.LISTENING -> "Go ahead…"
+            else -> ""
+        }, color = if (v.partial.isBlank()) Hud.Faint else Hud.Txt, fontFamily = Hud.Mono, fontSize = 15.sp,
+            lineHeight = 20.sp, maxLines = 3)
+        if (v.phase == VoicePhase.LISTENING) {
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth().height(2.dp).background(color.copy(alpha = 0.12f))) {
+                Box(Modifier.fillMaxWidth(level.coerceIn(0.02f, 1f)).height(2.dp).background(color))
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceSettings(c: LinkController) {
+    val ctx = LocalContext.current
+    val tick by c.voice.statsTick.collectAsState()
+    var tts by remember { mutableStateOf(c.prefs.voiceTts) }
+    var bargeIn by remember { mutableStateOf(c.prefs.bargeIn) }
+    var followUp by remember { mutableStateOf(c.prefs.followUp) }
+    var micGranted by remember { mutableStateOf(false) }
+    var isAssistant by remember { mutableStateOf(false) }
+    val now = rememberNow()
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(now / 5000) {
+        micGranted = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        isAssistant = runCatching {
+            Settings.Secure.getString(ctx.contentResolver, "assistant").orEmpty().startsWith(ctx.packageName)
+        }.getOrDefault(false)
+    }
+    val median = remember(tick) { c.voice.stats.medianFirstAudio() }
+    val count = remember(tick) { c.voice.stats.count() }
+    val last = remember(tick) { c.voice.stats.last() }
+    val good = median != null && median <= 1500
+    Panel("VOICE", accent = Hud.Cyan, badge = {
+        Badge(if (median == null) "NO TURNS" else "MEDIAN ${String.format(Locale.US, "%.2f", median / 1000.0)}s",
+            if (median == null) Hud.Cyan else if (good) Hud.Green else Hud.Amber, live = median != null)
+    }) {
+        Access("MICROPHONE", micGranted) { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+        Hairline()
+        Row(Modifier.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Tracked("NORA'S OWN VOICE", color = Hud.Txt, size = 10.sp, spacing = 1.5.sp)
+                Detail(if (tts == VoiceController.TTS_CORE) "Made on the core and streamed: her real voice, about a second slower."
+                    else "Off: the phone's own voice, which starts about a second sooner.")
+            }
+            HudToggle(tts == VoiceController.TTS_CORE, {
+                tts = if (it) VoiceController.TTS_CORE else VoiceController.TTS_PHONE
+                c.prefs.voiceTts = tts
+            })
+        }
+        Hairline()
+        Row(Modifier.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Tracked("TALK OVER HER", color = Hud.Txt, size = 10.sp, spacing = 1.5.sp)
+                Detail("Speaking while NORA answers stops her and listens.")
+            }
+            HudToggle(bargeIn, { bargeIn = it; c.prefs.bargeIn = it })
+        }
+        Hairline()
+        Row(Modifier.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Tracked("KEEP LISTENING", color = Hud.Txt, size = 10.sp, spacing = 1.5.sp)
+                Detail("After she answers, listen for a follow-up until you go quiet.")
+            }
+            HudToggle(followUp, { followUp = it; c.prefs.followUp = it })
+        }
+        Hairline()
+        Access("DIGITAL ASSISTANT (HOLD POWER)", isAssistant) {
+            ctx.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
+        }
+        Spacer(Modifier.height(8.dp))
+        if (count > 0) {
+            Detail("First audio after you stop talking, median of the last $count turn(s). Target ≤ 1.5 s.")
+            last?.let { r ->
+                fun ms(k: String) = if (r.isNull(k)) "—" else "${r.optLong(k)} ms"
+                Detail("Last: heard ${ms("stt_ms")} · first words ${ms("core_first_say_ms")} · " +
+                    "audio ${ms("first_audio_ms")} (${r.optString("tts")}, ${r.optString("route")})")
+            }
+            Spacer(Modifier.height(6.dp))
+            HudButton("RESET MEASUREMENTS", { c.voice.clearStats() }, Modifier.fillMaxWidth(), color = Hud.Light)
+        } else Detail("Talk to NORA and the time to her first word is measured here.")
+    }
+}
+
 // ── system ───────────────────────────────────────────────────────────────────
 
 @Composable
@@ -712,6 +896,8 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
                 }
             }
         }
+
+        Enter(true, 200) { VoiceSettings(c) }
 
         Enter(true, 240) {
             Panel("PHONE ACCESS") {

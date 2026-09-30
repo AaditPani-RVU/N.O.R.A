@@ -29,6 +29,7 @@ import kotlin.math.sin
 /** What the orb shows, as on the dashboard, plus the phone's own "no link". */
 enum class OrbState(val color: Color, val label: String, val speed: Float, val pulseMs: Float, val swell: Float) {
     IDLE(Hud.Cyan, "STANDBY", 1f, 3200f, 0.18f),
+    LISTENING(Color(0xFF2ACDFF), "LISTENING", 1.4f, 1800f, 0.22f),
     THINKING(Hud.Violet, "PROCESSING", 2.25f, 1200f, 0.10f),
     SPEAKING(Hud.Teal, "RESPONDING", 1.8f, 900f, 0.28f),
     OFFLINE(Color(0xFF3E6378), "LINK DOWN", 0.35f, 4200f, 0.06f),
