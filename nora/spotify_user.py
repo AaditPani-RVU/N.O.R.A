@@ -183,9 +183,10 @@ def canonical(query: str) -> str:
     return _ALIASES.get(q, q)
 
 
-def match(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+def match(query: str, candidates: list[dict[str, Any]], strict: bool = False) -> dict[str, Any] | None:
     """The playlist a spoken name means. Exact beats contained beats close;
-    on a tie the user's own playlist beats one they only follow."""
+    on a tie the user's own playlist beats one they only follow. `strict`
+    drops "close": for a bare "play risk", which is usually a song."""
     q = canonical(query)
     if not q:
         return None
@@ -199,6 +200,8 @@ def match(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None
             score = 3.0
         elif words <= set(n.split()) or q in n:
             score = 2.0 + len(q) / max(len(n), 1)       # "workout" → "Workout 2026" over "Workout Mix Vol. 7 Extended"
+        elif strict:
+            score = 0.0
         else:
             ratio = difflib.SequenceMatcher(None, q, n).ratio()
             score = ratio if ratio >= 0.75 else 0.0
@@ -209,12 +212,12 @@ def match(query: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None
     return best
 
 
-def find_playlist(query: str) -> dict[str, Any] | None:
+def find_playlist(query: str, strict: bool = False) -> dict[str, Any] | None:
     """{name, uri} of the user's playlist called something like `query`, or
     None. Raises NotLoggedIn before the first login."""
-    hit = match(query, playlists())
-    if hit is None and _playlists_at and time.time() - _playlists_at > 5:
-        hit = match(query, playlists(refresh=True))     # made one a minute ago
+    hit = match(query, playlists(), strict)
+    if hit is None and not strict and _playlists_at and time.time() - _playlists_at > 5:
+        hit = match(query, playlists(refresh=True), strict)     # made one a minute ago
     return hit
 
 

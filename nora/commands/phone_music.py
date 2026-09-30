@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from nora import spotify_api, spotify_user
 from nora.command_engine import register
@@ -26,10 +27,10 @@ async def _phone(params: dict) -> StepResult:
     return await server.call_capability("phone.play_media", params)
 
 
-def _own(query: str) -> tuple[dict | None, bool]:
+def _own(query: str, strict: bool = False) -> tuple[dict | None, bool]:
     """(the user's playlist called `query`, whether Spotify is linked)."""
     try:
-        return spotify_user.find_playlist(query), True
+        return spotify_user.find_playlist(query, strict=strict), True
     except spotify_user.NotLoggedIn:
         return None, False
     except Exception as exc:                        # network, 5xx: fall back to search
@@ -37,16 +38,26 @@ def _own(query: str) -> tuple[dict | None, bool]:
         return None, True
 
 
+def _by(query: str) -> tuple[str, str] | None:
+    """"risk by deftones" → ("risk", "deftones")."""
+    m = re.match(r"^(?P<t>.+?)\s+by\s+(?P<a>.+)$", query, re.I)
+    return (m.group("t"), m.group("a")) if m else None
+
+
 def _resolve(query: str, kind: str) -> tuple[str | None, str, str]:
     """(uri, what to call it, a note for the user). Blocking: run off the loop."""
     note = ""
-    if kind in ("playlist", "any"):
-        hit, linked = _own(query)
+    by = _by(query) if kind in ("any", "track") else None
+    if kind == "playlist" or (kind == "any" and by is None):
+        # A loose near-miss is fine when they said "playlist"; for a bare
+        # "play risk" only a clear match beats the catalogue.
+        hit, linked = _own(query, strict=(kind == "any"))
         if hit is not None:
             return hit["uri"], f"your {hit['name']} playlist", ""
         if spotify_user.canonical(query) == _OFFLINE:
             return None, "Offline Backup", (
-                "I can't see your Offline Backup playlist from here." if linked else
+                "I can't see your Offline Backup playlist. In Spotify, add it to your "
+                "library, and I'll find it." if linked else
                 "Spotify isn't linked on the core, so I can't reach your Offline Backup.")
         if kind == "playlist":
             note = (f"You don't have a playlist called {query}, so here's a public one."
@@ -65,7 +76,15 @@ def _resolve(query: str, kind: str) -> tuple[str | None, str, str]:
         if hit:
             return hit["uri"], hit["name"], ""
     else:
-        hit = spotify_api.find_track(query)
+        if by is not None:
+            hit = spotify_api.find_track(*by)
+        else:
+            if kind == "any":
+                # "play some pink floyd": the name is an artist's, so play the artist.
+                artist = spotify_api.find_artist(query)
+                if artist and artist["name"].casefold() == query.casefold():
+                    return artist["uri"], artist["name"], ""
+            hit = spotify_api.find_track(query)
         if hit:
             return hit["uri"], f"{hit['title']} by {hit['artist']}", ""
     return None, query, note

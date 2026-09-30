@@ -266,15 +266,28 @@ class PlayMedia(private val context: Context) : Capability {
             Bundle().apply { putInt("android.support.v4.media.session.action.ARGUMENT_SHUFFLE_MODE", 1) })
     }
 
-    /** Wait up to 8s for the session to play something new; its title, or null. */
+    /**
+     * Wait for the session to play something new; its title, or null.
+     *
+     * Spotify with NORA in the background loads what play-from-URI asked for
+     * and leaves it paused, so once the new track is in (or after 2s, in case
+     * it starts with the same one) press play. At most 4.8s: the core gives
+     * the whole call `invoke_deadline_ms` (8s), and answering "didn't start"
+     * beats the core giving up with a timeout.
+     */
     private suspend fun startedPlaying(
         controller: android.media.session.MediaController, before: String?, wasPlaying: Boolean,
     ): String? {
-        repeat(20) {
+        var nudged = false
+        for (i in 1..12) {
             delay(400)
             val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
             val title = Media.title(controller)
             if (playing && title != null && (title != before || !wasPlaying)) return title
+            if (!playing && !nudged && (title != before || i >= 5)) {
+                controller.transportControls.play()
+                nudged = true
+            }
         }
         return null
     }

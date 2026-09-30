@@ -128,18 +128,46 @@ class PlayOnPhoneTest(unittest.TestCase):
         self.assertEqual(self.sent[0]["uri"], "spotify:playlist:pppppppppppppppppppppp")
         self.assertIn("isn't linked", r.message)
 
+    TRACK = {"uri": "spotify:track:0VjIjW4GlUZAMYd2vXMi3b", "title": "Blinding Lights",
+             "artist": "The Weeknd", "album": "After Hours"}
+
     def test_a_song_is_found_in_the_catalogue(self):
         with mock.patch.object(spotify_user, "playlists", return_value=MINE), \
-             mock.patch.object(phone_music.spotify_api, "find_track",
-                               return_value={"uri": "spotify:track:0VjIjW4GlUZAMYd2vXMi3b",
-                                             "title": "Blinding Lights", "artist": "The Weeknd",
-                                             "album": "After Hours"}):
+             mock.patch.object(phone_music.spotify_api, "find_artist", return_value=None), \
+             mock.patch.object(phone_music.spotify_api, "find_track", return_value=self.TRACK):
             self.run_(query="blinding lights", kind="any")
         self.assertEqual(self.sent[0]["uri"], "spotify:track:0VjIjW4GlUZAMYd2vXMi3b")
         self.assertEqual(self.sent[0]["label"], "Blinding Lights by The Weeknd")
 
+    def test_song_by_artist_is_split(self):
+        """"Risk by Deftones" searched as one title found Bruno Mars's "Risk It All"."""
+        with mock.patch.object(spotify_user, "playlists", return_value=MINE) as own, \
+             mock.patch.object(phone_music.spotify_api, "find_track", return_value=self.TRACK) as ft:
+            self.run_(query="Risk by Deftones", kind="any")
+        ft.assert_called_once_with("Risk", "Deftones")
+        own.assert_not_called()
+
+    def test_an_artist_name_plays_the_artist(self):
+        with mock.patch.object(spotify_user, "playlists", return_value=MINE), \
+             mock.patch.object(phone_music.spotify_api, "find_artist",
+                               return_value={"uri": "spotify:artist:0k17h0D3J5VfsdmQ1iZtE9",
+                                             "name": "Pink Floyd"}), \
+             mock.patch.object(phone_music.spotify_api, "find_track") as ft:
+            self.run_(query="pink floyd", kind="any")
+        self.assertEqual(self.sent[0]["uri"], "spotify:artist:0k17h0D3J5VfsdmQ1iZtE9")
+        ft.assert_not_called()
+
+    def test_a_bare_song_name_does_not_fuzzy_match_a_playlist(self):
+        # "roadtrip" is close to "Road trip"; said as "play roadtrip" it's a song.
+        with mock.patch.object(spotify_user, "playlists", return_value=MINE), \
+             mock.patch.object(phone_music.spotify_api, "find_artist", return_value=None), \
+             mock.patch.object(phone_music.spotify_api, "find_track", return_value=self.TRACK):
+            self.run_(query="roadtrip", kind="any")
+        self.assertEqual(self.sent[0]["uri"], self.TRACK["uri"])
+
     def test_nothing_found_still_asks_the_phone_to_search(self):
         with mock.patch.object(spotify_user, "playlists", return_value=MINE), \
+             mock.patch.object(phone_music.spotify_api, "find_artist", return_value=None), \
              mock.patch.object(phone_music.spotify_api, "find_track", return_value=None):
             self.run_(query="some obscure thing", kind="any")
         self.assertNotIn("uri", self.sent[0])
