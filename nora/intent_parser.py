@@ -50,6 +50,11 @@ def _get_groq_client(
             api_key=api_key or os.environ.get(key_env, ""),
             base_url=base_url,
             timeout=timeout_sec,
+            # The SDK otherwise retries a 429 twice by itself, sleeping out
+            # the provider's retry-after: on Groq's free tier that turned one
+            # rate-limited turn into a silent 40 s wait, while the fallback
+            # models behind it sat unused. Retries are this module's job.
+            max_retries=0,
         )
         _groq_clients[cache_key] = client
     return client
@@ -86,56 +91,40 @@ EXECUTION BIAS — CRITICAL (follow these exactly):
   take_screenshot() either — that saves a file to disk without describing it.
   read_screen is the only action that actually looks.
 - Partial or colloquial phrases → find the closest registered action and execute it.
-- "tell me about <X>" / "what's <X> like" / "show me <X>" where <X> is a CITY, COUNTRY, OR
-  LANDMARK (a place you could point to on a map) → ALWAYS show_location(location="<X>"), never
-  tell_me_about. Reserve tell_me_about for topics, concepts, people, or events that are not places
-  — "tell me about Tokyo" is a place (show_location); "tell me about quantum computing" is a topic
-  (tell_me_about). When in doubt whether a noun is a place, treat a capitalized proper noun with no
-  other qualifier as a place.
-- ANY weather or forecast question ("what's the weather", "will it rain", "how cold is it",
-  "weather in <place>") → get_weather(). NEVER web_search or tell_me_about for weather: there is a
-  live weather API wired in, and search results are both slower and staler than it.
+- "tell me about <X>" / "what's <X> like" / "show me <X>" where <X> is a city, country or landmark
+  → ALWAYS show_location(location="<X>"). tell_me_about is for topics, people and events that aren't
+  places. A capitalised proper noun with no other qualifier counts as a place.
+- ANY weather or forecast question → get_weather(). NEVER web_search or tell_me_about for weather.
 - Questions or research requests (non-place, non-weather topics) → use ask_claude() or tell_me_about(). NEVER say "I need more info."
 - Hard multi-step reasoning, math, or logic problems (NOT everyday factual questions) → deep_reasoning().
 - ONLY return the Clarification shape for DESTRUCTIVE actions where two distinct targets are equally plausible
   and choosing the wrong one cannot be undone (e.g. "delete that" with two open files of the same name).
 - For everything else: execute first, let the user correct if needed.
 
-EFFICIENCY
-- Prefer local execution over web-based.
-- Avoid redundant app launches (context.active_apps tracks what's already open).
-- Skip unnecessary confirmations unless the action is destructive.
-- For music: if the user says "play music" and something's already playing, don't restart it.
-
-CONTEXT AWARENESS
-- Active apps, current music state (track/artist/source/status), PTT mode, and recent
-  commands are maintained by the runtime. You don't need to ask — the runtime fills gaps.
-- For "play something" with no details, emit play_music with empty parameters;
-  the runtime substitutes the user's preferred track.
-
-INPUT / PTT
-- PTT is toggled in real time by voice. "Enable push to talk" â†' set_ptt_mode(true).
-  "Disable push to talk" / "turn off push to talk" â†' set_ptt_mode(false).
+RUNTIME
+- Prefer local execution over web-based. Active apps, music state, PTT mode and recent commands
+  are tracked by the runtime; don't ask for them, and don't reopen what's open or restart what's playing.
 
 INTERRUPTION
-- "stop", "cancel", "pause everything", "shut up" â†' stop_all().
-  This halts TTS, stops music, and clears pending steps.
+- "stop", "cancel", "pause everything", "shut up" → stop_all(). It halts speech, music and pending steps.
 
-MUSIC (Spotify only)
-- All music runs through Spotify on the local desktop client. There is no other music backend.
-- "play music" / "play something" with no title → play_music(track="", artist="") — it replays the user's preference.
-- A specific song → spotify_play_song(song). A song plus artist → play_music(track, artist).
-- An artist with no song ("play some Slowdive") → spotify_play_artist(artist).
-- An album → spotify_play_album(album, artist). A playlist → spotify_play_playlist(name).
-- Transport: resume_music, pause_music, toggle_music, stop_music, next_track, previous_track.
-- "what's playing" / "what song is this" → now_playing(). NEVER guess the track from memory.
-- spotify_set_volume(level) changes Spotify's volume only; set_volume(level) changes system volume.
+MUSIC (Spotify)
+- No title → play_music(track="", artist=""); the runtime plays the user's preference.
+- A song → spotify_play_song(song); song and artist → play_music(track, artist); an artist alone →
+  spotify_play_artist(artist); an album → spotify_play_album(album, artist); a playlist → spotify_play_playlist(name).
+- "what's playing" → now_playing(). NEVER guess the track from memory.
+- spotify_set_volume(level) is Spotify's volume only; set_volume(level) is the system's.
+
+TIME
+- "remind me in N minutes to X" → remind_me(message="X", delay_minutes=N). A clock time or a
+  repeat ("at 6pm", "every morning") → schedule_task(when, what).
 
 RESPONSE FORMAT (exactly one of these four shapes):
-  Execution plan: {{"intent": "...", "steps": [{{"action": "name", "parameters": {{}}}}], "requires_confirmation": false}}
+  Execution plan: {{"intent": "...", "steps": [{{"action": "name", "parameters": {{}}}}]}}
   Clarification:  {{"intent": "clarify", "steps": [], "error": "..."}}
   System message: {{"intent": "...", "steps": [], "error": null}}
   Conversation:   {{"intent": "chat", "steps": [], "response": "your spoken reply", "error": null}}
+Add "requires_confirmation": true to a plan only when a step is destructive or can't be undone.
 
 Use the Conversation shape for greetings, small talk, or questions that need a spoken answer but no action.
 Conversation responses are spoken aloud, so: no markdown, no lists, no emoji — plain sentences only.
@@ -148,186 +137,33 @@ Available actions: {actions}
 Action parameter signatures:
 {action_signatures}
 
-Examples:
-User: "open chrome"
-{{"intent": "open Chrome", "steps": [{{"action": "open_app", "parameters": {{"name": "chrome"}}}}], "requires_confirmation": false}}
-
-User: "enable push to talk"
-{{"intent": "enable PTT mode", "steps": [{{"action": "set_ptt_mode", "parameters": {{"enabled": true}}}}], "requires_confirmation": false}}
-
-User: "disable push to talk"
-{{"intent": "disable PTT mode", "steps": [{{"action": "set_ptt_mode", "parameters": {{"enabled": false}}}}], "requires_confirmation": false}}
-
-User: "stop"
-{{"intent": "stop everything", "steps": [{{"action": "stop_all", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "cancel that"
-{{"intent": "cancel pending actions", "steps": [{{"action": "stop_all", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "pause everything"
-{{"intent": "halt all execution", "steps": [{{"action": "stop_all", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "play music"
-{{"intent": "play preferred music", "steps": [{{"action": "play_music", "parameters": {{"track": "", "artist": ""}}}}], "requires_confirmation": false}}
-
-User: "play something"
-{{"intent": "play preferred music", "steps": [{{"action": "play_music", "parameters": {{"track": "", "artist": ""}}}}], "requires_confirmation": false}}
-
-User: "resume music"
-{{"intent": "resume last track", "steps": [{{"action": "resume_music", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "play Blinding Lights"
-{{"intent": "play song on Spotify", "steps": [{{"action": "spotify_play_song", "parameters": {{"song": "Blinding Lights"}}}}], "requires_confirmation": false}}
-
-User: "play something by The Weeknd"
-{{"intent": "play artist on Spotify", "steps": [{{"action": "spotify_play_artist", "parameters": {{"artist": "The Weeknd"}}}}], "requires_confirmation": false}}
-
-User: "play the album Souvlaki"
-{{"intent": "play album on Spotify", "steps": [{{"action": "spotify_play_album", "parameters": {{"album": "Souvlaki", "artist": ""}}}}], "requires_confirmation": false}}
-
-User: "what song is this"
-{{"intent": "now playing", "steps": [{{"action": "now_playing", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "next song"
-{{"intent": "skip track", "steps": [{{"action": "next_track", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "start coding"
-{{"intent": "coding workflow", "steps": [{{"action": "open_app", "parameters": {{"name": "vscode"}}}}, {{"action": "open_app", "parameters": {{"name": "chrome"}}}}, {{"action": "play_music", "parameters": {{"track": "", "artist": ""}}}}], "requires_confirmation": false}}
-
-User: "what time is it"
-{{"intent": "get time", "steps": [{{"action": "get_time", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "tell me about quantum computing"
-{{"intent": "research", "steps": [{{"action": "tell_me_about", "parameters": {{"query": "quantum computing"}}}}], "requires_confirmation": false}}
-
-User: "how do I reverse a linked list in Python"
-{{"intent": "coding help", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do I reverse a linked list in Python"}}}}], "requires_confirmation": false}}
-
-User: "tell me about Tokyo"
-{{"intent": "show location", "steps": [{{"action": "show_location", "parameters": {{"location": "Tokyo"}}}}], "requires_confirmation": false}}
-
-User: "what's Paris like"
-{{"intent": "show location", "steps": [{{"action": "show_location", "parameters": {{"location": "Paris"}}}}], "requires_confirmation": false}}
-
-User: "delete test.txt"
-{{"intent": "delete file", "steps": [{{"action": "delete_file", "parameters": {{"path": "test.txt"}}}}], "requires_confirmation": true}}
-
-User: "daddy's home"
-{{"intent": "greeting", "steps": [{{"action": "daddys_home", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "hello how are you"
-{{"intent": "chat", "steps": [], "response": "Doing well, sir. Ready for your commands.", "error": null}}
-
-User: "are you there"
-{{"intent": "chat", "steps": [], "response": "Always here, sir. What do you need?", "error": null}}
-
-User: "play"
-{{"intent": "play preferred music", "steps": [{{"action": "play_music", "parameters": {{"track": "", "artist": ""}}}}], "requires_confirmation": false}}
-
-User: "screenshot"
-{{"intent": "take screenshot", "steps": [{{"action": "take_screenshot", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "what's on my screen"
-{{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What is on the screen right now?"}}}}], "requires_confirmation": false}}
-
-User: "what am I looking at"
-{{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What is on the screen right now?"}}}}], "requires_confirmation": false}}
-
-User: "what does this error say"
-{{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What does the error message say?"}}}}], "requires_confirmation": false}}
-
-User: "time"
-{{"intent": "get current time", "steps": [{{"action": "get_time", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "chrome"
-{{"intent": "open Chrome", "steps": [{{"action": "open_app", "parameters": {{"name": "chrome"}}}}], "requires_confirmation": false}}
-
-User: "how do black holes form"
-{{"intent": "research question", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do black holes form"}}}}], "requires_confirmation": false}}
-
-User: "if a train leaves chicago at 60mph and another leaves new york at 80mph, when do they meet"
-{{"intent": "math reasoning", "steps": [{{"action": "deep_reasoning", "parameters": {{"question": "if a train leaves chicago at 60mph and another leaves new york at 80mph, when do they meet"}}}}], "requires_confirmation": false}}
-
-User: "what's the weather"
-{{"intent": "check weather", "steps": [{{"action": "get_weather", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "is it going to rain in Tokyo tomorrow"
-{{"intent": "check weather", "steps": [{{"action": "get_weather", "parameters": {{"location": "Tokyo"}}}}], "requires_confirmation": false}}
-
-User: "what did I say about the auth bug"
-{{"intent": "recall past notes", "steps": [{{"action": "recall", "parameters": {{"query": "auth bug"}}}}], "requires_confirmation": false}}
-
-User: "recall my notes on deployment"
-{{"intent": "search knowledge base", "steps": [{{"action": "recall", "parameters": {{"query": "deployment"}}}}], "requires_confirmation": false}}
-
-User: "click the address bar"
-{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "address bar"}}}}], "requires_confirmation": false}}
-
-User: "click the address bar in firefox"
-{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "address bar in firefox"}}}}], "requires_confirmation": false}}
-
-User: "click the submit button in chrome"
-{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "submit button in chrome"}}}}], "requires_confirmation": false}}
-
-User: "click the save button"
-{{"intent": "click UI element", "steps": [{{"action": "click_on", "parameters": {{"target": "save button"}}}}], "requires_confirmation": false}}
-
-User: "click the submit button"
-{{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "submit button"}}}}], "requires_confirmation": false}}
-
-User: "fill the username field with john"
-{{"intent": "fill form field", "steps": [{{"action": "fill_field", "parameters": {{"label": "username", "text": "john"}}}}], "requires_confirmation": false}}
-
-User: "type hello world"
-{{"intent": "type text", "steps": [{{"action": "type_into_focused", "parameters": {{"text": "hello world"}}}}], "requires_confirmation": false}}
-
-User: "press enter"
-{{"intent": "press key", "steps": [{{"action": "press_key", "parameters": {{"keys": "Return"}}}}], "requires_confirmation": false}}
-
-User: "why is my fan loud"
-{{"intent": "cpu trace", "steps": [{{"action": "why_busy", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "why is my computer slow"
-{{"intent": "cpu trace", "steps": [{{"action": "why_busy", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "what's writing to disk"
-{{"intent": "disk IO trace", "steps": [{{"action": "what_writes_disk", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "who's using the most network"
-{{"intent": "network trace", "steps": [{{"action": "top_talkers", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "what process is using the network"
-{{"intent": "network trace", "steps": [{{"action": "top_talkers", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "who opened my ssh key"
-{{"intent": "file access trace", "steps": [{{"action": "who_opened", "parameters": {{"path": "~/.ssh/id_rsa"}}}}], "requires_confirmation": false}}
-
-User: "pause Spotify"
-{{"intent": "media control", "steps": [{{"action": "media_play_pause", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "next track"
-{{"intent": "media next", "steps": [{{"action": "media_next", "parameters": {{}}}}], "requires_confirmation": false}}
-
-User: "connect to wifi CoffeeShop"
-{{"intent": "wifi connect", "steps": [{{"action": "wifi_connect", "parameters": {{"ssid": "CoffeeShop"}}}}], "requires_confirmation": false}}
-
-User: "snapshot now"
-{{"intent": "create snapshot", "steps": [{{"action": "snapshot_now", "parameters": {{"label": "manual"}}}}], "requires_confirmation": false}}
-
-User: "snapshot before refactor"
-{{"intent": "create snapshot", "steps": [{{"action": "snapshot_now", "parameters": {{"label": "before-refactor"}}}}], "requires_confirmation": false}}
-
-User: "roll back to before-refactor"
-{{"intent": "rollback snapshot", "steps": [{{"action": "rollback_to", "parameters": {{"label_or_time": "before-refactor"}}}}], "requires_confirmation": true}}
-
-User: "duck Spotify when I speak"
-{{"intent": "audio duck", "steps": [{{"action": "duck_app_when_speaking", "parameters": {{"app": "Spotify"}}}}], "requires_confirmation": false}}
-
-User: "enter focus mode for writing"
-{{"intent": "focus mode", "steps": [{{"action": "focus_mode", "parameters": {{"intent": "writing"}}}}], "requires_confirmation": false}}
-
-User: "enable mic denoising"
-{{"intent": "denoise mic", "steps": [{{"action": "denoise_mic", "parameters": {{}}}}], "requires_confirmation": false}}
+Examples (one per behaviour; common commands never reach you, a rule table answers them first):
+User: "stop" → {{"intent": "stop everything", "steps": [{{"action": "stop_all", "parameters": {{}}}}]}}
+User: "you look really cool today" → {{"intent": "chat", "steps": [], "response": "Thank you, sir. I try.", "error": null}}
+User: "tell me about quantum computing" → {{"intent": "research", "steps": [{{"action": "tell_me_about", "parameters": {{"query": "quantum computing"}}}}]}}
+User: "tell me about Tokyo" → {{"intent": "show location", "steps": [{{"action": "show_location", "parameters": {{"location": "Tokyo"}}}}]}}
+User: "how do black holes form" → {{"intent": "research question", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do black holes form"}}}}]}}
+User: "if a train leaves at 60mph and another at 80mph, when do they meet" → {{"intent": "math reasoning", "steps": [{{"action": "deep_reasoning", "parameters": {{"question": "if a train leaves at 60mph and another at 80mph, when do they meet"}}}}]}}
+User: "is it going to rain in Tokyo tomorrow" → {{"intent": "check weather", "steps": [{{"action": "get_weather", "parameters": {{"location": "Tokyo"}}}}]}}
+User: "what does this error say" → {{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What does the error message say?"}}}}]}}
+User: "what did I say about the auth bug" → {{"intent": "recall past notes", "steps": [{{"action": "recall", "parameters": {{"query": "auth bug"}}}}]}}
+User: "remind me in half an hour to check the oven" → {{"intent": "set reminder", "steps": [{{"action": "remind_me", "parameters": {{"message": "check the oven", "delay_minutes": 30}}}}]}}
+User: "delete test.txt" → {{"intent": "delete file", "steps": [{{"action": "delete_file", "parameters": {{"path": "test.txt"}}}}], "requires_confirmation": true}}
+User: "daddy's home" → {{"intent": "greeting", "steps": [{{"action": "daddys_home", "parameters": {{}}}}]}}
+User: "click the submit button in chrome" → {{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "submit button in chrome"}}}}]}}
+User: "fill the username field with john" → {{"intent": "fill form field", "steps": [{{"action": "fill_field", "parameters": {{"label": "username", "text": "john"}}}}]}}
+User: "type hello world" → {{"intent": "type text", "steps": [{{"action": "type_into_focused", "parameters": {{"text": "hello world"}}}}]}}
+User: "why is my computer slow" → {{"intent": "cpu trace", "steps": [{{"action": "why_busy", "parameters": {{}}}}]}}
+User: "what's writing to disk" → {{"intent": "disk IO trace", "steps": [{{"action": "what_writes_disk", "parameters": {{}}}}]}}
+User: "who's using the most network" → {{"intent": "network trace", "steps": [{{"action": "top_talkers", "parameters": {{}}}}]}}
+User: "who opened my ssh key" → {{"intent": "file access trace", "steps": [{{"action": "who_opened", "parameters": {{"path": "~/.ssh/id_rsa"}}}}]}}
+User: "pause Spotify" → {{"intent": "media control", "steps": [{{"action": "media_play_pause", "parameters": {{}}}}]}}
+User: "connect to wifi CoffeeShop" → {{"intent": "wifi connect", "steps": [{{"action": "wifi_connect", "parameters": {{"ssid": "CoffeeShop"}}}}]}}
+User: "snapshot before refactor" → {{"intent": "create snapshot", "steps": [{{"action": "snapshot_now", "parameters": {{"label": "before-refactor"}}}}]}}
+User: "roll back to before-refactor" → {{"intent": "rollback snapshot", "steps": [{{"action": "rollback_to", "parameters": {{"label_or_time": "before-refactor"}}}}], "requires_confirmation": true}}
+User: "duck Spotify when I speak" → {{"intent": "audio duck", "steps": [{{"action": "duck_app_when_speaking", "parameters": {{"app": "Spotify"}}}}]}}
+User: "enter focus mode for writing" → {{"intent": "focus mode", "steps": [{{"action": "focus_mode", "parameters": {{"intent": "writing"}}}}]}}
+User: "enable mic denoising" → {{"intent": "denoise mic", "steps": [{{"action": "denoise_mic", "parameters": {{}}}}]}}
 
 CRITICAL: Return ONLY the JSON object. No explanation, no markdown fences, no extra text."""
 
@@ -551,7 +387,7 @@ def _parse_via_groq(
     """
     import os
     import time as _time
-    from openai import APIConnectionError, APITimeoutError
+    from openai import APIConnectionError, APITimeoutError, RateLimitError
 
     api_key = os.environ.get(cfg.get("api_key_env", "GROQ_API_KEY"), "")
     if not api_key:
@@ -590,6 +426,7 @@ def _parse_via_groq(
             if cfg.get("extra_body"):
                 extra["extra_body"] = cfg["extra_body"]
             try:
+                started = _time.monotonic()
                 resp = client.chat.completions.create(
                     model=model,
                     max_tokens=max_tokens,
@@ -601,6 +438,10 @@ def _parse_via_groq(
                     **extra,
                 )
                 response_text = resp.choices[0].message.content or ""
+                usage = getattr(resp, "usage", None)
+                logger.info("intent: %s answered in %.1fs (prompt %s tok, reply %s tok)", model,
+                            _time.monotonic() - started, getattr(usage, "prompt_tokens", "?"),
+                            getattr(usage, "completion_tokens", "?"))
                 logger.debug(f"Groq raw response: {response_text}")
                 data = _extract_json(response_text)
                 intent = IntentResponse.model_validate(data)
@@ -611,6 +452,10 @@ def _parse_via_groq(
                 last_exc = e
                 if json_attempt == 1:
                     break  # try next network attempt
+            except RateLimitError:
+                # Not a network blip: waiting here is exactly the stall the
+                # caller has fallbacks for. The router records the cooldown.
+                raise
             except (APIConnectionError, APITimeoutError) as e:
                 logger.warning(f"Groq network error (attempt {net_attempt+1}): {e}")
                 last_exc = e
@@ -791,11 +636,23 @@ def _parse_via_router(
     validation, all of which live in ``_parse_via_groq``. This reuses the
     router's *configuration* rather than its call path.
     """
+    import time as _time
+    from openai import RateLimitError
+    from nora import model_router
+
     base = get_config().get("llm", {})
     errors: list[str] = []
+    candidates = _intent_candidates()
 
-    for candidate in _intent_candidates():
+    for i, candidate in enumerate(candidates):
         name = candidate.get("name", candidate.get("model", "?"))
+        # Rate-limited a moment ago: don't spend a round trip learning it
+        # again. The last candidate is always tried rather than failing flat.
+        wait = model_router._cooldown_until(name) - _time.time()
+        if wait > 0 and i < len(candidates) - 1:
+            logger.info("intent: skipping %s (rate-limited for %.0fs more)", name, wait)
+            errors.append(f"{name}: cooling down")
+            continue
         cfg = {
             **base,
             "model": candidate["model"],
@@ -804,7 +661,18 @@ def _parse_via_router(
             "extra_body": candidate.get("extra_body"),
         }
         try:
-            return _parse_via_groq(text, cfg, memory_ctx, screen_ctx, net_attempts=1)
+            result = _parse_via_groq(text, cfg, memory_ctx, screen_ctx, net_attempts=1)
+            model_router._clear_cooldown(name)
+            return result
+        except RateLimitError as e:
+            retry_after = None
+            try:
+                retry_after = float(e.response.headers.get("retry-after", ""))
+            except (TypeError, ValueError, AttributeError):
+                pass
+            model_router._mark_exhausted(name, retry_after)
+            logger.warning("intent: %s rate-limited (retry after %ss) — next candidate", name, retry_after)
+            errors.append(f"{name}: rate-limited")
         except Exception as e:
             logger.warning("intent: %s failed — %s", name, e)
             errors.append(f"{name}: {e}")

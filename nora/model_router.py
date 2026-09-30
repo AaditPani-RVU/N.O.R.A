@@ -141,7 +141,10 @@ def _call_openai_compatible(
     if candidate.get("api_key_env") and not api_key:
         raise EnvironmentError(f"{candidate['api_key_env']} not set")
 
-    client = OpenAI(api_key=api_key, base_url=candidate["base_url"], timeout=timeout_sec)
+    # max_retries=0: the SDK's own 429 retries sleep out retry-after before
+    # this function ever sees the 429, so the cooldown below never engaged.
+    client = OpenAI(api_key=api_key, base_url=candidate["base_url"], timeout=timeout_sec,
+                    max_retries=0)
     # Per-candidate provider extensions, e.g. Groq's reasoning_format:"hidden"
     # for the gpt-oss models — without it their analysis channel is appended to
     # `content` and gets spoken aloud ("We need to consider the conversation...").

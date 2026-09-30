@@ -607,6 +607,21 @@ def _build_rules() -> None:
         lambda m: _intent("add task", "add_task",
                           {"title": (m.group("what") or m.group("what2")).strip()}),
     )
+    # "Remind me in 1 minute to stretch": the model sent {"duration": "1 minute"}
+    # here, which remind_me dropped, and the reminder landed at 5 minutes.
+    n = r"(?P<n>\d+(?:\.\d+)?|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty-five)"
+    unit = r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)"
+    _rule(
+        r"(?:remind\s+me|set\s+(?:a\s+|an\s+)?(?:reminder|alarm\s+reminder))\s+(?:in|for|after)\s+"
+        + n + r"\s+" + unit + r"\s+(?:to|that|about)\s+(?P<msg>.{2,200})",
+        lambda m: _intent("set reminder", "remind_me",
+                          {"message": m.group("msg").strip(), "duration": f"{m.group('n')} {m.group('unit')}"}),
+    )
+    _rule(
+        r"remind\s+me\s+(?:to|about)\s+(?P<msg>.{2,200}?)\s+in\s+" + n + r"\s+" + unit,
+        lambda m: _intent("set reminder", "remind_me",
+                          {"message": m.group("msg").strip(), "duration": f"{m.group('n')} {m.group('unit')}"}),
+    )
     from nora.days import _TOMORROW
     day = (r"(?:\s+(?:for\s+|on\s+)?(?P<day>today|tonight|" + _TOMORROW + r"|this\s+(?:morning|afternoon|evening)"
            r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday))")

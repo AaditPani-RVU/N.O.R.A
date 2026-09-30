@@ -170,9 +170,11 @@ def parse_spec(spec: str) -> Schedule | None:
         return cron
 
     # "in 20 minutes" / "in an hour" — one-shot, relative.
-    m = re.search(r"\bin\s+(a|an|\d+)\s*(second|minute|min|hour|hr|day)s?\b", text)
+    # Decimals too: "in 1.5 minutes" used to miss this and reach _parse_clock,
+    # which read "1.5" as 1:05 and set the reminder for the middle of the night.
+    m = re.search(r"\bin\s+(a|an|\d+(?:\.\d+)?)\s*(second|minute|min|hour|hr|day)s?\b", text)
     if m:
-        qty = 1 if m.group(1) in ("a", "an") else int(m.group(1))
+        qty = 1 if m.group(1) in ("a", "an") else float(m.group(1))
         unit = m.group(2)
         seconds = qty * {
             "second": 1, "minute": 60, "min": 60,
