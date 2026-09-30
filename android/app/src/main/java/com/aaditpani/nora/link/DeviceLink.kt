@@ -97,7 +97,8 @@ class DeviceLink(
     private val isKilled: () -> Boolean,
     private val outbox: Outbox,
     private val audit: AuditSink,
-    private val onNotify: (title: String, body: String, priority: String) -> Unit,
+    /** Typed chat, confirmations and messages. Without one, confirmations are declined. */
+    private val chat: ChatListener?,
     private val scope: CoroutineScope,
     private val client: OkHttpClient = defaultClient(),
 ) {
@@ -136,6 +137,17 @@ class DeviceLink(
     /** Re-advertise capabilities after the user switches one on or off. */
     fun refreshManifest() {
         current?.send("manifest", manifest())
+    }
+
+    /**
+     * Send a typed message as a turn. Returns its id, which NORA's answer lines
+     * and `turn.done` carry as `corr`; null when not connected. Not queued: a
+     * command run minutes after it was typed is a surprise, not a service.
+     */
+    fun sendUtterance(text: String): String? {
+        val sock = current ?: return null
+        val env = Protocol.envelope("utterance", JSONObject().put("text", text.take(ChatLog.MAX_TEXT)))
+        return if (sock.resend(env)) env.getString("id") else null
     }
 
     /** Queue an event; it is sent now if connected, else on the next connection. */
@@ -228,24 +240,60 @@ class DeviceLink(
         val body = msg.getJSONObject("body")
         when (msg.getString("type")) {
             "invoke" -> scope.launch { invoke(sock, msg) }
-            "confirm_request" -> {
-                // No capability in this version is tier 2, and typed turns
-                // (which can ask to confirm a plan) arrive with the chat
-                // screen. Decline rather than approve anything unseen.
-                sock.send("confirm_response", JSONObject()
-                    .put("invocation_id", body.optString("invocation_id"))
-                    .put("approved", false)
-                    .put("method", "unsupported"), corr = msg.getString("id"))
-                audit.record(AuditEntry(System.currentTimeMillis(), body.optString("invocation_id"),
-                    "confirm", body.optString("rendered").take(200), "", body.optInt("tier"),
-                    ErrorCode.USER_DECLINED, "Confirmation isn't supported on this phone yet", 0))
-            }
-            "notify" -> onNotify(body.optString("title", "NORA"), body.optString("body"),
-                body.optString("priority", "default"))
+            "confirm_request" -> scope.launch { confirm(sock, msg) }
+            "notify" -> chat?.onNotify(body.optString("title", "NORA"), body.optString("body"),
+                body.optString("kind", "answer"))
+            "say" -> chat?.onSay(Protocol.corr(msg), body.optString("text"))
+            "turn.done" -> chat?.onTurnDone(Protocol.corr(msg), body.optString("outcome"))
             "ping" -> sock.send("pong", corr = msg.getString("id"))
             "ack" -> Protocol.corr(msg)?.let(outbox::remove)
-            else -> Unit   // say / turn.done arrive with typed chat (Phase 5)
+            else -> Unit
         }
+    }
+
+    /**
+     * Ask the user, on this phone, whether the core may go ahead. Declined on
+     * expiry, on a malformed request, and when nothing here can ask. An
+     * approval is recorded in the gate against exactly these steps, so the
+     * invocations that follow are held to what was shown.
+     */
+    private suspend fun confirm(sock: Socket, msg: JSONObject) {
+        val body = msg.getJSONObject("body")
+        val ref = body.optString("invocation_id")
+        val tier = body.optInt("tier", Protocol.TIER_CONFIRM)
+        val started = System.currentTimeMillis()
+        val steps = ConfirmSteps.parse(body.optJSONArray("steps"))
+        val expiresMs = (body.optDouble("expires_in", 60.0) * 1000).toLong().coerceIn(5_000, 300_000)
+        val listener = chat
+        val (approved, method) = when {
+            listener == null -> false to "unsupported"
+            steps == null || ref.isEmpty() -> false to "malformed"
+            else -> {
+                val prompt = ConfirmPrompt(msg.getString("id"), ref, steps,
+                    body.optString("rendered").take(300), tier, started + expiresMs)
+                val answer = try {
+                    withTimeoutOrNull(expiresMs) { listener.onConfirm(prompt) }
+                } catch (e: CancellationException) {
+                    if (!currentCoroutineContext().isActive) throw e
+                    null
+                }
+                when (answer) {
+                    true -> true to "on_device"
+                    false -> false to "declined"
+                    null -> false to "expired"
+                }
+            }
+        }
+        if (approved) gate.approve(ref, steps!!)
+        sock.send("confirm_response", JSONObject()
+            .put("invocation_id", ref).put("approved", approved).put("method", method),
+            corr = msg.getString("id"))
+        audit.record(AuditEntry(started, ref, "confirm",
+            steps?.joinToString("; ") { "${it.first} ${it.second}" }?.take(500) ?: "", "", tier,
+            if (approved) "ok" else ErrorCode.USER_DECLINED,
+            if (approved) "Approved on this phone: ${body.optString("rendered").take(200)}"
+            else "Not approved ($method): ${body.optString("rendered").take(200)}",
+            System.currentTimeMillis() - started))
     }
 
     private suspend fun invoke(sock: Socket, msg: JSONObject) {
@@ -326,9 +374,8 @@ class DeviceLink(
         }
 
         /** An outbox frame keeps its id — the core acks by it — and gets a fresh seq. */
-        fun resend(frame: JSONObject) {
+        fun resend(frame: JSONObject): Boolean =
             ws.send(frame.put("seq", seq.incrementAndGet()).toString())
-        }
 
         suspend fun next(timeoutMs: Long?): JSONObject {
             val item = if (timeoutMs == null) incoming.receive()

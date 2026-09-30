@@ -16,7 +16,12 @@ Protocol: one JSON object per line on stdout. The first line is
     invoke <device_id> <cap> <json> [origin]
                                           → {"success", "message", "error_code"}
     invocations                           → {"rows": [...]}
+    deliver <device_id> <kind> <text>     → {"ok": true}   (a job or reminder)
+    turns                                 → {"turns": [...]} (typed turns received)
     quit
+
+Typed turns (`utterance`) don't reach a model here: `_fake_turn` echoes them,
+and "confirm …" asks the device first.
 """
 from __future__ import annotations
 
@@ -34,7 +39,7 @@ os.chdir(ROOT)
 _tmp = Path(tempfile.mkdtemp(prefix="nora-harness-"))
 os.environ["NORA_STORE_PATH"] = str(_tmp / "nora_core.db")
 
-from nora import audit_log, channel, command_engine, store  # noqa: E402
+from nora import audit_log, channel, command_engine, delivery, store  # noqa: E402
 from nora.hub import registry  # noqa: E402
 from nora.hub.server import Hub  # noqa: E402
 
@@ -45,7 +50,42 @@ def out(obj: dict) -> None:
     print(json.dumps(obj), flush=True)
 
 
+# Typed turns from the device run this instead of the real pipeline: the
+# test is about the chat round trip, not the model. "confirm …" asks the
+# device's user first; anything else is echoed.
+_turns: list[str] = []
+
+
+async def _fake_turn(text, deps, rms=0.0, channel=None):
+    from nora.pipeline import TurnOutcome
+    from nora.schemas import ActionStep
+
+    _turns.append(text)
+    if text.startswith("confirm "):
+        approved = await channel.confirm(_channel_mod.ConfirmRequest(
+            turn_id=channel.turn_id, rendered="Ping the phone?", expires_in=10,
+            steps=[ActionStep(action="test.ping", parameters={"text": text[8:]})]))
+        channel.speak("Done." if approved else "Left it.")
+        return TurnOutcome(kind="executed" if approved else "cancelled", text=text)
+    channel.speak(f"You said: {text}")
+    channel.speak("That's all.")
+    return TurnOutcome(kind="chat", text=text)
+
+
+def _stub_turns() -> None:
+    import contextlib
+    # stdout is the reply channel; pygame greets whoever imports it there.
+    with contextlib.redirect_stdout(sys.stderr):
+        from nora import pipeline, wiring
+    pipeline.handle_turn = _fake_turn
+    wiring.build = lambda **_kw: None
+
+
+_channel_mod = channel
+
+
 def main() -> None:
+    _stub_turns()
     hub = Hub()
     port = hub.start("127.0.0.1", 0)
     code, _ = registry.create_code()
@@ -81,6 +121,11 @@ def main() -> None:
                                               channel=ch))
                 out({"success": result.success, "message": result.message,
                      "error_code": getattr(result, "error_code", None)})
+            elif cmd == "deliver":
+                # deliver <device_id> <kind> <text>: as a finished job or reminder would.
+                out({"ok": delivery.deliver(parts[3], device=parts[1], kind=parts[2])})
+            elif cmd == "turns":
+                out({"turns": _turns})
             elif cmd == "invocations":
                 with store.transaction() as conn:
                     rows = conn.execute(

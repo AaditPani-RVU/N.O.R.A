@@ -117,7 +117,7 @@ class HubIntegrationTest {
         val outbox = MemOutbox()
         val audit = Collections.synchronizedList(mutableListOf<AuditEntry>())
         val link = DeviceLink(LinkConfig(url, deviceId, "test", "17"), signer, { listOf(ping) },
-            { killed }, outbox, audit::add, { _, _, _ -> }, scope)
+            { killed }, outbox, audit::add, null, scope)
         link.start()
 
         // Pending: refused until approved on the core. Events wait meanwhile.
@@ -161,6 +161,79 @@ class HubIntegrationTest {
         // Revocation cuts it off live, and it stays out.
         assertTrue(harness.cmd("revoke $deviceId").getBoolean("ok"))
         until("revoked") { link.state.value is LinkState.NotAuthorised }
+        link.stop()
+    }
+    private class Recorder : ChatListener {
+        val said = Collections.synchronizedList(mutableListOf<Pair<String?, String>>())
+        val done = Collections.synchronizedList(mutableListOf<Pair<String?, String>>())
+        val notes = Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
+        val asked = Collections.synchronizedList(mutableListOf<ConfirmPrompt>())
+        @Volatile var answer: Boolean? = true   // null: never answers
+
+        override fun onSay(replyTo: String?, text: String) { said += replyTo to text }
+        override fun onTurnDone(replyTo: String?, outcome: String) { done += replyTo to outcome }
+        override fun onNotify(title: String, body: String, kind: String) { notes += Triple(title, body, kind) }
+        override suspend fun onConfirm(prompt: ConfirmPrompt): Boolean {
+            asked += prompt
+            return answer ?: kotlinx.coroutines.awaitCancellation()
+        }
+    }
+
+    /**
+     * Phase 5: typed chat. A message goes up as a turn and its answer lines
+     * come back tagged with its id; a confirmation is asked and answered on
+     * the phone, and an approval is held to the exact step shown; jobs and
+     * reminders arrive as messages.
+     */
+    @Test
+    fun chatConfirmAndDeliver() = runBlocking {
+        val url = harness.hello.getString("url")
+        val signer = JvmSigner()
+        val deviceId = (DeviceLink.pair(url, harness.hello.getString("code"), "chat-test",
+            signer.publicKeyDer()) as PairResult.Paired).deviceId
+        assertTrue(harness.cmd("approve $deviceId").getBoolean("ok"))
+        val chat = Recorder()
+        val audit = Collections.synchronizedList(mutableListOf<AuditEntry>())
+        val link = DeviceLink(LinkConfig(url, deviceId, "test", "17"), signer, { listOf(ping) },
+            { false }, MemOutbox(), audit::add, chat, scope)
+        assertEquals(null, link.sendUtterance("too early"))
+        link.start()
+        until("connected") { link.state.value is LinkState.Connected }
+
+        val id = link.sendUtterance("hello")!!
+        until("turn done") { chat.done.any { it.first == id } }
+        assertEquals(listOf(id to "You said: hello", id to "That's all."), chat.said.toList())
+        assertEquals("chat", chat.done.first { it.first == id }.second)
+        assertEquals(listOf("hello"), harness.cmd("turns").getJSONArray("turns").let { a ->
+            (0 until a.length()).map { a.getString(it) } })
+
+        // The turn asks first; a yes lets it go ahead, a no stops it.
+        val yes = link.sendUtterance("confirm one")!!
+        until("approved turn done") { chat.done.any { it.first == yes } }
+        assertTrue(chat.said.contains(yes to "Done."))
+        val prompt = chat.asked.single()
+        assertEquals("test.ping", prompt.steps.single().first)
+        assertEquals("one", prompt.steps.single().second.getString("text"))
+        chat.answer = false
+        val no = link.sendUtterance("confirm two")!!
+        until("declined turn done") { chat.done.any { it.first == no } }
+        assertTrue(chat.said.contains(no to "Left it."))
+        until("confirm audit rows") { audit.count { it.capability == "confirm" } == 2 }
+        assertEquals(listOf("ok", ErrorCode.USER_DECLINED), audit.filter { it.capability == "confirm" }.map { it.outcome })
+
+        // A tier-2 invocation (tier 1 from a job) is asked on the phone now,
+        // and runs once approved: the gate holds it to the approved step.
+        chat.answer = true
+        val job = harness.cmd("""invoke $deviceId test.ping {"text":"hi"} job""")
+        assertTrue(job.toString(), job.getBoolean("success"))
+        assertEquals("pong: hi", job.getString("message"))
+
+        // Unprompted: a reminder and a job's answer.
+        assertTrue(harness.cmd("deliver $deviceId reminder Reminder, sir: call mom").getBoolean("ok"))
+        assertTrue(harness.cmd("deliver $deviceId answer Back to the weather — sunny").getBoolean("ok"))
+        until("messages") { chat.notes.size == 2 }
+        assertEquals(Triple("Reminder", "Reminder, sir: call mom", "reminder"), chat.notes[0])
+        assertEquals("NORA", chat.notes[1].first)
         link.stop()
     }
 }

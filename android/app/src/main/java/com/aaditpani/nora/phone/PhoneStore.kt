@@ -6,14 +6,20 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.aaditpani.nora.link.AuditEntry
 import com.aaditpani.nora.link.AuditSink
+import com.aaditpani.nora.link.ChatMessage
+import com.aaditpani.nora.link.ChatStore
+import com.aaditpani.nora.link.Delivery
 import com.aaditpani.nora.link.Outbox
+import com.aaditpani.nora.link.Sender
 
 /**
  * The phone's own records: its audit log of every invocation, so it can show
  * what happened without trusting the core (plan §7.7), and the event outbox,
- * capped at 500 events and 24 hours (plan §5 "Events").
+ * capped at 500 events and 24 hours (plan §5 "Events"), and the chat with
+ * NORA (the last [CHAT_KEEP] lines).
  */
-class PhoneDb(context: Context) : SQLiteOpenHelper(context, "nora_phone.db", null, 1), Outbox, AuditSink {
+class PhoneDb(context: Context) : SQLiteOpenHelper(context, "nora_phone.db", null, 2),
+    Outbox, AuditSink, ChatStore {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE audit (
@@ -21,9 +27,18 @@ class PhoneDb(context: Context) : SQLiteOpenHelper(context, "nora_phone.db", nul
             capability TEXT NOT NULL, params TEXT NOT NULL, origin TEXT NOT NULL, tier INTEGER NOT NULL,
             outcome TEXT NOT NULL, message TEXT NOT NULL, duration_ms INTEGER NOT NULL)""")
         db.execSQL("CREATE TABLE outbox (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, frame TEXT NOT NULL)")
+        createChat(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createChat(db)
+    }
+
+    private fun createChat(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE chat (
+            row INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, ts INTEGER NOT NULL,
+            sender TEXT NOT NULL, text TEXT NOT NULL, ref TEXT NOT NULL, delivery TEXT NOT NULL)""")
+    }
 
     /** Called after each new audit row, so the audit screen can refresh. */
     var onAudit: () -> Unit = {}
@@ -72,17 +87,55 @@ class PhoneDb(context: Context) : SQLiteOpenHelper(context, "nora_phone.db", nul
             buildList { while (c.moveToNext()) add(c.getString(0) to c.getString(1)) }
         }
 
+    override fun loadChat(limit: Int): List<ChatMessage> =
+        readableDatabase.rawQuery(
+            "SELECT id, ts, sender, text, ref, delivery FROM chat ORDER BY row DESC LIMIT ?",
+            arrayOf(limit.toString())).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val sender = runCatching { Sender.valueOf(c.getString(2)) }.getOrNull() ?: continue
+                    val delivery = runCatching { Delivery.valueOf(c.getString(5)) }.getOrDefault(Delivery.ANSWERED)
+                    add(ChatMessage(c.getString(0), c.getLong(1), sender, c.getString(3), c.getString(4), delivery))
+                }
+            }.reversed()
+        }
+
+    /** Insert, or update in place (keeping its position) when the id exists. */
+    override fun saveChat(message: ChatMessage) {
+        val values = ContentValues().apply {
+            put("ts", message.ts); put("sender", message.sender.name)
+            put("text", message.text.take(4000)); put("ref", message.ref); put("delivery", message.delivery.name)
+        }
+        writableDatabase.run {
+            if (update("chat", values, "id = ?", arrayOf(message.id)) == 0) {
+                values.put("id", message.id)
+                insert("chat", null, values)
+                execSQL("DELETE FROM chat WHERE row <= (SELECT MAX(row) FROM chat) - $CHAT_KEEP")
+            }
+        }
+    }
+
+    override fun removeChat(id: String) {
+        writableDatabase.delete("chat", "id = ?", arrayOf(id))
+    }
+
+    override fun clearChat() {
+        writableDatabase.delete("chat", null, null)
+    }
+
     fun clear() {
         writableDatabase.run {
             delete("audit", null, null)
             delete("outbox", null, null)
+            delete("chat", null, null)
         }
     }
 
-    private companion object {
-        const val AUDIT_KEEP = 2000
-        const val OUTBOX_MAX = 500
-        const val OUTBOX_MAX_AGE_MS = 24 * 60 * 60 * 1000L
+    companion object {
+        const val CHAT_KEEP = 300
+        private const val AUDIT_KEEP = 2000
+        private const val OUTBOX_MAX = 500
+        private const val OUTBOX_MAX_AGE_MS = 24 * 60 * 60 * 1000L
     }
 }
 

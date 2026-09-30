@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- Phase 5: tier-3 confirmations ask for the fingerprint or screen lock -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <!-- Package visibility (Android 11+): only what the capabilities need to
          find, not QUERY_ALL_PACKAGES. -->
@@ -89,6 +91,12 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Reply typed into a NORA notification. Only the notification's own
+             explicit PendingIntent reaches it. -->
+        <receiver
+            android:name=".phone.ReplyReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".phone.BootReceiver"

@@ -4,9 +4,12 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -14,16 +17,21 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -44,10 +52,12 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,8 +68,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.aaditpani.nora.link.AuditEntry
+import com.aaditpani.nora.link.ChatMessage
+import com.aaditpani.nora.link.ConfirmPrompt
+import com.aaditpani.nora.link.ConfirmSteps
+import com.aaditpani.nora.link.Delivery
 import com.aaditpani.nora.link.LinkState
+import com.aaditpani.nora.link.Sender
 import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
 import com.aaditpani.nora.phone.LinkController
@@ -71,26 +89,59 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
 class MainActivity : ComponentActivity() {
+    /** A tab a notification asked for; the paired screen consumes it. */
+    private val requestedTab = MutableStateFlow<Int?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val c = controller
         if (c.paired.value) LinkService.start(this)
+        requestTab(intent)
         setContent {
             NoraTheme {
                 val paired by c.paired.collectAsState()
                 Scaffold(modifier = Modifier.fillMaxSize()) { pad ->
-                    Column(Modifier.padding(pad).padding(horizontal = 16.dp)) {
-                        if (paired) PairedScreen(c) else PairScreen(c, onScan = ::scan)
+                    Column(Modifier.padding(pad).padding(horizontal = 16.dp).imePadding()) {
+                        if (paired) PairedScreen(c, requestedTab, ::authenticate)
+                        else PairScreen(c, onScan = ::scan)
                     }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        requestTab(intent)
+    }
+
+    private fun requestTab(intent: Intent?) {
+        intent?.getIntExtra(EXTRA_TAB, -1)?.takeIf { it >= 0 }?.let { requestedTab.value = it }
+    }
+
+    /** Fingerprint or screen lock, for confirmations of tier 3 and up (plan §6). */
+    private fun authenticate(onOk: () -> Unit) {
+        BiometricPrompt.Builder(this)
+            .setTitle("Confirm it's you")
+            .setSubtitle("NORA asks for this one to be unlocked first")
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build()
+            .authenticate(CancellationSignal(), mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) = onOk()
+            })
+    }
+
+    companion object {
+        const val EXTRA_TAB = "tab"
+        const val TAB_CHAT = 0
     }
 
     private fun scan(onResult: (String?) -> Unit) {
@@ -169,13 +220,151 @@ private fun PairScreen(c: LinkController, onScan: ((String?) -> Unit) -> Unit) {
 // ── paired ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun PairedScreen(c: LinkController) {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    TabRow(selectedTabIndex = tab) {
-        Tab(tab == 0, { tab = 0 }, text = { Text("Status") })
-        Tab(tab == 1, { tab = 1 }, text = { Text("Audit log") })
+private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>,
+                         authenticate: (() -> Unit) -> Unit) {
+    var tab by rememberSaveable { mutableIntStateOf(MainActivity.TAB_CHAT) }
+    val requested by requestedTab.collectAsState()
+    LaunchedEffect(requested) {
+        requested?.let { tab = it; requestedTab.value = null }
     }
-    if (tab == 0) StatusTab(c) else AuditTab(c)
+    TabRow(selectedTabIndex = tab) {
+        Tab(tab == 0, { tab = 0 }, text = { Text("Chat") })
+        Tab(tab == 1, { tab = 1 }, text = { Text("Status") })
+        Tab(tab == 2, { tab = 2 }, text = { Text("Audit log") })
+    }
+    when (tab) {
+        0 -> ChatTab(c, authenticate)
+        1 -> StatusTab(c)
+        else -> AuditTab(c)
+    }
+}
+
+// ── chat ─────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ChatTab(c: LinkController, authenticate: (() -> Unit) -> Unit) {
+    val ctx = LocalContext.current
+    val messages by c.chat.messages.collectAsState()
+    val confirms by c.confirms.collectAsState()
+    val state by c.state.collectAsState()
+    val connected = state is LinkState.Connected
+    var draft by rememberSaveable { mutableStateOf("") }
+    val list = rememberLazyListState()
+
+    // On screen means answers land here, not in a notification.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> { c.chatVisible.value = true; Notifications.clearReply(ctx) }
+                Lifecycle.Event.ON_PAUSE -> c.chatVisible.value = false
+                else -> Unit
+            }
+        }
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            c.chatVisible.value = true
+            Notifications.clearReply(ctx)
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            c.chatVisible.value = false
+        }
+    }
+    val rows = messages.size + confirms.size
+    LaunchedEffect(rows) { if (rows > 0) list.animateScrollToItem(rows - 1) }
+
+    Column(Modifier.fillMaxSize().padding(top = 8.dp)) {
+        if (!connected) {
+            Text("Not connected to the core, so messages can't be sent right now.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 8.dp))
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (messages.isEmpty() && confirms.isEmpty()) {
+                Text("Type to NORA here. Try \"remember I have to submit the assignment tomorrow\", " +
+                    "then ask the laptop what you need to do.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp))
+            }
+            LazyColumn(Modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(messages, key = { it.id }) { m -> Bubble(m, onRetry = { c.resend(m.id) }) }
+                items(confirms, key = { it.requestId }) { p ->
+                    ConfirmCard(p,
+                        onYes = { if (p.tier >= 3) authenticate { c.answer(p.requestId, true) } else c.answer(p.requestId, true) },
+                        onNo = { c.answer(p.requestId, false) })
+                }
+            }
+        }
+        if (messages.any { it.sender == Sender.ME && it.delivery == Delivery.SENT }) {
+            Text("NORA is on it…", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(draft, { draft = it.take(2000) }, Modifier.weight(1f),
+                placeholder = { Text("Message NORA") }, maxLines = 4)
+            Spacer(Modifier.padding(4.dp))
+            Button(enabled = connected && draft.isNotBlank(), onClick = {
+                if (c.send(draft)) draft = ""
+            }) { Text("Send") }
+        }
+    }
+}
+
+@Composable
+private fun Bubble(m: ChatMessage, onRetry: () -> Unit) {
+    val fmt = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
+    val mine = m.sender == Sender.ME
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+        val colors = when (m.sender) {
+            Sender.ME -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+            Sender.NORA -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+            Sender.NOTICE -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        }
+        Card(Modifier.widthIn(max = 320.dp).then(
+            if (mine && m.delivery == Delivery.FAILED) Modifier.clickable(onClick = onRetry) else Modifier),
+            colors = androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = colors.first, contentColor = colors.second)) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                if (m.sender == Sender.NOTICE) {
+                    Text(if (m.ref == "reminder") "Reminder" else "From NORA",
+                        style = MaterialTheme.typography.labelSmall)
+                }
+                SelectionContainer { Text(m.text, style = MaterialTheme.typography.bodyLarge) }
+                val status = when {
+                    !mine -> ""
+                    m.delivery == Delivery.FAILED -> " · not sent, tap to retry"
+                    m.delivery == Delivery.SENDING -> " · sending"
+                    else -> ""
+                }
+                Text(fmt.format(Date(m.ts)) + status, style = MaterialTheme.typography.labelSmall,
+                    color = if (m.delivery == Delivery.FAILED && mine) MaterialTheme.colorScheme.error
+                    else colors.second)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmCard(p: ConfirmPrompt, onYes: () -> Unit, onNo: () -> Unit) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(p.requestId) { while (true) { delay(1000); now = System.currentTimeMillis() } }
+    val left = ((p.expiresAtMs - now) / 1000).coerceAtLeast(0)
+    Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("NORA wants to:", style = MaterialTheme.typography.titleMedium)
+            // What will actually run, as the phone reads it — not the core's summary.
+            for ((action, params) in p.steps) Text("• " + ConfirmSteps.describe(action, params))
+            if (p.tier >= 3) Text("Needs your fingerprint or screen lock.", style = MaterialTheme.typography.bodySmall)
+            Text("Expires in $left s", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onNo) { Text("Don't") }
+                Button(onClick = onYes) { Text("Go ahead") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -185,7 +374,7 @@ private fun StatusTab(c: LinkController) {
     val killed by c.killed.collectAsState()
     val disabled by c.disabled.collectAsState()
     var confirmUnpair by remember { mutableStateOf(false) }
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}

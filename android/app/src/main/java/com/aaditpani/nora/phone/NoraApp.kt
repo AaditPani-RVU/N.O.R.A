@@ -8,20 +8,28 @@ import android.os.Build
 import android.service.quicksettings.TileService
 import com.aaditpani.nora.BuildConfig
 import com.aaditpani.nora.link.Capability
+import com.aaditpani.nora.link.ChatListener
+import com.aaditpani.nora.link.ChatLog
+import com.aaditpani.nora.link.ConfirmPrompt
+import com.aaditpani.nora.link.Delivery
 import com.aaditpani.nora.link.DeviceLink
 import com.aaditpani.nora.link.LinkConfig
 import com.aaditpani.nora.link.LinkState
 import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
+import com.aaditpani.nora.link.Protocol
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 class NoraApp : Application() {
     lateinit var controller: LinkController
@@ -65,6 +73,46 @@ class LinkController(private val app: Context) {
     /** Bumped on every audit row, so the audit screen re-reads. */
     val auditTick = MutableStateFlow(0)
 
+    val chat = ChatLog(db)
+    /** True while the chat is on screen: answers and messages then don't also notify. */
+    val chatVisible = MutableStateFlow(false)
+    private val _confirms = MutableStateFlow<List<ConfirmPrompt>>(emptyList())
+    /** Questions from the core waiting for a yes or no, oldest first. */
+    val confirms: StateFlow<List<ConfirmPrompt>> = _confirms
+    private val answers = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+
+    private val chatListener = object : ChatListener {
+        override fun onSay(replyTo: String?, text: String) {
+            if (text.isNotBlank()) chat.nora(replyTo, text)
+        }
+
+        override fun onTurnDone(replyTo: String?, outcome: String) {
+            chat.done(replyTo)
+            if (replyTo == null || chatVisible.value) return
+            val said = chat.answersTo(replyTo)
+            if (said.isNotEmpty()) Notifications.reply(app, said.joinToString(" "))
+        }
+
+        override fun onNotify(title: String, body: String, kind: String) {
+            chat.notice(body, kind)
+            if (!chatVisible.value) Notifications.message(app, title, body)
+        }
+
+        override suspend fun onConfirm(prompt: ConfirmPrompt): Boolean {
+            val answer = CompletableDeferred<Boolean>()
+            answers[prompt.requestId] = answer
+            _confirms.update { it + prompt }
+            if (!chatVisible.value) Notifications.confirm(app, prompt)
+            return try {
+                answer.await()
+            } finally {
+                answers.remove(prompt.requestId)
+                _confirms.update { list -> list.filterNot { it.requestId == prompt.requestId } }
+                Notifications.cancelConfirm(app, prompt)
+            }
+        }
+    }
+
     init {
         db.onAudit = { auditTick.value++ }
     }
@@ -83,11 +131,15 @@ class LinkController(private val app: Context) {
             signer,
             capabilities = { capabilities.filter { it.name !in _disabled.value } },
             isKilled = { _killed.value },
-            outbox = db, audit = db,
-            onNotify = { title, body, _ -> Notifications.message(app, title, body) },
+            outbox = db, audit = db, chat = chatListener,
             scope = scope)
         link = l
-        mirror = scope.launch { l.state.collect { _state.value = it } }
+        mirror = scope.launch {
+            l.state.collect {
+                _state.value = it
+                if (it !is LinkState.Connected) chat.dropInFlight()
+            }
+        }
         l.start()
     }
 
@@ -100,6 +152,31 @@ class LinkController(private val app: Context) {
     }
 
     fun kick() = link?.kick()
+
+    /** Type a message to NORA. False when it couldn't be sent (not connected). */
+    fun send(text: String): Boolean {
+        val t = text.trim().take(ChatLog.MAX_TEXT)
+        if (t.isEmpty()) return false
+        val id = link?.sendUtterance(t)
+        if (id == null) {
+            chat.mine(Protocol.newId(), t, Delivery.FAILED)
+            return false
+        }
+        chat.mine(id, t, Delivery.SENT)
+        return true
+    }
+
+    /** Send a failed message again, in place of the failed copy. */
+    fun resend(id: String) {
+        val m = chat.get(id) ?: return
+        chat.remove(id)
+        send(m.text)
+    }
+
+    /** The user's answer to a confirmation on screen. */
+    fun answer(requestId: String, approved: Boolean) {
+        answers[requestId]?.complete(approved)
+    }
 
     fun setKilled(active: Boolean) {
         prefs.killed = active
@@ -146,6 +223,8 @@ class LinkController(private val app: Context) {
         signer.deleteKey()
         prefs.clear()
         db.clear()
+        chat.clear()
+        answers.values.forEach { it.complete(false) }
         _killed.value = false
         _disabled.value = emptySet()
         _hiddenNoteApps.value = emptySet()
