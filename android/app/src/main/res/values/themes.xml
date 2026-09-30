@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Nora" parent="android:Theme.Material.NoActionBar" />
+    <!-- The dashboard's ground, so the app never flashes grey before Compose draws. -->
+    <style name="Theme.Nora" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#00070E</item>
+    </style>
 </resources>

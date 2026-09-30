@@ -182,6 +182,37 @@ Two things on the core were missing for the exit criterion:
   existing KTX-style ones).
 - **Not verified: anything on the Pixel.** See the checklist.
 
+## The look (app 0.5.1)
+
+The first build used stock Material with wallpaper colours, and read as a
+settings screen rather than NORA. The app now uses the dashboard's visual
+language (`nora/static/index.html`), in `ui/Hud.kt` and `ui/Orb.kt`:
+
+- **One accent that retints with state:** cyan idle, violet while the core
+  works, teal as the answer arrives, amber when she's waiting on you. The
+  header, the frame and the orb all follow it.
+- **Type:** Rajdhani for the name and the big readouts, Share Tech Mono for
+  everything else, with small labels in widely tracked uppercase. Both fonts
+  are bundled (SIL OFL; licences in `android/third_party/fonts/`).
+- **Surfaces:** glass panels, a bright top-left and dim bottom-right corner
+  bracket, a diamond before each title, a hairline under the head, and the
+  flow line along a live panel's edge. Under everything: the drifting 52 dp
+  grid, aurora blooms, scanlines and a vignette.
+- **The orb:** the dashboard's five rings, triangle, sweep, satellites and
+  breathing core, with the same idle/thinking/speaking colours and speeds,
+  plus a dim "link down" state. It's full size above an empty chat, and
+  shrinks into a strip once there's a conversation.
+- **Transcript:** turns drawn as on the dashboard. NORA has a diamond
+  avatar and a left accent bar, you have a round one and a right bar, and
+  reminders are amber. Her first line in a turn carries its latency. While the
+  core works there's a "PROCESSING ▋" line. The empty state is a reticle with
+  the idle equaliser and "AWAITING INPUT".
+- **Pipeline strip:** the dashboard's LISTEN · STT · … · SPEAK, cut down to
+  what the phone can honestly see: UPLINK · CORE · REPLY.
+- **Confirmations** are an amber AUTHORIZATION panel with a draining
+  countdown hairline. The status screen is panels with a glowing link
+  readout, and the log reads like the dashboard's command log.
+
 ## On-phone checklist (to close Phase 5)
 
 1. Merge into the live tree and restart NORA (`systemctl --user restart
