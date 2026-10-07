@@ -835,7 +835,6 @@
     .w-main { display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px; }
     .w-temp { font-family:var(--disp);font-size:44px;font-weight:600;color:var(--c);line-height:1; }
     .w-temp sup { font-size:18px;font-weight:300; }
-    .w-icon { font-size:38px;line-height:1; }
     .w-desc { font-size:9px;letter-spacing:3px;color:var(--dim);margin-bottom:3px; }
     .w-loc  { font-size:8px;letter-spacing:2px;color:var(--dim);margin-bottom:10px; }
     .w-grid { display:grid;grid-template-columns:1fr 1fr;gap:5px; }
@@ -2182,6 +2181,215 @@
       border-color: rgba(var(--rgb),0.55);
       box-shadow: 0 0 0 1px rgba(var(--rgb),0.14), 0 0 22px -8px rgba(var(--rgb),0.8);
     }
+
+    /* ══════════════════════════════════════════════════════════
+       v4 — CARDS THAT TAKE THEIR LIGHT FROM THEIR DATA
+
+       The Spotify card works because its colour comes from what it shows:
+       the sleeve tints the frame, spills behind the controls and lights
+       the type. Every other card was the same cyan rule on the same navy,
+       so nothing on the dashboard told you anything until you read it.
+       Each card below now carries its own light — the weather's sky, the
+       load on the machine, how fast NORA is answering — and only falls
+       back to NORA's accent when there is nothing to say.
+       ══════════════════════════════════════════════════════════ */
+
+    /* A tinted card redeclares the accent locally. The derived vars must be
+       redeclared with it — they compute where they are declared. */
+    .widget[data-tint] {
+      --c:   rgb(var(--rgb));
+      --cg:  rgba(var(--rgb),0.40);
+      --cd:  rgba(var(--rgb),0.18);
+      --txt: rgba(var(--lrgb),0.92);
+      --dim: rgba(var(--lrgb),0.58);
+      border-color: rgba(var(--rgb),0.30);
+      box-shadow: 0 0 34px -20px rgba(var(--rgb),0.95),
+                  inset 0 0 26px -14px rgba(var(--rgb),0.45);
+      background:
+        radial-gradient(120% 70% at 50% 0%, rgba(var(--rgb),0.13), transparent 70%),
+        var(--cbg);
+    }
+    .widget[data-tint="warm"]      { --rgb: 255,170,40;  --lrgb: 255,214,160; }
+    .widget[data-tint="hot"]       { --rgb: 255,68,96;   --lrgb: 255,180,190; }
+    .widget[data-tint="fast"]      { --rgb: 52,230,160;  --lrgb: 170,245,215; }
+    .widget[data-tint="sky-day"]   { --rgb: 255,184,77;  --lrgb: 255,224,175; }
+    .widget[data-tint="sky-night"] { --rgb: 150,160,255; --lrgb: 208,212,255; }
+    .widget[data-tint="sky-cloud"] { --rgb: 140,190,215; --lrgb: 205,226,238; }
+    .widget[data-tint="sky-fog"]   { --rgb: 165,188,198; --lrgb: 214,226,232; }
+    .widget[data-tint="sky-rain"]  { --rgb: 70,150,255;  --lrgb: 172,206,255; }
+    .widget[data-tint="sky-storm"] { --rgb: 125,140,255; --lrgb: 200,206,255; }
+    .widget[data-tint="sky-snow"]  { --rgb: 205,232,255; --lrgb: 232,244,255; }
+    .widget[data-tint] .widget-flow::after { opacity: 0.55; }
+
+    /* ── Weather: the sky is the head of the card ──
+       Same move as the sleeve: it bleeds to the frame and the reading sits
+       on it, instead of an emoji in a corner. */
+    #weather-card .w-sky {
+      position: relative; overflow: hidden;
+      margin: 0 -14px 11px; height: 128px;
+      border-top: 1px solid rgba(var(--rgb),0.16);
+      border-bottom: 1px solid rgba(var(--rgb),0.30);
+    }
+    /* Class-only so the per-sky rules below can override it. */
+    .w-sky { background: linear-gradient(180deg, #0b2236, #06121f); }
+    #weather-card .w-sky::after {
+      /* Readability floor under the temperature, plus the HUD scanlines the
+         sleeve carries, so both heads read as the same kind of display. */
+      content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+      background:
+        repeating-linear-gradient(180deg, rgba(0,0,0,0.14) 0 1px, transparent 1px 3px),
+        linear-gradient(180deg, transparent 46%, rgba(0,5,12,0.42) 76%, rgba(0,4,10,0.84));
+    }
+    #weather-card .w-main {
+      position: absolute; z-index: 3; left: 14px; right: 14px; bottom: 11px;
+      display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin: 0;
+    }
+    #weather-card .w-temp {
+      font-size: 58px; font-weight: 600; line-height: 0.82; color: #f2f8ff;
+      text-shadow: 0 0 22px rgba(var(--rgb),0.65), 0 2px 10px rgba(0,4,10,0.7);
+    }
+    #weather-card .w-temp sup { font-size: 20px; vertical-align: top; color: rgba(var(--lrgb),0.9); }
+    #weather-card .w-cond { text-align: right; min-width: 0; }
+    #weather-card .w-desc { color: rgba(var(--lrgb),0.98); font-size: 10px; text-shadow: 0 0 10px rgba(0,4,10,0.9); }
+    #weather-card .w-loc  { color: rgba(var(--lrgb),0.66); margin: 0; text-shadow: 0 0 10px rgba(0,4,10,0.9); }
+
+    .w-fx, .w-fx i { position: absolute; pointer-events: none; }
+    .w-fx { inset: 0; z-index: 1; }
+    .w-fx i { opacity: 0; transition: opacity var(--t-slow) var(--ease); }
+    .w-orb { width: 46px; height: 46px; right: 26px; top: 16px; border-radius: 50%; }
+    /* Three overlapping lobes and a flat base, so a cloud reads as a cloud
+       rather than a blurred pill. --cl is the cloud's colour per sky. */
+    .w-cloud {
+      --cl: 214,230,242;
+      height: 52px; filter: blur(2.5px);
+      background:
+        radial-gradient(closest-side at 28% 66%, rgba(var(--cl),0.55), rgba(var(--cl),0.32) 60%, transparent),
+        radial-gradient(closest-side at 52% 42%, rgba(var(--cl),0.62), rgba(var(--cl),0.36) 62%, transparent),
+        radial-gradient(closest-side at 76% 64%, rgba(var(--cl),0.50), rgba(var(--cl),0.28) 60%, transparent);
+      animation: cloud-drift 46s linear infinite;
+    }
+    .w-cloud.c1 { width: 170px; top: 8px;   left: -10%; }
+    .w-cloud.c2 { width: 120px; top: 34px;  left: 40%; animation-duration: 62s; animation-delay: -20s; }
+    .w-cloud.c3 { width: 210px; top: -14px; left: 62%; animation-duration: 54s; animation-delay: -34s; opacity: 0; }
+    @keyframes cloud-drift { from { transform: translateX(-60%); } to { transform: translateX(130%); } }
+    .w-fall { inset: -40px 0 0 0; }
+    .w-flash { inset: 0; background: rgba(210,220,255,0.55); }
+
+    [data-sky="day"] .w-sky {
+      background:
+        radial-gradient(70% 120% at 85% 20%, rgba(255,190,90,0.38), transparent 60%),
+        linear-gradient(180deg, #1a6db8 0%, #124f8c 50%, #0a2c4c);
+    }
+    [data-sky="day"] .w-orb {
+      opacity: 1; background: radial-gradient(circle, #fff6d8 0 32%, #ffc24d 55%, rgba(255,170,40,0) 72%);
+      box-shadow: 0 0 60px 24px rgba(255,180,60,0.40);
+      animation: sun-breathe 7s ease-in-out infinite alternate;
+    }
+    @keyframes sun-breathe { to { box-shadow: 0 0 76px 30px rgba(255,180,60,0.52); } }
+    [data-sky="day"] .w-cloud.c2 { opacity: 0.8; }
+
+    [data-sky="night"] .w-sky {
+      background:
+        radial-gradient(1px 1px at 12% 22%, #fff, transparent),
+        radial-gradient(1px 1px at 30% 60%, rgba(255,255,255,0.7), transparent),
+        radial-gradient(1.5px 1.5px at 48% 18%, #fff, transparent),
+        radial-gradient(1px 1px at 62% 44%, rgba(255,255,255,0.6), transparent),
+        radial-gradient(1px 1px at 22% 40%, rgba(255,255,255,0.5), transparent),
+        radial-gradient(1px 1px at 70% 12%, rgba(255,255,255,0.8), transparent),
+        linear-gradient(180deg, #1a2470, #0f1748 60%, #080c28);
+    }
+    [data-sky="night"] .w-orb {
+      opacity: 1; width: 34px; height: 34px; top: 20px; right: 32px;
+      background: radial-gradient(circle at 38% 38%, #f4f6ff, #c3caf0 60%, #9aa3d6);
+      box-shadow: 0 0 34px 8px rgba(160,170,255,0.38);
+    }
+
+    [data-sky="cloud"] .w-sky {
+      /* Light still gets through an overcast sky — a diffuse bright patch
+         where the sun is behind it keeps grey from reading as "off". */
+      background:
+        radial-gradient(60% 110% at 78% 0%, rgba(200,226,240,0.30), transparent 65%),
+        linear-gradient(180deg, #3d5d78, #27425b 55%, #142636);
+    }
+    [data-sky="cloud"] .w-cloud,
+    [data-sky="rain"]  .w-cloud,
+    [data-sky="storm"] .w-cloud,
+    [data-sky="snow"]  .w-cloud { opacity: 1; }
+    [data-sky="cloud"] .w-cloud.c3 { opacity: 0.8; }
+
+    [data-sky="fog"] .w-sky {
+      background:
+        repeating-linear-gradient(180deg, rgba(200,215,222,0.10) 0 9px, transparent 9px 22px),
+        linear-gradient(180deg, #4f6470, #34464f 60%, #1a262d);
+    }
+    [data-sky="fog"] .w-cloud { opacity: 0.9; filter: blur(9px); }
+
+    [data-sky="rain"] .w-sky { background: linear-gradient(180deg, #1f4a78, #133256 60%, #0a1d33); }
+    [data-sky="rain"] .w-cloud { --cl: 150,178,205; }
+    [data-sky="rain"] .w-fall, [data-sky="storm"] .w-fall {
+      opacity: 0.55;
+      background: repeating-linear-gradient(105deg, transparent 0 9px, rgba(170,205,255,0.55) 9px 10px, transparent 10px 23px);
+      background-size: 100% 40px;
+      animation: rain-fall 0.55s linear infinite;
+    }
+    @keyframes rain-fall { to { background-position: -10px 40px; } }
+
+    [data-sky="storm"] .w-sky { background: linear-gradient(180deg, #2a2a6a, #18184a 60%, #0c0c28); }
+    [data-sky="storm"] .w-cloud { --cl: 120,120,175; }
+    [data-sky="storm"] .w-flash { animation: storm-flash 9s steps(1) infinite; }
+    @keyframes storm-flash { 0%, 100% { opacity: 0; } 61% { opacity: 0.9; } 62% { opacity: 0; } 64% { opacity: 0.5; } 65% { opacity: 0; } }
+
+    [data-sky="snow"] .w-sky { background: linear-gradient(180deg, #557796, #34506c 60%, #1b2c40); }
+    [data-sky="snow"] .w-fall {
+      opacity: 0.8;
+      background:
+        radial-gradient(1.6px 1.6px at 20% 30%, #fff, transparent),
+        radial-gradient(1.2px 1.2px at 55% 70%, #fff, transparent),
+        radial-gradient(2px 2px at 80% 20%, #fff, transparent),
+        radial-gradient(1.2px 1.2px at 38% 90%, #fff, transparent);
+      background-size: 70px 60px;
+      animation: snow-fall 6s linear infinite;
+    }
+    @keyframes snow-fall { to { background-position: 14px 60px, -10px 60px, 6px 60px, -4px 60px; } }
+
+    #weather-card .wcell .wv { font-family: var(--disp); font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+
+    /* ── System stats: three gauges, not three hairlines ──
+       Round where every other element on the HUD is a rectangle, which is
+       what makes the machine's state findable at a glance. */
+    .gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .gauge { position: relative; aspect-ratio: 1; --p: 0; --g: var(--rgb-idle); }
+    .gauge.warn { --g: 255,170,40; }
+    .gauge.crit { --g: 255,68,96; }
+    .gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+    .gauge circle { fill: none; stroke-width: 4.5; }
+    .g-track { stroke: rgba(var(--rgb),0.10); stroke-dasharray: 0.6 4.4; }
+    .g-fill {
+      stroke: rgb(var(--g)); stroke-linecap: round;
+      stroke-dasharray: calc(var(--p) * 1) 100;
+      filter: drop-shadow(0 0 4px rgba(var(--g),0.75));
+      transition: stroke-dasharray 1.2s var(--ease-out), stroke var(--t-slow) var(--ease);
+    }
+    .g-read {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1px;
+    }
+    .g-read b {
+      font-family: var(--disp); font-size: 19px; font-weight: 600; line-height: 1;
+      color: rgb(var(--g)); text-shadow: 0 0 12px rgba(var(--g),0.45);
+      font-variant-numeric: tabular-nums;
+    }
+    .g-read span { font-size: 7.5px; letter-spacing: 2px; color: var(--dim); }
+    .g-subs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 3px; text-align: center; font-size: 8px; color: var(--dim); opacity: 0.8; }
+    #stats-card .load-wrap { margin-top: 11px; }
+
+    /* ── Response time: bigger numbers once there are numbers ── */
+    #latency-card .sbox .sv { font-family: var(--disp); font-size: 17px; }
+    #weather-card .wcell, #latency-card .sbox { background: rgba(var(--rgb),0.05); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .w-cloud, .w-fall, .w-flash, .w-orb { animation: none !important; }
+    }
   </style>
 </head>
 <body>
@@ -2253,20 +2461,27 @@
 
     <!-- LEFT -->
     <div class="panel panel-left">
-      <div class="widget">
+      <div class="widget" id="stats-card">
         <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
         <div class="widget-head">
           <div class="widget-title"><div class="sq"></div>SYSTEM STATS</div>
           <div class="badge" id="stats-badge">POLLING</div>
         </div>
-        <div class="srow"><div class="slabel">CPU</div><div class="sbar-wrap"><div class="sbar" id="cpu-bar"></div></div><div class="sval" id="cpu-val">—</div></div>
-        <div class="srow"><div class="slabel">RAM</div><div class="sbar-wrap"><div class="sbar" id="ram-bar"></div></div><div class="sval" id="ram-val">—</div></div>
-        <div class="srow"><div class="slabel">DISK</div><div class="sbar-wrap"><div class="sbar" id="disk-bar"></div></div><div class="sval" id="disk-val">—</div></div>
-        <div class="sboxrow">
-          <div class="sbox"><div class="sl">CPU</div><div class="sv" id="c-cpu">—</div></div>
-          <div class="sbox"><div class="sl">MEMORY</div><div class="sv" id="c-ram">—</div></div>
-          <div class="sbox"><div class="sl">DISK</div><div class="sv" id="c-dsk">—</div></div>
+        <div class="gauges">
+          <div class="gauge" id="g-cpu">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="g-track" cx="32" cy="32" r="27" pathLength="100"/><circle class="g-fill" cx="32" cy="32" r="27" pathLength="100"/></svg>
+            <div class="g-read"><b id="c-cpu">—</b><span>CPU</span></div>
+          </div>
+          <div class="gauge" id="g-ram">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="g-track" cx="32" cy="32" r="27" pathLength="100"/><circle class="g-fill" cx="32" cy="32" r="27" pathLength="100"/></svg>
+            <div class="g-read"><b id="c-ram">—</b><span>RAM</span></div>
+          </div>
+          <div class="gauge" id="g-dsk">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="g-track" cx="32" cy="32" r="27" pathLength="100"/><circle class="g-fill" cx="32" cy="32" r="27" pathLength="100"/></svg>
+            <div class="g-read"><b id="c-dsk">—</b><span>DISK</span></div>
+          </div>
         </div>
+        <div class="g-subs"><span id="g-cpu-sub">&nbsp;</span><span id="g-ram-sub">&nbsp;</span><span id="g-dsk-sub">&nbsp;</span></div>
         <div class="load-wrap">
           <div class="load-lbl">SYSTEM LOAD</div>
           <div class="load-segs" id="ld-segs"></div>
@@ -2392,19 +2607,21 @@
 
     <!-- RIGHT -->
     <div class="panel panel-right">
-      <div class="widget">
+      <div class="widget" id="weather-card">
         <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
         <div class="widget-head">
           <div class="widget-title"><div class="sq"></div>WEATHER</div>
           <div class="badge" id="w-badge">FETCHING</div>
         </div>
-        <div class="w-main">
-          <div>
+        <div class="w-sky" id="w-sky">
+          <div class="w-fx" aria-hidden="true"><i class="w-orb"></i><i class="w-cloud c1"></i><i class="w-cloud c2"></i><i class="w-cloud c3"></i><i class="w-fall"></i><i class="w-flash"></i></div>
+          <div class="w-main">
             <div class="w-temp"><span id="w-temp">—</span><sup>°C</sup></div>
-            <div class="w-desc" id="w-desc">—</div>
-            <div class="w-loc"  id="w-loc">LOCATING…</div>
+            <div class="w-cond">
+              <div class="w-desc" id="w-desc">—</div>
+              <div class="w-loc"  id="w-loc">LOCATING…</div>
+            </div>
           </div>
-          <div class="w-icon" id="w-icon">🌐</div>
         </div>
         <div class="w-grid">
           <div class="wcell"><div class="wl">HUMIDITY</div><div class="wv" id="w-hum">—</div></div>
@@ -3749,6 +3966,20 @@ function setStage(stage) {
 // ═══════════════════════════════════════════════════
 const ldSegs = document.getElementById('ld-segs');
 for (let i = 0; i < 20; i++) { const s = document.createElement('div'); s.className = 'seg'; ldSegs.appendChild(s); }
+// Per-card light. A card with data-tint carries its own --rgb, so every
+// accent inside it — title, frame, boxes, glow — follows the data, not the orb.
+function tintCard(id, tint) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (tint) el.dataset.tint = tint; else delete el.dataset.tint;
+}
+function setGauge(id, pct) {
+  const g = document.getElementById(id);
+  const v = Math.max(0, Math.min(100, Number(pct) || 0));
+  g.style.setProperty('--p', v);
+  g.classList.toggle('warn', v > 70 && v <= 88);
+  g.classList.toggle('crit', v > 88);
+}
 function setLoadSegs(pct) {
   const on = Math.round(pct / 100 * 20);
   Array.from(ldSegs.children).forEach((s, i) => { s.className = 'seg'+(i<on?(pct>85?' on crit':pct>65?' on warn':' on'):''); });
@@ -3905,6 +4136,7 @@ function renderLatency() {
   if (!latencies.length) {
     empty.hidden = false;
     badge.textContent = 'IDLE'; badge.className = 'badge';
+    tintCard('latency-card', '');
     ['lat-last','lat-med','lat-max'].forEach(id => document.getElementById(id).textContent = '—');
     return;
   }
@@ -3924,6 +4156,7 @@ function renderLatency() {
   document.getElementById('lat-max').textContent  = peak.toFixed(1) + 's';
   badge.textContent = latencies.length + (latencies.length === 1 ? ' TURN' : ' TURNS');
   badge.className = 'badge live';
+  tintCard('latency-card', median > 6 ? 'hot' : median > 3 ? 'warm' : 'fast');
 }
 
 // ── Turn entry points ──
@@ -4260,15 +4493,19 @@ setTimeout(() => { if (!usingWS) startPolling(); }, 2000);
 async function pollMetrics() {
   try {
     const d = await (await fetch('/metrics')).json();
-    document.getElementById('cpu-bar').style.width  = d.cpu_percent  + '%';
-    document.getElementById('ram-bar').style.width  = d.ram_percent  + '%';
-    document.getElementById('disk-bar').style.width = d.disk_percent + '%';
-    animateNum(document.getElementById('cpu-val'), d.cpu_percent,  '%');
-    animateNum(document.getElementById('ram-val'), d.ram_used_gb,  ' GB');
-    animateNum(document.getElementById('disk-val'),d.disk_used_gb, ' GB');
-    animateNum(document.getElementById('c-cpu'),   d.cpu_percent,  '%');
-    animateNum(document.getElementById('c-ram'),   d.ram_used_gb,  ' GB');
-    document.getElementById('c-dsk').textContent = d.disk_used_gb + '/' + d.disk_total_gb;
+    setGauge('g-cpu', d.cpu_percent);
+    setGauge('g-ram', d.ram_percent);
+    setGauge('g-dsk', d.disk_percent);
+    animateNum(document.getElementById('c-cpu'), Math.round(d.cpu_percent), '%');
+    animateNum(document.getElementById('c-ram'), d.ram_used_gb, '');
+    animateNum(document.getElementById('c-dsk'), Math.round(d.disk_used_gb), '');
+    document.getElementById('g-cpu-sub').textContent = 'of 100%';
+    document.getElementById('g-ram-sub').textContent = 'of ' + Math.round(d.ram_total_gb) + ' GB';
+    document.getElementById('g-dsk-sub').textContent = 'of ' + Math.round(d.disk_total_gb) + ' GB';
+    // The card takes the colour of its most stressed resource, the way the
+    // Spotify card takes the sleeve's — calm reads as NORA's own accent.
+    const worst = Math.max(d.cpu_percent, d.ram_percent, d.disk_percent - 10);
+    tintCard('stats-card', worst > 88 ? 'hot' : worst > 70 ? 'warm' : '');
     const sb = document.getElementById('stats-badge');
     sb.textContent = 'LIVE'; sb.classList.add('live');
     setLoadSegs(d.cpu_percent);
@@ -4591,16 +4828,29 @@ setInterval(tickUptime,1000); tickUptime();
 //  WEATHER
 // ═══════════════════════════════════════════════════
 const WMO={0:'CLEAR SKY',1:'MAINLY CLEAR',2:'PARTLY CLOUDY',3:'OVERCAST',45:'FOG',48:'RIME FOG',51:'LT DRIZZLE',53:'DRIZZLE',55:'HVY DRIZZLE',61:'SLT RAIN',63:'MOD RAIN',65:'HVY RAIN',71:'SLT SNOW',73:'MOD SNOW',75:'HVY SNOW',80:'RAIN SHOWERS',81:'MOD SHOWERS',82:'VIO SHOWERS',95:'THUNDERSTORM',96:'T-STORM+HAIL',99:'T-STORM+H.HAIL'};
-const WMO_ICON={0:'☀️',1:'🌤',2:'⛅',3:'☁️',45:'🌫',48:'🌫',51:'🌦',53:'🌧',55:'🌧',61:'🌧',63:'🌧',65:'🌧',71:'❄️',73:'❄️',75:'❄️',80:'🌧',81:'🌧',82:'⛈',95:'⛈',96:'⛈',99:'⛈'};
+// WMO code → the sky the weather card paints. Night only changes the clear
+// skies; an overcast night and an overcast noon look the same from below.
+function skyFor(code, isDay) {
+  if (code >= 95) return 'storm';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  if (code >= 51) return 'rain';
+  if (code === 45 || code === 48) return 'fog';
+  if (code >= 2) return 'cloud';
+  return isDay ? 'day' : 'night';
+}
+function setSky(sky) {
+  document.getElementById('weather-card').dataset.sky = sky;
+  tintCard('weather-card', 'sky-' + sky);
+}
 async function fetchWeather() {
   try {
     const geo=await (await fetch('https://ipapi.co/json/')).json();
     document.getElementById('w-loc').textContent=`${geo.city}, ${geo.country_code}`.toUpperCase();
-    const url=`https://api.open-meteo.com/v1/forecast?latitude=${geo.latitude}&longitude=${geo.longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,visibility&wind_speed_unit=ms&forecast_days=1`;
+    const url=`https://api.open-meteo.com/v1/forecast?latitude=${geo.latitude}&longitude=${geo.longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,visibility,is_day&wind_speed_unit=ms&forecast_days=1`;
     const wd=await (await fetch(url)).json(), c=wd.current, code=c.weather_code;
     document.getElementById('w-temp').textContent=Math.round(c.temperature_2m);
     document.getElementById('w-desc').textContent=WMO[code]||'UNKNOWN';
-    document.getElementById('w-icon').textContent=WMO_ICON[code]||'🌐';
+    setSky(skyFor(code, c.is_day !== 0));
     document.getElementById('w-hum').textContent=c.relative_humidity_2m+'%';
     document.getElementById('w-wind').textContent=c.wind_speed_10m.toFixed(1)+' m/s';
     document.getElementById('w-feel').textContent=Math.round(c.apparent_temperature)+'°C';
