@@ -117,6 +117,19 @@ Found on the way: `groq/compound-mini` withdrawn, Google token
 `invalid_grant`, and two command modules (volume, mute, lock, screenshot)
 not loading under systemd since it has no X display.
 
+**Phase G, built 2026-10-07** (branch `sharp/g-keep-up`): `python -m nora.scout`.
+Scout (weekly, free `/models` listings; first scan is a baseline), trials of
+new chat models on the eval set's model cases for the intent role, a slice
+a night and accumulated per case, judged against the role's first choice on
+the cases both answered, proposed once on the phone, `promote` / `rollback`
+editing one block of config.yaml. A model missing from two scans running
+leaves the router's chains with no edit. Not yet: shadowing live turns,
+per-model prompt adapters, trials for chat/research/vision (they need their
+own eval cases), the quarterly review. Seen on the first night: GLM-5.3,
+GLM-5.3-flash and Kimi-K3 are listed free on NVIDIA but were queued for
+minutes at 22:40 IST (Kimi's first token at 180 s); a timeout or 404 counts
+as unavailable, never as a wrong answer, and three such nights drop a trial.
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent

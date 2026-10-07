@@ -632,8 +632,10 @@ def _parse_via_ollama(
 
 
 def _intent_candidates() -> list[dict]:
-    """Candidates for the router's "intent" role, in preference order."""
-    return get_config().get("llm_router", {}).get("roles", {}).get("intent", []) or []
+    """Candidates for the router's "intent" role, in preference order, minus
+    any the scout has seen withdrawn."""
+    from nora import scout
+    return scout.live(get_config().get("llm_router", {}).get("roles", {}).get("intent", []) or [])
 
 
 def candidate_cfg(candidate: dict) -> dict:

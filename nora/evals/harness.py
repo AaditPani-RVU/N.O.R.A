@@ -20,6 +20,8 @@ from typing import Iterator
 from nora.evals.cases import Route
 
 EVAL_DEVICE = "d_eval_phone"
+_UNAVAILABLE = ("APITimeoutError", "APIConnectionError", "InternalServerError",
+                "ServiceUnavailable", "NotFoundError", "timed out", "503", "502", "404")
 _MANIFEST = Path(__file__).with_name("phone_manifest.json")
 
 
@@ -120,4 +122,7 @@ def route_model(text: str, candidate: dict) -> tuple[Route, dict]:
         "completion_tokens": sum(c["completion_tokens"] or 0 for c in calls),
         "json_retry": len(ok) > 1,      # the first reply was not valid JSON
         "rate_limited": any(c.get("error") == "rate-limited" for c in calls),
+        # Timed out or unreachable: says nothing about the model's answers.
+        "unavailable": route.kind == "error" and any(
+            n in route.detail for n in _UNAVAILABLE),
     }

@@ -12,7 +12,8 @@ offline run can gate a change the way a test does.
 pass, the whole set on the NVIDIA fallback (rate-limited, not metered), and a
 slice of about ten cases on the Groq primary, whose free tier is shared with
 the live NORA. The slice moves on each night, so the primary sees every case
-over a couple of weeks.
+over a couple of weeks. Then nora.scout scans for new models (weekly) and
+advances model trials.
 """
 from __future__ import annotations
 
@@ -58,9 +59,15 @@ def _quantile(values: list[int], q: float) -> int | None:
     return round(statistics.quantiles(values, n=100, method="inclusive")[int(q * 100) - 1])
 
 
-def run(cases: list[Case], *, model: str = "", limit: int = 0, space: float | None = None,
-        budget: int | None = None, verbose: bool = False, out=print) -> dict:
-    candidate = _candidate(model) if model else None
+def run(cases: list[Case], *, model: str = "", candidate: dict | None = None, limit: int = 0,
+        space: float | None = None, budget: int | None = None, skip: set[str] = frozenset(),
+        verbose: bool = False, out=print) -> dict:
+    """Score `cases`. `candidate` is a router-style candidate dict for a model
+    that isn't in config.yaml (a trial); `model` names one that is. Cases in
+    `skip` are not sent to the model (already scored on an earlier night)."""
+    if candidate is None and model:
+        candidate = _candidate(model)
+    model = model or (candidate or {}).get("name", "")
     pace, cap = _PACE.get((candidate or {}).get("provider", ""), _DEFAULT_PACE)
     space = pace if space is None else space
     budget = cap if budget is None else budget
@@ -71,6 +78,7 @@ def run(cases: list[Case], *, model: str = "", limit: int = 0, space: float | No
     results: list[dict] = []
     spent = 0
     sent = 0
+    unavailable_run = 0          # consecutive calls the provider didn't answer
     last_call = 0.0
     with phone_connected():
         for case in cases:
@@ -80,7 +88,8 @@ def run(cases: list[Case], *, model: str = "", limit: int = 0, space: float | No
             served = "offline"
             if route is None:
                 served = "model"
-                if candidate is None or (limit and sent >= limit) or (budget and spent >= budget):
+                if (candidate is None or case.id in skip or (limit and sent >= limit)
+                        or (budget and spent >= budget) or unavailable_run >= 3):
                     results.append({"case": case, "route": None, "served": "pending"})
                     continue
                 wait = space - (time.monotonic() - last_call)
@@ -90,6 +99,7 @@ def run(cases: list[Case], *, model: str = "", limit: int = 0, space: float | No
                     route, call = route_model(sent_text, candidate)
                 last_call = time.monotonic()
                 sent += 1
+                unavailable_run = unavailable_run + 1 if call.get("unavailable") else 0
                 spent += call["prompt_tokens"] + call["completion_tokens"]
             ok = route.kind != "error" and matches(case.expect, route)
             results.append({"case": case, "route": route, "served": served, "ok": ok, "call": call})
@@ -127,6 +137,14 @@ def _summarise(results: list[dict], *, model: str, spent: int, out=print) -> dic
                       "expect": r["case"].expect,
                       "got": r["route"].describe() if r["route"] else None} for r in failed],
         "known_fixed": [r["case"].id for r in known_fixed],
+        # Per case, for the model's turns: what trials compare night by night.
+        "by_case": {r["case"].id: {"ok": r["ok"], "ms": r["call"].get("ms"),
+                                   "prompt_tokens": r["call"].get("prompt_tokens"),
+                                   "error": r["route"].kind == "error",
+                                   "json_retry": r["call"].get("json_retry", False),
+                                   "rate_limited": r["call"].get("rate_limited", False),
+                                   "unavailable": r["call"].get("unavailable", False)}
+                    for r in by_model},
     }
     if by_model:
         calls = [r["call"] for r in by_model]
@@ -181,6 +199,10 @@ def nightly() -> int:
     for model, extra in NIGHTLY:
         print(f"\n== {model or 'offline'} ==")
         worst = max(worst, main((["--model", model] if model else []) + extra))
+    # Sharp G: scan for new models weekly, advance trials nightly.
+    from nora import scout
+    print("\n== scout ==")
+    scout.nightly()
     return worst
 
 

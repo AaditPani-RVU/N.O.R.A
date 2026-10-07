@@ -214,8 +214,9 @@ def _call_ollama(
 # ---------------------------------------------------------------------------
 
 def _candidates_for(role: str) -> list[dict]:
+    from nora import scout
     roles_cfg = get_config().get("llm_router", {}).get("roles", {})
-    return roles_cfg.get(role, [])
+    return scout.live(roles_cfg.get(role, []))      # minus models the scout saw withdrawn
 
 
 def complete(

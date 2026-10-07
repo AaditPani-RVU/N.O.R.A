@@ -36,3 +36,7 @@ _doctor.STATE_PATH = Path(_tmp) / "nora_doctor_state.json"
 # Dev mode is a file in the repo root; a test must never switch the live one.
 from nora import dev as _dev  # noqa: E402
 _dev.DEV_PATH = Path(_tmp) / "nora_dev_mode.json"
+
+# nora.scout keeps what it has seen of every provider, and can edit config.yaml.
+from nora import scout as _scout  # noqa: E402
+_scout.STATE_PATH = Path(_tmp) / "nora_model_scout.json"
