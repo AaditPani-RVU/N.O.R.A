@@ -401,7 +401,7 @@ class Hub:
 
     # ── turns from the device ────────────────────────────────────────────────
     async def _turn(self, session: Session, text: str, corr: str, *, core_tts: bool = False) -> None:
-        from nora import pipeline, wiring
+        from nora import dialogue, pipeline, wiring
         from nora.frustration import FrustrationTracker
 
         out = None
@@ -418,6 +418,11 @@ class Hub:
                 if audio is not None:
                     body["audio"] = audio
                 session.send_nowait("say", body, corr=corr)
+                # The laptop's speaker keeps what NORA said in the transcript;
+                # a device's lines must too. Without them the chat model saw
+                # only the user's side ("what time is it" x4, then "that's
+                # crazy") and answered every remark with the time.
+                dialogue.record_nora(line, kind=mood or "info")
 
         async def confirm(req: _channel.ConfirmRequest) -> bool:
             return await self._ask(session, req.turn_id, req.rendered,
