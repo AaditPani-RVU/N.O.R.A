@@ -12,6 +12,7 @@ Design principles:
 from __future__ import annotations
 
 import re
+import sys
 
 from nora.schemas import ActionStep, IntentResponse
 
@@ -64,19 +65,30 @@ _FILLER_RE = re.compile(
     r"|(?:(?:can|could|would)\s+you\s+(?:please\s+)?)"
     r"|(?:(?:i(?:'d|\s+would)?(?:\s+like(?:\s+you)?)?|i\s+need(?:\s+you)?)\s+to\s+)"
     r"|please\s+"
+    # Lead-ins that carry nothing ("okay. okay, what are...", "actually, can
+    # you...", "one second. hey nora, how are you") — only when more follows.
+    r"|(?:so|okay|ok|alright|actually|well|yeah|one\s+second|wait|hey)[,.!]*\s+(?=\S)"
     r")+",
     re.I,
 )
 _SUFFIX_RE = re.compile(
-    r"\s+(?:for\s+me|please|right\s+now|now|quickly|asap)\s*$", re.I
+    r"(?:\s+(?:for\s+me|please|right\s+now|now|quickly|asap)|[,\s]+(?:nora|jarvis))\s*$", re.I
 )
+# Typed on a phone keyboard, not misheard: the nouns rules key on.
+_TYPOS = [(re.compile(r"\b(?:calender|calndar|calandar|calander)\b", re.I), "calendar"),
+          (re.compile(r"\bmachien\b", re.I), "machine"),
+          (re.compile(r"\bmu\s+(?=cpu|phone|calendar|battery|screen)", re.I), "my "),
+          (re.compile(r"\byouy\b", re.I), "you")]   # tomorrow's spellings: nora.days
 
 
 def _normalise(text: str) -> str:
     """Strip leading fillers, trailing noise, and punctuation."""
     # Phone keyboards type curly apostrophes; every rule is written with '.
-    t = _FILLER_RE.sub("", text.strip().replace("\u2019", "'"))
-    t = _SUFFIX_RE.sub("", t)
+    t = " ".join(text.replace("\u2019", "'").split())
+    for typo, fix in _TYPOS:
+        t = typo.sub(fix, t)
+    t = _FILLER_RE.sub("", t)
+    t = _SUFFIX_RE.sub("", t.rstrip(".,!?; "))
     return t.rstrip(".,!?;").strip()
 
 
@@ -353,6 +365,11 @@ def _travel_mode(text: str, how: str) -> str:
 def _build_rules() -> None:
     global _BUILT
 
+    # Sharp B: the everyday families, as phrase tables (nora/fast_tables.py).
+    # First: "start a timer for five minutes" said to the phone was opening an
+    # app called "timer for five minutes" through the phone's "start X" rule.
+    from nora import fast_tables
+    fast_tables.register(sys.modules[__name__])
     _phone_rules()
 
     # ─── Music: no-arg commands ───────────────────────────────────────────
@@ -691,6 +708,12 @@ def _build_rules() -> None:
     _BUILT = True
 
 
+_ABOUT_ABILITY = re.compile(
+    r"^(?:(?:hey\s+)?(?:nora|jarvis)[,\s]+)?(?:can|could|do|are|will)\s+you\b.*"
+    r"\b(?:or\s+(?:only|just)|only\s+(?:specific|certain|some)|any\s+(?:app|application|song|playlist)s?\s+or"
+    r"|if\s+i\s+name|able\s+to\b|capable\s+of|support)", re.I)
+
+
 def resolve(text: str) -> IntentResponse | None:
     """
     Attempt a deterministic resolution of *text* without calling the LLM.
@@ -702,6 +725,12 @@ def resolve(text: str) -> IntentResponse | None:
 
     clean = _normalise(text)
     if len(clean) < 2:
+        return None
+    # "Can you play playlists if I name them, or only songs?" asks *whether*,
+    # and stripping "can you" turned it into a request to play a song called
+    # "playlists if i name them or only songs". Questions about what NORA can
+    # do go to the conversation, not to a rule.
+    if _ABOUT_ABILITY.match(text.strip()):
         return None
 
     for pattern, fn in _RULES:

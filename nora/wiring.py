@@ -145,6 +145,9 @@ def start_subsystems(speak: Callable[..., None]) -> None:
     # Daily: are models, sign-ins and devices still working? Says so once.
     from nora import doctor
     doctor.start(speak_callback=_gated)
+    # Keep the weather and today's calendar warm for the fast path.
+    from nora import prefetch
+    prefetch.start()
 
     # Pull the lazy model loads off the first spoken turn and onto startup.
     from nora import pipeline

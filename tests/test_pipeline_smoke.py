@@ -322,6 +322,8 @@ SUBSYSTEM_STARTS = [
     "nora.hub.server.start",
     # Calls providers and Google a few minutes in; a test run must not.
     "nora.doctor.start",
+    # Fetches the weather and the calendar from the network.
+    "nora.prefetch.start",
 ]
 
 SUBSYSTEM_STOPS = [

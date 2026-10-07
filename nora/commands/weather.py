@@ -98,15 +98,80 @@ def _resolve(location: str) -> dict | None:
     # "tell me about Tokyo" can never land on two different Tokyos.
     from nora.commands.location import _geocode
 
+    hit = _GEO.get(place.lower())
+    if hit and time.time() - hit[0] < _GEO_TTL:
+        return hit[1]
     geo = _geocode(place)
     if not geo:
         return None
-    return {
+    found = {
         "name": geo.get("name", place),
         "country": geo.get("country", ""),
         "lat": geo["latitude"],
         "lon": geo["longitude"],
     }
+    _GEO[place.lower()] = (time.time(), found)
+    return found
+
+
+# Places don't move; forecasts are good for a while. The forecast call is the
+# slow leg (about 3 s from here), so a place's 16-day forecast is kept for 15
+# minutes and the local one is refreshed in the background (`prefetch`). One
+# call answers "now", "tomorrow" and "friday" alike.
+_GEO: dict[str, tuple[float, dict]] = {}
+_GEO_TTL = 86400.0
+_FORECAST: dict[tuple[float, float], tuple[float, dict]] = {}
+_FORECAST_TTL = 900.0
+_FORECAST_DAYS = 16
+
+
+def _forecast(place: dict) -> dict:
+    key = (round(place["lat"], 2), round(place["lon"], 2))
+    hit = _FORECAST.get(key)
+    if hit and time.time() - hit[0] < _FORECAST_TTL:
+        return hit[1]
+    resp = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": place["lat"],
+            "longitude": place["lon"],
+            "current": ("temperature_2m,apparent_temperature,relative_humidity_2m,"
+                        "weather_code,wind_speed_10m"),
+            "daily": ("temperature_2m_max,temperature_2m_min,"
+                      "precipitation_probability_max,weather_code"),
+            "wind_speed_unit": "ms",
+            "timezone": "auto",
+            "forecast_days": _FORECAST_DAYS,
+        },
+        timeout=8,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    _FORECAST[key] = (time.time(), data)
+    return data
+
+
+def prefetch() -> None:
+    """Warm the local forecast so "what's the weather" needn't wait on it."""
+    place = _resolve("")
+    if place:
+        key = (round(place["lat"], 2), round(place["lon"], 2))
+        _FORECAST.pop(key, None)
+        _forecast(place)
+
+
+def _describe_ahead(place: dict, day: dict, when: str) -> str:
+    """A later day's forecast: there is no "now" to report, only the day."""
+    if day.get("temperature_2m_max") is None:
+        return f"I don't have a forecast for {when} yet."
+    name = "" if place["name"] == "here" else f" in {place['name']}"
+    cond = WMO_SPOKEN.get(day.get("weather_code"), "")
+    out = f"{when.strip().capitalize()}{name}: {cond + ', ' if cond else ''}high of " \
+          f"{round(day['temperature_2m_max'])}, low of {round(day['temperature_2m_min'])}"
+    rain = day.get("precipitation_probability_max")
+    if isinstance(rain, (int, float)):
+        out += f", rain {round(rain)} percent likely" if rain >= 25 else ", little chance of rain"
+    return out + "."
 
 
 def _describe(place: dict, cur: dict, day: dict) -> str:
@@ -144,16 +209,29 @@ def _describe(place: dict, cur: dict, day: dict) -> str:
 
 @register(
     "get_weather",
-    sig="get_weather(location: str = '')",
+    sig="get_weather(location: str = '', day: str = '')",
     description=(
-        "Current weather and today's forecast from the live weather API. "
+        "Current weather and today's forecast, or the forecast for `day` "
+        "('tomorrow', 'friday'; up to two weeks ahead), from the live weather API. "
         'Use for ANY weather question — "what\'s the weather", "is it going to '
-        'rain", "how cold is it", "weather in Tokyo". Never web_search for '
+        'rain tomorrow", "how cold is it", "weather in Tokyo". Never web_search for '
         "weather. Omit location for here."
     ),
     category="web",
 )
-def get_weather(location: str = "") -> str:
+def get_weather(location: str = "", day: str = "") -> str:
+    # A day ahead: the forecast for that day. It used to fetch one day only,
+    # so "will it rain tomorrow" was answered with today's weather.
+    ahead = 0
+    if day and day.strip().lower() not in ("today", "now", "tonight"):
+        from datetime import date
+        from nora import days
+        when = days.parse(day)
+        if when is None:
+            return f"I can't tell which day {day} is."
+        ahead = (when - date.today()).days
+        if not 0 <= ahead <= 15:
+            return "I only have the forecast for the next two weeks."
     place = _resolve(location)
     if not place:
         return (
@@ -163,23 +241,7 @@ def get_weather(location: str = "") -> str:
         )
 
     try:
-        resp = requests.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": place["lat"],
-                "longitude": place["lon"],
-                "current": ("temperature_2m,apparent_temperature,relative_humidity_2m,"
-                            "weather_code,wind_speed_10m"),
-                "daily": ("temperature_2m_max,temperature_2m_min,"
-                          "precipitation_probability_max"),
-                "wind_speed_unit": "ms",
-                "timezone": "auto",
-                "forecast_days": 1,
-            },
-            timeout=8,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = _forecast(place)
     except Exception as e:
         logger.warning("weather fetch failed for %s: %s", place["name"], e)
         return "I couldn't reach the weather service just now."
@@ -189,8 +251,9 @@ def get_weather(location: str = "") -> str:
         return "The weather service returned nothing usable."
 
     daily = data.get("daily") or {}
-    day = {k: v[0] for k, v in daily.items() if isinstance(v, list) and v}
+    forecast = {k: v[ahead] for k, v in daily.items() if isinstance(v, list) and len(v) > ahead}
 
-    answer = _describe(place, cur, day)
+    answer = (_describe(place, cur, forecast) if ahead == 0
+              else _describe_ahead(place, forecast, day))
     logger.info("weather for %s: %s", place["name"], answer)
     return answer

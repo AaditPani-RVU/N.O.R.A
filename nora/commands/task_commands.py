@@ -163,11 +163,9 @@ def _reminders_on(day: date) -> list[str]:
 def _calendar_on(day: date) -> list[str]:
     """Calendar events on `day`, or nothing when the calendar isn't reachable."""
     def fetch() -> list[str]:
-        from nora.commands.google_services import _calendar_service, _day_window, _fmt_event_time
+        from nora.commands.google_services import _day_window, _events_between, _fmt_event_time
         time_min, time_max = _day_window(datetime.combine(day, datetime.min.time()))
-        items = _calendar_service().events().list(
-            calendarId="primary", timeMin=time_min, timeMax=time_max, maxResults=10,
-            singleEvents=True, orderBy="startTime").execute().get("items", [])
+        items = _events_between(time_min, time_max)
         return [f"{ev.get('summary', 'Untitled')} at {_fmt_event_time(ev)}" for ev in items]
 
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)

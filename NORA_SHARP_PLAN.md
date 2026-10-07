@@ -130,6 +130,18 @@ GLM-5.3-flash and Kimi-K3 are listed free on NVIDIA but were queued for
 minutes at 22:40 IST (Kimi's first token at 180 s); a timeout or 404 counts
 as unavailable, never as a wrong answer, and three such nights drop a trial.
 
+**Phase B, built 2026-10-07** (branch `sharp/b-local`): `nora/fast_tables.py`,
+one phrase table per family (date, battery, calendar and adding events,
+weather, screen, email, system, globe, alarms and timers, Claude, memory
+facts, what NORA can do, small talk), checked against held-out paraphrases
+and near-misses as well as the eval set. Eval set: 72% answered without a
+model call (was 33%), offline routing 97% right (was 86%), no regressions.
+On all 527 harvested utterances, weighted by how often each was said: 58%
+(was 35%); the rest is mostly open conversation. `get_weather` gained a
+`day` (it only ever fetched today, so "rain tomorrow" got today's weather);
+weather and today's/tomorrow's calendar are prefetched (`nora/prefetch.py`),
+so their answers come from memory: weather 3.6 s → ~0, calendar 0.5 s → ~0.
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent

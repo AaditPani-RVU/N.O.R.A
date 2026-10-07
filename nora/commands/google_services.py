@@ -14,6 +14,7 @@ Setup (one-time):
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,7 @@ def _get_creds():
             flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), _SCOPES)
             creds = flow.run_local_server(port=0)
         _TOKEN_FILE.write_text(creds.to_json())
+        _TOKEN_FILE.chmod(0o600)         # a refresh token: for this user only
 
     return creds
 
@@ -213,25 +215,51 @@ def _fmt_event_time(ev: dict) -> str:
         return start
 
 
+# ── Calendar reads, cached briefly (Sharp B) ───────────────────────────────
+# "What's on my calendar" is asked often and answered from the fast path in a
+# few milliseconds; the Google round trip after it was the slow part. A day's
+# events are kept for a few minutes, refreshed in the background
+# (`prefetch_calendar`), and dropped whenever NORA adds or deletes an event.
+
+_CAL_TTL_SEC = 180.0
+_cal_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+
+
+def _events_between(time_min: str, time_max: str, *, max_results: int = 15) -> list[dict]:
+    hit = _cal_cache.get((time_min, time_max))
+    if hit and time.time() - hit[0] < _CAL_TTL_SEC:
+        return hit[1]
+    items = _calendar_service().events().list(
+        calendarId="primary", timeMin=time_min, timeMax=time_max, maxResults=max_results,
+        singleEvents=True, orderBy="startTime").execute().get("items", [])
+    _cal_cache[(time_min, time_max)] = (time.time(), items)
+    return items
+
+
+def _calendar_changed() -> None:
+    _cal_cache.clear()
+
+
+def prefetch_calendar() -> None:
+    """Warm today's and tomorrow's events. Quietly does nothing when signed out."""
+    if not _TOKEN_FILE.exists():
+        return
+    now = datetime.now()
+    for d in (now, now + timedelta(days=1)):
+        time_min, time_max = _day_window(d)
+        _cal_cache.pop((time_min, time_max), None)
+        _events_between(time_min, time_max)
+
+
 # ── Calendar commands ──────────────────────────────────────────────────────
 
 @register("check_calendar", sig='check_calendar(when: str = "today")',
           description="Check Google Calendar for upcoming events", category="notification")
 def check_calendar(when: str = "today") -> str:
     try:
-        svc = _calendar_service()
         dt = _parse_date(when)
         time_min, time_max = _day_window(dt)
-
-        result = svc.events().list(
-            calendarId="primary",
-            timeMin=time_min,
-            timeMax=time_max,
-            maxResults=15,
-            singleEvents=True,
-            orderBy="startTime",
-        ).execute()
-        events = result.get("items", [])
+        events = _events_between(time_min, time_max)
 
         if not events:
             return f"Nothing on your calendar for {when}."
@@ -285,6 +313,7 @@ def add_calendar_event(summary: str = "", date: str = "today", time: str = "") -
             }
 
         svc.events().insert(calendarId="primary", body=event_body).execute()
+        _calendar_changed()
         date_label = str(dt.date())
         time_label = f" at {dt.strftime('%-I:%M %p')}" if timed else ""
         return f"Added '{summary}' to your calendar on {date_label}{time_label}."
@@ -326,6 +355,7 @@ def delete_calendar_event(summary: str = "", date: str = "today") -> str:
             return f"I couldn't find '{summary}' on {date}."
 
         svc.events().delete(calendarId="primary", eventId=match["id"]).execute()
+        _calendar_changed()
         return f"Deleted '{match.get('summary')}' from your calendar."
     except RuntimeError as e:
         return str(e)

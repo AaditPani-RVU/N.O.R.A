@@ -160,6 +160,19 @@ _POOLS: dict[str, list[str]] = {
         "Sure thing.",
         "You bet.",
     ],
+    # "What can you do?" — answered locally (fast_tables), varied a little
+    "capabilities": [
+        "Quite a lot: your calendar, email and reminders, music on the laptop or "
+        "your phone, the weather, news, directions, timers and alarms, what's on "
+        "your screen, places on the globe, and anything you want looked up or "
+        "asked of Claude. What do you need?",
+        "Calendar, email, reminders and tasks; music here or on your phone; "
+        "weather, news and look-ups; directions, alarms and timers on the phone; "
+        "your screen and the globe; and Claude for the deep stuff. Try me.",
+        "Ask me about your day, your inbox or the weather, have me play something "
+        "here or on your phone, set alarms and reminders, find places, read your "
+        "screen, or look things up. What's first?",
+    ],
     # Backchannels — the user said "mhm" / "cool" / "ok", nothing is required
     "backchannel": [
         "Mm-hm.",

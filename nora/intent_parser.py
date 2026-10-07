@@ -145,7 +145,6 @@ User: "tell me about quantum computing" → {{"intent": "research", "steps": [{{
 User: "tell me about Tokyo" → {{"intent": "show location", "steps": [{{"action": "show_location", "parameters": {{"location": "Tokyo"}}}}]}}
 User: "how do black holes form" → {{"intent": "research question", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do black holes form"}}}}]}}
 User: "if a train leaves at 60mph and another at 80mph, when do they meet" → {{"intent": "math reasoning", "steps": [{{"action": "deep_reasoning", "parameters": {{"question": "if a train leaves at 60mph and another at 80mph, when do they meet"}}}}]}}
-User: "is it going to rain in Tokyo tomorrow" → {{"intent": "check weather", "steps": [{{"action": "get_weather", "parameters": {{"location": "Tokyo"}}}}]}}
 User: "what does this error say" → {{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What does the error message say?"}}}}]}}
 User: "what did I say about the auth bug" → {{"intent": "recall past notes", "steps": [{{"action": "recall", "parameters": {{"query": "auth bug"}}}}]}}
 User: "remind me in half an hour to check the oven" → {{"intent": "set reminder", "steps": [{{"action": "remind_me", "parameters": {{"message": "check the oven", "delay_minutes": 30}}}}]}}
@@ -153,10 +152,7 @@ User: "delete test.txt" → {{"intent": "delete file", "steps": [{{"action": "de
 User: "daddy's home" → {{"intent": "greeting", "steps": [{{"action": "daddys_home", "parameters": {{}}}}]}}
 User: "click the submit button in chrome" → {{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "submit button in chrome"}}}}]}}
 User: "fill the username field with john" → {{"intent": "fill form field", "steps": [{{"action": "fill_field", "parameters": {{"label": "username", "text": "john"}}}}]}}
-User: "type hello world" → {{"intent": "type text", "steps": [{{"action": "type_into_focused", "parameters": {{"text": "hello world"}}}}]}}
-User: "why is my computer slow" → {{"intent": "cpu trace", "steps": [{{"action": "why_busy", "parameters": {{}}}}]}}
 User: "what's writing to disk" → {{"intent": "disk IO trace", "steps": [{{"action": "what_writes_disk", "parameters": {{}}}}]}}
-User: "who's using the most network" → {{"intent": "network trace", "steps": [{{"action": "top_talkers", "parameters": {{}}}}]}}
 User: "who opened my ssh key" → {{"intent": "file access trace", "steps": [{{"action": "who_opened", "parameters": {{"path": "~/.ssh/id_rsa"}}}}]}}
 User: "pause Spotify" → {{"intent": "media control", "steps": [{{"action": "media_play_pause", "parameters": {{}}}}]}}
 User: "connect to wifi CoffeeShop" → {{"intent": "wifi connect", "steps": [{{"action": "wifi_connect", "parameters": {{"ssid": "CoffeeShop"}}}}]}}
@@ -164,7 +160,6 @@ User: "snapshot before refactor" → {{"intent": "create snapshot", "steps": [{{
 User: "roll back to before-refactor" → {{"intent": "rollback snapshot", "steps": [{{"action": "rollback_to", "parameters": {{"label_or_time": "before-refactor"}}}}], "requires_confirmation": true}}
 User: "duck Spotify when I speak" → {{"intent": "audio duck", "steps": [{{"action": "duck_app_when_speaking", "parameters": {{"app": "Spotify"}}}}]}}
 User: "enter focus mode for writing" → {{"intent": "focus mode", "steps": [{{"action": "focus_mode", "parameters": {{"intent": "writing"}}}}]}}
-User: "enable mic denoising" → {{"intent": "denoise mic", "steps": [{{"action": "denoise_mic", "parameters": {{}}}}]}}
 
 CRITICAL: Return ONLY the JSON object. No explanation, no markdown fences, no extra text."""
 

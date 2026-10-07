@@ -86,7 +86,7 @@ def phone(commands):
     ("thanks", "fast", None),                              # the fast path's own small talk
     ("What do you think about beagles", "chat", None),
     ("wake up, Nora", "wake", None),
-    ("Set an alarm to wake up at 6", None, None),         # the model's to decide, not "awake"
+    ("Set an alarm to wake up at 6", "fast", "phone.set_alarm"),   # not "I'm awake"
 ])
 def test_route_offline(phone, text, kind, action):
     with on_phone("phone"):
