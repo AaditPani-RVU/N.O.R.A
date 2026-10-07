@@ -522,4 +522,9 @@ its own. S/M/L = relative size.
 | **9 — Accessibility (optional)** | Disabled-by-default service; allowlisted apps; named recipes only; tier ≥ 2 | Three recipes work; the service can't run anything outside them | M |
 | **10 — Hardening** | Latency tracing per stage, reconnection chaos tests, key rotation, protocol fuzzing, battery measurement, UX polish | Battery drain < 3%/day idle; no invocation without an audit row on both sides | M |
 
+**Paused after Phase 6 (2026-10-05).** `NORA_SHARP_PLAN.md` comes first:
+it makes the existing abilities fast, measured and kept current before
+more are added. Phase 10's latency trace moves into Sharp Phase A, and
+Phases 7–9 resume after Sharp A, G, B and C.
+
 Phase 0 is small, independent, and worth doing even if nothing else here is approved.
