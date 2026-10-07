@@ -2516,6 +2516,37 @@
                   inset 0 0 22px -6px rgba(var(--orb-rgb),0.45),
                   0 0 34px -20px rgba(var(--rgb),0.95);
     }
+
+    /* ── Today, refined ──
+       The reticle sized itself to the frame, not the content, so the day
+       floated in an oversized box; and the rows ran in the wide mono face
+       under a Rajdhani headline. Brackets off, titles in the display face,
+       mono kept for the times — the one place a fixed width helps. */
+    .ce-frame.today { width: min(600px, 88%); padding: 0; gap: 22px; background: none; }
+    .ce-frame.today::before, .ce-frame.today::after { content: none; }
+    #convo-empty:not([hidden]) .ce-frame.today { animation: card-enter var(--t-enter) var(--ease-out) both; }
+    .td-date { font-size: 12px; letter-spacing: 2.6px; }
+    .td-next { min-height: 0; gap: 4px; }
+    .td-next-what { font-size: 38px; }
+    .td-cols { gap: 36px; }
+    .td-head { font-size: 10px; letter-spacing: 2.6px; color: var(--dim); }
+    .td-list li {
+      grid-template-columns: 70px 1fr; padding: 8px 0;
+      font-family: var(--disp); font-size: 16px; font-weight: 500; letter-spacing: 0.2px;
+      line-height: 1.2; color: #dcecf8;
+    }
+    .td-list time { font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px; }
+    .td-list span {
+      white-space: normal; overflow: hidden;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .td-list li:last-child { border-bottom: 0; }
+    .td-list li.td-none { font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--dim); padding-top: 8px; }
+    #convo-empty .ce-frame.today .hint { margin-top: 4px; letter-spacing: 0.6px; }
+
+    /* Resting: the conversation is kept, just not shown. */
+    #convo.resting #convo-scroll { visibility: hidden; }
+    #convo.resting #convo-jump { display: none; }
   </style>
 </head>
 <body>
@@ -2705,8 +2736,9 @@
 
       <section id="convo" class="center-col">
         <div id="convo-head">
-          <div class="widget-title"><div class="sq"></div>TRANSCRIPT</div>
+          <div class="widget-title"><div class="sq"></div><span id="convo-title">TODAY</span></div>
           <div class="convo-meta">
+            <button class="convo-act" id="convo-view" type="button" hidden>TRANSCRIPT</button>
             <span class="convo-stat" id="convo-last">—</span>
             <span class="convo-stat"><b id="convo-turns">0</b> TURNS</span>
             <button class="convo-act" id="convo-copy" type="button" title="Copy transcript">COPY</button>
@@ -2731,7 +2763,7 @@
                 <ol class="td-list" id="td-rems"></ol>
               </div>
             </div>
-            <span class="hint"><span class="caret">▋</span> Hold space to speak, or press / to type</span>
+            <span class="hint">Hold space to speak, or press / to type</span>
           </div>
         </div>
         <button id="convo-jump" type="button" hidden>NEW ↓</button>
@@ -4095,6 +4127,7 @@ const STAGE_SETS = {
 let lastStage = '';
 function setStage(stage) {
   if (stage === lastStage) return; lastStage = stage;
+  if (stage !== 'idle' && resting) setResting(false);
   const active = new Set(STAGE_SETS[stage] || []);
   STAGE_IDS.forEach(id => { const el = document.getElementById('stg-' + id); if (el) el.className = 'stg' + (active.has(id) ? ' active' : ''); });
   setOrbState(stageToState(stage));
@@ -4237,10 +4270,12 @@ function typeInto(el, text) {
 
 function addTurn(who, text, lat) {
   finishTyping();
-  const turn = { who, text, t: clockNow(), lat: lat || '' };
+  const turn = { who, text, t: clockNow(), ts: Date.now(), lat: lat || '' };
   turns.push(turn);
   if (turns.length > MAX_TURNS) turns = turns.slice(-MAX_TURNS);
+  lastTurnAt = turn.ts;
   renderTurn(turn, true);
+  setResting(false);
   stickBottom();
   saveTranscript();
 }
@@ -4256,11 +4291,41 @@ function restoreTranscript() {
   turns = saved;
   saved.forEach(t => renderTurn(t, false));
   requestAnimationFrame(() => { convoScroll.scrollTop = convoScroll.scrollHeight; });
+  // Turns saved before timestamps existed count as old.
+  lastTurnAt = saved[saved.length - 1].ts || 0;
 }
+
+// ── Resting: back to the day after a quiet spell ──
+// The transcript persists in the browser, so without this the today view was
+// gone for good after the first exchange. After a few quiet minutes the card
+// goes back to the day; any new turn, or NORA starting to listen, brings the
+// conversation back, and the head button flips between the two by hand.
+var REST_AFTER_MS = 3 * 60 * 1000;
+var lastTurnAt = 0, resting = false;
+function setResting(on) {
+  resting = !!on && turns.length > 0;
+  const showToday = resting || !turns.length;
+  document.getElementById('convo').classList.toggle('resting', resting);
+  convoEmpty.hidden = !showToday;
+  document.getElementById('convo-title').textContent = showToday ? 'TODAY' : 'TRANSCRIPT';
+  const btn = document.getElementById('convo-view');
+  btn.hidden = !turns.length;
+  btn.textContent = resting ? 'TRANSCRIPT' : 'TODAY';
+  if (resting) { convoJump.hidden = true; renderToday(); }
+  else if (turns.length) requestAnimationFrame(() => { convoScroll.scrollTop = convoScroll.scrollHeight; });
+}
+document.getElementById('convo-view').addEventListener('click', () => {
+  if (resting) { lastTurnAt = Date.now(); setResting(false); }   // a fresh 3 minutes to read it
+  else setResting(true);
+});
+setInterval(() => {
+  if (!resting && turns.length && (lastStage === 'idle' || !lastStage) && !activeType
+      && Date.now() - lastTurnAt > REST_AFTER_MS) setResting(true);
+}, 10000);
 
 function clearTranscript() {
   finishTyping();
-  turns = []; convoList.innerHTML = ''; convoEmpty.hidden = false;
+  turns = []; convoList.innerHTML = ''; setResting(false);
   convoTurns.textContent = '0'; latencies = []; convoLast.textContent = '—';
   hdrLatency.textContent = '—';
   renderLatency();
@@ -5089,28 +5154,32 @@ function renderToday() {
   const tomorrow = evs.filter(e => e.day === 'tomorrow');
   const rems = d.reminders || [];
 
+  // The one thing worth reading from across the room: whatever comes next.
+  // Picked first so the lists below don't repeat it.
+  const nextEv = live.find(e => !e.all_day && e.s > now);
+  const nextRem = rems.find(r => r.next_run * 1000 > now);
+  const evAt = nextEv ? nextEv.s.getTime() : Infinity, remAt = nextRem ? nextRem.next_run * 1000 : Infinity;
+  const hero = evAt === Infinity && remAt === Infinity ? null : evAt <= remAt ? nextEv : nextRem;
+
   const evList = document.getElementById('td-events');
-  const rows = live.length ? live : tomorrow;
+  const rows = (live.length ? live : tomorrow).filter(e => e !== hero);
   const dayTag = live.length ? '' : '<li class="td-sub">Tomorrow</li>';
   if (d.calendar === 'signed_out')      evList.innerHTML = '<li class="td-none">Google Calendar isn\'t signed in.</li>';
   else if (d.calendar === 'error')      evList.innerHTML = '<li class="td-none">Couldn\'t reach Google Calendar.</li>';
   else if (d.calendar === 'loading')    evList.innerHTML = '<li class="td-none">Checking…</li>';
-  else if (!rows.length)                evList.innerHTML = '<li class="td-none">Nothing today or tomorrow.</li>';
+  else if (!rows.length)                evList.innerHTML = `<li class="td-none">${hero && hero === nextEv ? 'Nothing else today.' : 'Nothing today or tomorrow.'}</li>`;
   else evList.innerHTML = dayTag + rows.slice(0, 4).map(e =>
-    `<li class="${!e.all_day && e.s <= now ? 'on' : ''}"><time>${e.all_day ? 'All day' : tdClock(e.s)}</time><span>${tdEsc(e.title)}</span></li>`).join('');
+    `<li class="${!e.all_day && e.s <= now ? 'on' : ''}"><time>${e.all_day ? 'All day' : e.s <= now ? 'Now' : tdClock(e.s)}</time><span>${tdEsc(e.title)}</span></li>`).join('');
 
   const remList = document.getElementById('td-rems');
-  remList.innerHTML = rems.length
-    ? rems.slice(0, 4).map(r => {
+  const remRows = rems.filter(r => r !== hero);
+  remList.innerHTML = remRows.length
+    ? remRows.slice(0, 4).map(r => {
         const at = new Date(r.next_run * 1000), soon = at - now < 3600e3;
         return `<li><time>${soon ? tdUntil(at - now) : tdClock(at)}</time><span>${tdEsc(r.what)}${r.recurring ? ' <em title="Repeats">↻</em>' : ''}</span></li>`;
       }).join('')
-    : '<li class="td-none">None set. Try “remind me in 20 minutes to stretch.”</li>';
+    : `<li class="td-none">${rems.length ? 'Nothing else pending.' : 'None set. Try “remind me in 20 minutes to stretch.”'}</li>`;
 
-  // The one thing worth reading from across the room: whatever comes next.
-  const nextEv = live.find(e => !e.all_day && e.s > now);
-  const nextRem = rems.find(r => r.next_run * 1000 > now);
-  const evAt = nextEv ? nextEv.s.getTime() : Infinity, remAt = nextRem ? nextRem.next_run * 1000 : Infinity;
   const when = document.getElementById('td-next-when'), what = document.getElementById('td-next-what');
   if (evAt === Infinity && remAt === Infinity) {
     when.textContent = '';
@@ -5440,6 +5509,7 @@ document.getElementById('convo-copy').addEventListener('click', async () => {
   catch (_) { flashConvoAct('convo-copy', 'BLOCKED'); }
 });
 restoreTranscript();
+setResting(turns.length > 0 && Date.now() - lastTurnAt > REST_AFTER_MS);
 
 // ═══════════════════════════════════════════════════
 //  DESKTOP REMOTE
