@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly NORA eval run
+
+[Timer]
+# After the 03:30 backup, while nobody is talking to NORA.
+OnCalendar=*-*-* 04:15
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

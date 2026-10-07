@@ -105,6 +105,18 @@ S/M/L = relative size.
 | **F — One NORA everywhere** | Every channel (laptop mic, phone voice, phone chat, Telegram, dashboard) goes through the same record-and-reply path, with a test per channel that the transcript, memory and policy see the turn alike. The transcript carries which device spoke. The routine learner needs a pattern across several days before suggesting. A phone screen to see and delete what NORA remembers | A parity test fails if any channel skips the transcript; no suggestion fires from a single session's burst; a memory can be deleted from the phone and is gone from recall | M |
 | **H — The globe (plug-in, after C)** | Connect [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view) (MIT, a CesiumJS globe of public live data: flights, satellites, quakes, fires, weather, cyclones, launches) as a separate service on the core; NORA's voice replaces its paid OpenAI voice. **Adapter**: about five NORA commands with flat arguments (`globe_show(place, layers)`, `flights_near(place)`, `satellite_pass(place, satellite)`, `quakes_near(place)`, `situation_brief(place)`) that call GEV over MCP, speak the one-line `summary` and never pass the 4–8 KB raw result to the model. Not a raw `mcp_servers` entry: the bridge flattens object arguments to strings, which GEV rejects, and its 30 tools would undo Phase C. **Dashboard globe**: a panel embedding `?embed=1` (allowed through `GEV_EMBED_FRAME_ANCESTORS`); the hub forwards each answer's `view` and the panel posts it as `gev:view`, so the globe flies to what NORA just said. `open_url` shows the same view on the phone, with GEV served over the tailnet (it binds to localhost by default). **Map budget**: photorealistic 3D (free Cesium ion token, personal use) only for city close-ups; world views stay on keyless Esri imagery. Optional free keys: NASA FIRMS (fires), AISStream (ships). **Upkeep**: pinned to a known-good commit, run as a systemd user service; `nora doctor` checks it answers; G's quarterly review checks for updates | "When does the ISS pass over me?", "what's flying over X?" and "earthquakes near X" are answered correctly in the eval set, and the dashboard globe shows each within 5 s; adding the adapter grows the intent prompt by ≤ 300 tokens; with GEV stopped, NORA says the globe is unavailable instead of hanging; ion use stays inside the free allowance over a week | S–M |
 
+**Phase A, built 2026-10-07** (branch `sharp/a-measure`). `python -m nora.evals`
+(254 labelled cases, private in `evals/`; offline gate in the test suite;
+`nightly` via nora-evals.timer), `python -m nora.evals.latency` over the
+per-turn trace, `python -m nora.doctor` (daily inside NORA, tells a new
+failure once) and `python -m nora.dev on` / `"test": true` for turns that
+aren't remembered. First baseline: 33% of distinct utterances answered
+without a model; 86% of offline decisions right, 18 known misses tagged for
+B and D; NVIDIA fallback 8/10, p50 2.3 s, p90 10.2 s, 5.5k prompt tokens.
+Found on the way: `groq/compound-mini` withdrawn, Google token
+`invalid_grant`, and two command modules (volume, mute, lock, screenshot)
+not loading under systemd since it has no X display.
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent

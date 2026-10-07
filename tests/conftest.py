@@ -24,3 +24,15 @@ _audit_log._LOG_PATH = Path(_tmp) / "nora_audit_log.jsonl"
 from nora import model_router as _model_router, session_index as _session_index  # noqa: E402
 _session_index._use_path_for_tests(Path(_tmp) / "nora_sessions.db")
 _model_router._LOG_PATH = Path(_tmp) / "nora_model_router_log.jsonl"
+
+# Every turn appends a latency trace (nora.trace); keep test turns out of it.
+from nora import trace as _trace  # noqa: E402
+_trace.TRACE_PATH = Path(_tmp) / "nora_turn_trace.jsonl"
+
+# nora.doctor remembers which failures it has already told the user about.
+from nora import doctor as _doctor  # noqa: E402
+_doctor.STATE_PATH = Path(_tmp) / "nora_doctor_state.json"
+
+# Dev mode is a file in the repo root; a test must never switch the live one.
+from nora import dev as _dev  # noqa: E402
+_dev.DEV_PATH = Path(_tmp) / "nora_dev_mode.json"

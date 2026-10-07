@@ -98,6 +98,9 @@ def record(text: str, role: str = "user", source: str = "command") -> None:
     text = (text or "").strip()
     if not text:
         return
+    from nora import dev
+    if dev.is_test_turn():
+        return
     with _lock:
         conn = _connect()
         if conn is None:

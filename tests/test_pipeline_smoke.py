@@ -156,6 +156,27 @@ class PipelineSmokeTest(unittest.TestCase):
         self.assertEqual(turn.dispatched, [("open_app", {"app_name": "firefox"})])
         self.assertEqual(outcome.intent, "open the browser")
 
+    def test_every_turn_leaves_a_latency_trace(self):
+        """Sharp A: each turn records its route and when its first words went out."""
+        import json
+        from nora import trace
+        before = trace.TRACE_PATH.read_text().count("\n") if trace.TRACE_PATH.exists() else 0
+
+        run_turn(Turn(), "play music")
+        run_turn(Turn(intent=IntentResponse(
+            intent="open the browser",
+            steps=[ActionStep(action="open_app", parameters={"app_name": "firefox"})],
+        )), "bring up the browser I was using earlier")
+
+        rows = [json.loads(line) for line in trace.TRACE_PATH.read_text().splitlines()[before:]]
+        self.assertEqual([(r["route"], r["outcome"]) for r in rows],
+                         [("fast", "executed"), ("model", "executed")])
+        for r in rows:
+            self.assertIn("first_say", r["marks"])
+            self.assertLessEqual(r["marks"]["routed"], r["marks"]["first_say"])
+            self.assertEqual(list(r["marks"])[-1], "done")
+        self.assertIsNone(trace.current(), "the trace must close with the turn")
+
     def test_destructive_action_is_confirmed_before_it_runs(self):
         """delete_file is on the destructive list: it must ask, and obey a no."""
         # The path stays inside the NeuroSym sandbox (~) on purpose: outside it
@@ -299,6 +320,8 @@ SUBSYSTEM_STARTS = [
     "nora.remote_mic.start",
     # Binds a socket too, when enabled; stubbed for the same reason.
     "nora.hub.server.start",
+    # Calls providers and Google a few minutes in; a test run must not.
+    "nora.doctor.start",
 ]
 
 SUBSYSTEM_STOPS = [

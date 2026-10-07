@@ -12,6 +12,7 @@ from nora import ambient, audit_log, autonomy, cognitive_memory, command_engine,
 from nora import channel as _channel
 from nora import delivery
 from nora import untrusted
+from nora import trace
 from nora import wiring
 from nora.channel import Channel, ConfirmRequest
 from nora.config import get_config
@@ -135,10 +136,18 @@ async def _respond(text: str, results: list[StepResult], speak) -> str:
     return summary
 
 
+_ADDRESS = re.compile(r"^(?:(?:hey|hi|ok|okay|so)\s+)?(?:nora|jarvis)\b|\b(?:nora|jarvis)$")
+
+
 def is_wake_phrase(text: str) -> bool:
-    """Check if transcribed text matches the wake phrase."""
-    text_lower = text.lower().strip().rstrip(".")
-    return any(phrase in text_lower for phrase in WAKE_PHRASES)
+    """True when the whole utterance is a wake phrase ("wake up, Nora").
+
+    A wake phrase inside a request is part of the request: "set an alarm to
+    wake up at 6" used to get "I'm already awake" and lose the alarm.
+    """
+    t = " ".join(re.sub(r"[^\w' ]+", " ", text.lower()).split())
+    t = " ".join(_ADDRESS.sub(" ", t).split())
+    return any(t == p.replace(",", "") for p in WAKE_PHRASES)
 
 
 async def confirmation_flow(listener: Listener) -> bool:
@@ -216,9 +225,25 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0,
     if channel is None:
         channel = _channel.local(deps.speak, deps.confirm)
     token = _channel.bind(channel)
+    # Per-stage latency (nora.trace). The first line spoken is timed by
+    # wrapping the channel's speak, which every reply in the turn goes through.
+    from nora import dev
+    trace_token = trace.start(channel=channel.kind, device=channel.device_id, corr=channel.turn_id,
+                              test=dev.is_test_turn())
+    speak = channel.speak
+
+    def _traced_speak(*args, **kwargs):
+        trace.mark("first_say")
+        return speak(*args, **kwargs)
+
+    channel.speak = _traced_speak
+    outcome: TurnOutcome | None = None
     try:
-        return await _handle_turn(text, deps, rms, channel)
+        outcome = await _handle_turn(text, deps, rms, channel)
+        return outcome
     finally:
+        channel.speak = speak
+        trace.finish(trace_token, outcome.kind if outcome else "raised")
         _channel.unbind(token)
 
 
@@ -272,6 +297,7 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
     elif any(p == text_lower or text_lower.startswith(p + " ") for p in STOP_PHRASES):
         from nora.commands.interrupt import stop_all
         stop_all()
+        trace.route("stop")
         deps.frustration.record(text_lower, rms=rms, success=True)
         return TurnOutcome(kind="interrupted", text=text)
 
@@ -284,6 +310,7 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
         return TurnOutcome(kind="exit", text=text)
 
     if is_wake_phrase(text_lower):
+        trace.route("wake")
         speak(phrasing.get("already_awake"), mood="chat")
         return TurnOutcome(kind="chat", text=text, intent="already_awake")
 
@@ -292,6 +319,8 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
     # in <50ms with zero network calls.
     from nora import fast_path as _fp
     _fast_intent = _fp.resolve(text)
+    if _fast_intent is not None and (_fast_intent.steps or _fast_intent.response):
+        trace.route("fast")
     if _fast_intent is not None and not _fast_intent.steps and _fast_intent.response:
         # Pure conversational shortcut — speak and loop immediately
         ui_server.notify_stage("speaking")
@@ -325,6 +354,7 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
         # that might be an instruction still takes the action path.
         _act = dialogue.classify(text)
         if conversation.should_handle(_act):
+            trace.route("chat")
             logger.info(f"Conversational act: {_act.value}")
             print(f"[NORA] Conversation ({_act.value})")
             ui_server.notify_stage("thinking")
@@ -383,6 +413,7 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
                 pass
 
         print(f"[NORA] Parsing intent...")
+        trace.route("model")
         ui_server.notify_stage("thinking")
         try:
             intent = await asyncio.wait_for(

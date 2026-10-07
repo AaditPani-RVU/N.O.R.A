@@ -390,7 +390,9 @@ class Hub:
             text = str(msg["body"].get("text", ""))[:2000]
             voice = msg["body"].get("voice")
             core_tts = isinstance(voice, dict) and voice.get("tts") == "core"
-            task = asyncio.create_task(self._turn(session, text, msg["id"], core_tts=core_tts))
+            test = msg["body"].get("test") is True          # nora.dev: run, don't remember
+            task = asyncio.create_task(self._turn(session, text, msg["id"], core_tts=core_tts,
+                                                  test=test))
             session._turns.add(task)
             task.add_done_callback(session._turns.discard)
         elif kind == "manifest":
@@ -400,7 +402,8 @@ class Hub:
                 self._register(session)
 
     # ── turns from the device ────────────────────────────────────────────────
-    async def _turn(self, session: Session, text: str, corr: str, *, core_tts: bool = False) -> None:
+    async def _turn(self, session: Session, text: str, corr: str, *, core_tts: bool = False,
+                    test: bool = False) -> None:
         from nora import dialogue, pipeline, wiring
         from nora.frustration import FrustrationTracker
 
@@ -431,7 +434,7 @@ class Hub:
                                    expires_in=req.expires_in)
 
         ch = _channel.Channel(device_id=session.device_id, kind="device", speak=speak,
-                              confirm=confirm, session_id=session.session_id)
+                              confirm=confirm, session_id=session.session_id, test=test)
         if session.frustration is None:
             session.frustration = FrustrationTracker()
         deps = wiring.build(listener=None, frustration=session.frustration, speak=speak)

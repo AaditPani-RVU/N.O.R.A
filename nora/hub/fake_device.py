@@ -153,12 +153,14 @@ class FakeDevice:
 
     # ── user actions ─────────────────────────────────────────────────────────
     async def say(self, text: str, timeout: float = 30.0, *, voice: dict | None = None,
-                  on_sent: Callable[[str], Any] | None = None) -> list[str]:
+                  on_sent: Callable[[str], Any] | None = None, test: bool = False) -> list[str]:
         """Type (or, with `voice`, speak) something to NORA; return what she
-        said back during that turn."""
+        said back during that turn. A `test` turn runs but isn't remembered."""
         body: dict[str, Any] = {"text": text}
         if voice is not None:
             body["voice"] = voice
+        if test:
+            body["test"] = True
         msg_id = await self._send("utterance", body)
         if on_sent is not None:
             on_sent(msg_id)
@@ -296,6 +298,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("pair"); p.add_argument("code")
     s = sub.add_parser("say"); s.add_argument("text")
+    s.add_argument("--test", action="store_true", help="a test turn: run it, don't remember it")
     args = ap.parse_args()
 
     async def run() -> None:
@@ -311,7 +314,7 @@ def main() -> None:
         if welcome["type"] != "welcome":
             print(welcome)
             return
-        for line in await dev.say(args.text):
+        for line in await dev.say(args.text, test=args.test):
             print("NORA:", line)
         await dev.close()
 

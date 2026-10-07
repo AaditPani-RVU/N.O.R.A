@@ -59,6 +59,8 @@ class Channel:
     # notification). Every action decided after that point needs this
     # channel's yes (plan §7.5): see `command_engine.execute`.
     tainted: bool = False
+    # A test turn runs normally but is not remembered (nora.dev).
+    test: bool = False
 
     @property
     def can_confirm(self) -> bool:

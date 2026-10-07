@@ -235,6 +235,15 @@ def get_action_signatures(exclude_categories: tuple[str, ...] = ()) -> str:
     return "\n".join(lines)
 
 
+# Modules and plugins that raised on import, with the error: `nora.doctor`
+# reports them, since every command they define is silently missing.
+_load_failures: dict[str, str] = {}
+
+
+def load_failures() -> dict[str, str]:
+    return dict(_load_failures)
+
+
 def discover_commands() -> None:
     """Auto-discover built-in command modules and user plugins."""
     import sys
@@ -245,8 +254,10 @@ def discover_commands() -> None:
         try:
             importlib.import_module(full_name)
             logger.debug(f"Loaded command module: {full_name}")
+            _load_failures.pop(full_name, None)
         except Exception as e:
             logger.error(f"Failed to load command module {full_name}: {e}")
+            _load_failures[full_name] = f"{type(e).__name__}: {e}"
 
     # User plugins
     cfg = get_config().get("plugins", {})
@@ -262,7 +273,9 @@ def discover_commands() -> None:
         try:
             importlib.import_module(plugin_file.stem)
             logger.info(f"Loaded plugin: {plugin_file.name}")
+            _load_failures.pop(f"plugin {plugin_file.name}", None)
         except Exception as e:
+            _load_failures[f"plugin {plugin_file.name}"] = f"{type(e).__name__}: {e}"
             logger.error(f"Failed to load plugin {plugin_file.name}: {e}")
 
 

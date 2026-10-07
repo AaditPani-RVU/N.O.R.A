@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from nora import trace
 from nora.config import get_config
 
 logger = logging.getLogger("nora.model_router")
@@ -274,12 +275,14 @@ def complete(
                 raise RuntimeError("reply rejected by validator")
             _clear_cooldown(name)
             _log_attempt(role, candidate, "ok", latency_ms)
+            trace.note_model(role, name, latency_ms / 1000)
             logger.info("model_router: role=%s -> %s (%.0fms)", role, name, latency_ms)
             return text, name
         except Exception as e:
             latency_ms = (time.monotonic() - start) * 1000
             outcome = "rate_limited" if "429" in str(e) or "rate" in str(e).lower() else "error"
             _log_attempt(role, candidate, outcome, latency_ms, error=str(e))
+            trace.note_model(role, name, latency_ms / 1000, ok=False, error=outcome)
             logger.warning("model_router: %s failed for role=%s — %s", name, role, e)
             errors.append(f"{name}: {e}")
             continue

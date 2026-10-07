@@ -1,0 +1,14 @@
+# Nightly eval run (NORA_SHARP_PLAN.md Phase A): offline routing, the whole
+# set on the NVIDIA fallback, and a ten-case slice on the Groq primary.
+# Reports land in evals/reports/. `systemctl --user start nora-evals` runs one now.
+
+[Unit]
+Description=Run NORA's eval set against the intent models
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Projects/JARVIS
+ExecStart=%h/Projects/JARVIS/.venv/bin/python -m nora.evals nightly
+# A failing case is a finding in the report, not a failed unit.
+SuccessExitStatus=1
+Nice=10

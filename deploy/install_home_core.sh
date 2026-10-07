@@ -3,9 +3,9 @@
 #
 #   bash deploy/install_home_core.sh
 #
-# Installs the systemd user units (NORA, lock-at-login, daily backup) and
-# creates the backup passphrase. Safe to re-run. The root half — lid switch,
-# GDM auto-login, rclone — is deploy/home_core_root.sh.
+# Installs the systemd user units (NORA, lock-at-login, daily backup, nightly
+# evals) and creates the backup passphrase. Safe to re-run. The root half —
+# lid switch, GDM auto-login, rclone — is deploy/home_core_root.sh.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,7 +18,7 @@ if [[ "$repo" != "$HOME/Projects/JARVIS" ]]; then
 fi
 
 mkdir -p "$units"
-for u in nora.service nora-autolock.service nora-backup.service nora-backup.timer; do
+for u in nora.service nora-autolock.service nora-backup.service nora-backup.timer nora-evals.service nora-evals.timer; do
     install -m 0644 "$repo/deploy/systemd/$u" "$units/$u"
 done
 systemctl --user daemon-reload
@@ -26,6 +26,7 @@ systemctl --user daemon-reload
 # Enabled, not started: starting it now would lock the screen in your face.
 systemctl --user enable nora-autolock.service
 systemctl --user enable --now nora-backup.timer
+systemctl --user enable --now nora-evals.timer
 systemctl --user enable nora.service
 if systemctl --user is-active --quiet nora.service; then
     echo "NORA service already running; restart it to pick up changes."

@@ -104,3 +104,9 @@ client_secret*.json
 
 # Spotify user login (nora/spotify_user.py): reads the user's playlists until revoked.
 spotify_user_token.json
+
+# ── Sharp Phase A: eval set and traces (built from real speech) ──────────
+/evals/
+/nora_turn_trace.jsonl
+/nora_doctor_state.json
+/nora_dev_mode.json

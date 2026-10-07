@@ -7,6 +7,7 @@ import re
 import requests
 
 from nora.command_engine import get_available_actions, get_action_signatures
+from nora import trace
 from nora.config import get_config
 from nora.schemas import IntentResponse
 
@@ -443,6 +444,9 @@ def _parse_via_groq(
                             _time.monotonic() - started, getattr(usage, "prompt_tokens", "?"),
                             getattr(usage, "completion_tokens", "?"))
                 logger.debug(f"Groq raw response: {response_text}")
+                trace.note_model("intent", cfg.get("name") or model, _time.monotonic() - started,
+                                 prompt_tokens=getattr(usage, "prompt_tokens", None),
+                                 completion_tokens=getattr(usage, "completion_tokens", None))
                 data = _extract_json(response_text)
                 intent = IntentResponse.model_validate(data)
                 logger.info(f"Parsed intent: {intent.intent} with {len(intent.steps)} step(s)")
@@ -455,8 +459,12 @@ def _parse_via_groq(
             except RateLimitError:
                 # Not a network blip: waiting here is exactly the stall the
                 # caller has fallbacks for. The router records the cooldown.
+                trace.note_model("intent", cfg.get("name") or model, _time.monotonic() - started,
+                                 ok=False, error="rate-limited")
                 raise
             except (APIConnectionError, APITimeoutError) as e:
+                trace.note_model("intent", cfg.get("name") or model, _time.monotonic() - started,
+                                 ok=False, error=type(e).__name__)
                 logger.warning(f"Groq network error (attempt {net_attempt+1}): {e}")
                 last_exc = e
                 break  # skip json retry, go straight to next network attempt
@@ -468,6 +476,8 @@ def _parse_via_groq(
                     logger.warning(
                         "JSON mode rejected by %s — falling back to plain text for it", endpoint[1])
                     continue
+                trace.note_model("intent", cfg.get("name") or model, _time.monotonic() - started,
+                                 ok=False, error=str(e))
                 logger.warning(f"Groq unexpected error: {e}")
                 last_exc = e
                 break
@@ -626,6 +636,19 @@ def _intent_candidates() -> list[dict]:
     return get_config().get("llm_router", {}).get("roles", {}).get("intent", []) or []
 
 
+def candidate_cfg(candidate: dict) -> dict:
+    """The `_parse_via_groq` config for one router candidate."""
+    base = get_config().get("llm", {})
+    return {
+        **base,
+        "name": candidate.get("name", candidate.get("model", "?")),
+        "model": candidate["model"],
+        "api_base": candidate.get("base_url") or base.get("api_base"),
+        "api_key_env": candidate.get("api_key_env") or base.get("api_key_env", "GROQ_API_KEY"),
+        "extra_body": candidate.get("extra_body"),
+    }
+
+
 def _parse_via_router(
     text: str, memory_ctx: dict | None = None, screen_ctx: dict | None = None
 ) -> IntentResponse:
@@ -640,7 +663,6 @@ def _parse_via_router(
     from openai import RateLimitError
     from nora import model_router
 
-    base = get_config().get("llm", {})
     errors: list[str] = []
     candidates = _intent_candidates()
 
@@ -653,15 +675,9 @@ def _parse_via_router(
             logger.info("intent: skipping %s (rate-limited for %.0fs more)", name, wait)
             errors.append(f"{name}: cooling down")
             continue
-        cfg = {
-            **base,
-            "model": candidate["model"],
-            "api_base": candidate.get("base_url") or base.get("api_base"),
-            "api_key_env": candidate.get("api_key_env") or base.get("api_key_env", "GROQ_API_KEY"),
-            "extra_body": candidate.get("extra_body"),
-        }
         try:
-            result = _parse_via_groq(text, cfg, memory_ctx, screen_ctx, net_attempts=1)
+            result = _parse_via_groq(text, candidate_cfg(candidate), memory_ctx, screen_ctx,
+                                     net_attempts=1)
             model_router._clear_cooldown(name)
             return result
         except RateLimitError as e:

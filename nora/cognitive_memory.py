@@ -215,6 +215,9 @@ def record_episode(
     ts: float | None = None,
 ) -> None:
     """Persist a full interaction episode to semantic memory and update user model."""
+    from nora import dev
+    if dev.is_test_turn():
+        return      # routine patterns are learned from episodes; tests teach none
     ts = ts or time.time()
     active_apps = active_apps or []
     dt = datetime.fromtimestamp(ts)
@@ -259,6 +262,9 @@ def record_knowledge(text: str, source: str = "ambient", tags: list[str] | None 
     """Add a free-text fact/observation to the knowledge collection."""
     text = text.strip()
     if not text or len(text) < 5:
+        return
+    from nora import dev
+    if dev.is_test_turn():
         return
     ts = time.time()
     uid = f"kn_{int(ts * 1000)}_{hashlib.md5(text.encode()).hexdigest()[:8]}"

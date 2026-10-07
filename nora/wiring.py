@@ -142,6 +142,9 @@ def start_subsystems(speak: Callable[..., None]) -> None:
     consolidation.start()
     terminal_monitor.start(speak_callback=speak)
     anomaly_watchdog.start(speak_callback=speak)
+    # Daily: are models, sign-ins and devices still working? Says so once.
+    from nora import doctor
+    doctor.start(speak_callback=_gated)
 
     # Pull the lazy model loads off the first spoken turn and onto startup.
     from nora import pipeline

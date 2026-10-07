@@ -45,6 +45,9 @@ def log_entry(text: str, source: str = "command", tags: list[str] | None = None)
     text = text.strip()
     if not text:
         return
+    from nora import dev
+    if dev.is_test_turn():
+        return
     with _lock:
         data = _read()
         data["entries"].insert(0, {
