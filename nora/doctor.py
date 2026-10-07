@@ -153,12 +153,19 @@ def check_hub() -> list[Finding]:
     if not cfg.get("enabled"):
         return []
     host, port = cfg.get("host", "127.0.0.1"), int(cfg.get("port", 8770))
+    # A plain HTTP request, answered with a 404: a bare connect-and-close
+    # makes the websockets server log a handshake traceback every time.
     try:
-        socket.create_connection((host, port), timeout=3).close()
+        with socket.create_connection((host, port), timeout=3) as s:
+            s.sendall(b"GET /doctor HTTP/1.1\r\nHost: " + host.encode() + b"\r\nConnection: close\r\n\r\n")
+            answered = s.recv(16).startswith(b"HTTP/1.")
     except OSError as e:
         return [Finding("hub", False, f"the device hub isn't listening on {host}:{port} ({e.strerror or e})",
                         "systemctl --user restart nora")]
-    return [Finding("hub", True, f"hub listening on {host}:{port}")]
+    if not answered:
+        return [Finding("hub", False, f"something on {host}:{port} isn't answering like the hub",
+                        "systemctl --user restart nora")]
+    return [Finding("hub", True, f"hub answering on {host}:{port}")]
 
 
 def check_phone() -> list[Finding]:

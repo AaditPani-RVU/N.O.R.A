@@ -104,3 +104,27 @@ def test_a_device_not_seen_for_days_is_reported(monkeypatch, age, ok):
     assert f.ok is ok
     if not ok:
         assert "revoke d_1" in f.fix
+
+
+try:
+    from tests.test_hub import HubTestCase
+except ImportError:          # run from inside tests/
+    from test_hub import HubTestCase
+
+
+class HubProbeTest(HubTestCase):
+    async def test_the_hub_check_gets_an_answer_from_a_real_hub(self):
+        import asyncio
+        port = int(self.url.split(":")[2].split("/")[0])
+        cfg = {"hub": {"enabled": True, "host": "127.0.0.1", "port": port}}
+        with mock.patch.object(doctor, "get_config", return_value=cfg), \
+                self.assertNoLogs("websockets", level="ERROR"):
+            (f,) = await asyncio.get_running_loop().run_in_executor(None, doctor.check_hub)
+        self.assertTrue(f.ok, f.detail)
+
+    def test_nothing_listening_is_a_finding(self):
+        cfg = {"hub": {"enabled": True, "host": "127.0.0.1", "port": 1}}
+        with mock.patch.object(doctor, "get_config", return_value=cfg):
+            (f,) = doctor.check_hub()
+        self.assertFalse(f.ok)
+        self.assertIn("restart nora", f.fix)
