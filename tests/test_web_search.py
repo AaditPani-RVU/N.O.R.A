@@ -118,7 +118,10 @@ class TestPrompts(unittest.TestCase):
 
 class TestTiering(unittest.TestCase):
     def test_live_answer_short_circuits_the_snippet_path(self):
-        with mock.patch.object(ws, "_live_search", return_value="Live answer."), \
+        # Live search is off in config.yaml while no free model offers it;
+        # the tier itself still has to work when one is configured.
+        with mock.patch.object(ws, "_cfg", return_value={"live_search": True}), \
+             mock.patch.object(ws, "_live_search", return_value="Live answer."), \
              mock.patch.object(ws, "_fetch_snippets") as fetch:
             self.assertEqual(ws.tell_me_about("what's happening now"), "Live answer.")
         fetch.assert_not_called()

@@ -194,27 +194,26 @@ llm_router:
         api_key_env: "NVIDIA_API_KEY"
         model: "openai/gpt-oss-20b"
 
-    live_search:
-      # Live web search (nora/commands/web_search.py). groq/compound-mini is an
-      # agentic model with a SERVER-SIDE search tool: it runs its own queries,
-      # reads the results and answers from them, so this is the only role that
-      # can answer "what's happening right now" truthfully. The searches it ran
-      # come back as `executed_tools` and are logged as source URLs.
-      #
-      # Measured on this machine, 2026-08-19:
-      #   groq/compound-mini   ~2-7s, ~7.5k prompt tokens per call
-      #   groq/compound        413 Request Entity Too Large on the free tier
-      # compound-mini is backed by openai/gpt-oss-120b and inherits its 8k TPM
-      # free-tier budget, so a single call sits close to the ceiling: keep
-      # max_tokens small (web_search asks for 180) or the request itself is
-      # rejected with 413, and expect intermittent 429s while intent parsing is
-      # using the same bucket. Both are fall-through, not failure — web_search
-      # drops to the Brave/DDG snippet path below.
-      - name: groq_compound_mini
-        provider: groq
-        base_url: "https://api.groq.com/openai/v1"
-        api_key_env: "GROQ_API_KEY"
-        model: "groq/compound-mini"
+    # live_search: removed 2026-10-07. Its notes, for whoever brings it back:
+    # Live web search (nora/commands/web_search.py). groq/compound-mini is an
+    # agentic model with a SERVER-SIDE search tool: it runs its own queries,
+    # reads the results and answers from them, so this is the only role that
+    # can answer "what's happening right now" truthfully. The searches it ran
+    # come back as `executed_tools` and are logged as source URLs.
+    #
+    # Measured on this machine, 2026-08-19:
+    #   groq/compound-mini   ~2-7s, ~7.5k prompt tokens per call
+    #   groq/compound        413 Request Entity Too Large on the free tier
+    # compound-mini is backed by openai/gpt-oss-120b and inherits its 8k TPM
+    # free-tier budget, so a single call sits close to the ceiling: keep
+    # max_tokens small (web_search asks for 180) or the request itself is
+    # rejected with 413, and expect intermittent 429s while intent parsing is
+    # using the same bucket. Both are fall-through, not failure — web_search
+    # drops to the Brave/DDG snippet path below.
+    #
+    # Withdrawn by Groq (gone from /models, 404 on every call), found by
+    # nora doctor on 2026-10-07; groq/compound went with it. Off until a
+    # free search-capable model replaces it (Sharp Phase G's scout).
 
     research:
       # Summarises Brave/DDG search snippets into a spoken answer — the
@@ -738,13 +737,14 @@ screen_intelligence:
 
 web_search:
   # tell_me_about() — the spoken research answer. Three tiers, tried in order:
-  #   1. live_search  — groq/compound-mini searches the web itself (current data)
+  #   1. live_search  — a search-capable model searches the web itself (none
+  #                     free since groq/compound-mini was withdrawn; off)
   #   2. snippets     — Brave (needs BRAVE_API_KEY) or DuckDuckGo Lite, then
   #                     summarised by the llm_router "research" role
   #   3. model only   — last resort, and it says so out loud
   # Today's date is injected into every prompt; without it the model answers
   # "right now" questions from its training cutoff and sounds confidently stale.
-  live_search: true
+  live_search: false        # no live_search model since 2026-10-07; see llm_router
   max_snippets: 5
   live_tokens: 180          # keep small — see the live_search notes in llm_router
   summary_tokens: 400       # tiers 2/3; gpt-oss bills hidden reasoning against this
