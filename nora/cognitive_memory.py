@@ -470,6 +470,9 @@ def get_analytics() -> dict[str, Any]:
     total_eps = m.get("total_episodes", 0)
     success_count = 0
     fail_count = 0
+    # Today's commands by local hour, for the dashboard's activity strip.
+    today_by_hour = [0] * 24
+    midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     with _lock:
         episodes, _ = _get_collections()
         if episodes is not None:
@@ -483,6 +486,9 @@ def get_analytics() -> dict[str, Any]:
                                 success_count += 1
                             else:
                                 fail_count += 1
+                            ts = float(meta.get("ts") or 0)
+                            if ts >= midnight:
+                                today_by_hour[datetime.fromtimestamp(ts).hour] += 1
             except Exception:
                 pass
 
@@ -495,6 +501,7 @@ def get_analytics() -> dict[str, Any]:
         "success_count": success_count,
         "fail_count": fail_count,
         "top_actions": top_actions,
+        "today_by_hour": today_by_hour,
     }
 
 

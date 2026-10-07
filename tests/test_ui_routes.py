@@ -109,3 +109,48 @@ class TestTranscriptEcho(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTodayView(unittest.TestCase):
+    """The idle view's data: answered from a snapshot, never a live Google call."""
+
+    def setUp(self):
+        # Fresh snapshot, so no background refresh reaches for the network.
+        ui_server._today.update(ts=time.time(), calendar="ok", events=[
+            {"title": "Standup", "start": "2026-10-07T09:30:00+05:30", "end": "",
+             "all_day": False, "day": "today"}])
+
+    def test_payload_carries_events_and_reminders(self):
+        from unittest import mock
+        from nora import scheduler
+        sched = scheduler.Schedule(id="ab12", spec="in 10 minutes", what="remind: call mum",
+                                   next_run=time.time() + 600)
+        with mock.patch.object(scheduler, "listing", return_value=[sched]):
+            payload = ui_server._today_payload()
+        self.assertEqual(payload["calendar"], "ok")
+        self.assertEqual(payload["events"][0]["title"], "Standup")
+        self.assertEqual(payload["reminders"][0]["what"], "call mum")
+        self.assertTrue(payload["reminders"][0]["reminder"])
+
+    def test_fresh_snapshot_starts_no_refresh(self):
+        ui_server._today_payload()
+        self.assertFalse(ui_server._today_refreshing.is_set())
+
+    def test_event_row_marks_all_day_events(self):
+        row = ui_server._event_row({"summary": "Holiday", "start": {"date": "2026-10-08"},
+                                    "end": {"date": "2026-10-09"}}, "tomorrow")
+        self.assertTrue(row["all_day"])
+        self.assertEqual(row["day"], "tomorrow")
+
+
+class TestLiveModel(unittest.TestCase):
+    def test_state_carries_the_last_model_that_answered(self):
+        from nora import model_router
+        model_router._log_attempt("chat", {"name": "x", "provider": "groq", "model": "m-1"}, "ok", 512.0)
+        self.assertEqual(ui_server._live_extras()["model"]["model"], "m-1")
+
+    def test_a_failed_call_does_not_replace_it(self):
+        from nora import model_router
+        model_router._log_attempt("chat", {"name": "x", "provider": "groq", "model": "m-1"}, "ok", 512.0)
+        model_router._log_attempt("chat", {"name": "y", "provider": "groq", "model": "m-2"}, "error", 90.0)
+        self.assertEqual(model_router.last_used()["model"], "m-1")

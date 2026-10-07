@@ -43,6 +43,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,80 @@ _STATIC_DIR = Path(__file__).parent / "static"
 # Public API
 # ---------------------------------------------------------------------------
 
+def _live_extras() -> dict:
+    """Fields read live on every state snapshot rather than stored in _state."""
+    extras: dict = {"ptt_mode": "on" if context.get_ptt_enabled() else "off"}
+    try:
+        from nora import model_router
+        last = model_router.last_used()
+        if last:
+            extras["model"] = {k: last.get(k) for k in ("provider", "model", "role", "ts", "latency_ms")}
+    except Exception:
+        pass
+    return extras
+
+
+# ── Today (the dashboard's idle view) ────────────────────────────────────────
+# The HTTP server is single-threaded, so a Google round trip inside a request
+# would stall every other poll behind it. /today answers from this snapshot
+# and a background thread keeps it fresh.
+
+_TODAY_TTL_SEC = 120.0
+_today: dict = {"ts": 0.0, "calendar": "loading", "events": []}
+_today_refreshing = threading.Event()
+
+
+def _event_row(ev: dict, day: str) -> dict:
+    start, end = ev.get("start", {}), ev.get("end", {})
+    return {
+        "title": ev.get("summary") or "Untitled",
+        "start": start.get("dateTime") or start.get("date") or "",
+        "end": end.get("dateTime") or end.get("date") or "",
+        "all_day": "dateTime" not in start,
+        "day": day,
+    }
+
+
+def _refresh_today() -> None:
+    from datetime import datetime, timedelta
+    events: list[dict] = []
+    status = "ok"
+    try:
+        from nora.commands import google_services as gs
+        if not gs._TOKEN_FILE.exists():
+            status = "signed_out"
+        else:
+            now = datetime.now()
+            for day, dt in (("today", now), ("tomorrow", now + timedelta(days=1))):
+                time_min, time_max = gs._day_window(dt)
+                events += [_event_row(ev, day) for ev in gs._events_between(time_min, time_max)]
+    except Exception as exc:
+        logger.debug("Today view calendar read failed: %s", exc)
+        status = "error"
+    finally:
+        _today.update(ts=time.time(), calendar=status, events=events)
+        _today_refreshing.clear()
+
+
+def _today_payload() -> dict:
+    if time.time() - _today["ts"] > _TODAY_TTL_SEC and not _today_refreshing.is_set():
+        _today_refreshing.set()
+        threading.Thread(target=_refresh_today, daemon=True, name="nora-ui-today").start()
+    reminders: list[dict] = []
+    try:
+        from nora import scheduler
+        for s in scheduler.listing()[:6]:
+            reminders.append({
+                "what": s.what.removeprefix("remind: "),
+                "reminder": s.what.startswith("remind: "),
+                "next_run": s.next_run,
+                "recurring": s.recurring,
+            })
+    except Exception as exc:
+        logger.debug("Today view schedule read failed: %s", exc)
+    return {"calendar": _today["calendar"], "events": list(_today["events"]), "reminders": reminders}
+
+
 def notify(speaking: bool, text: str = "", status: str = "", stage: str = "") -> None:
     """Update UI state. Thread-safe -- call from anywhere."""
     with _lock:
@@ -110,7 +185,7 @@ def notify(speaking: bool, text: str = "", status: str = "", stage: str = "") ->
         if stage:
             _state["stage"] = stage
     # Push state snapshot to connected WebSocket clients
-    ws_push({"type": "state", "data": {**_state, "ptt_mode": "on" if context.get_ptt_enabled() else "off"}})
+    ws_push({"type": "state", "data": {**_state, **_live_extras()}})
 
 
 def notify_stage(stage: str) -> None:
@@ -498,6 +573,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_history()
         elif route == "/analytics":
             self._serve_analytics()
+        elif route == "/today":
+            self._json_ok(json.dumps(_today_payload()).encode())
         elif route == "/processes":
             self._serve_processes()
         elif route == "/memory_graph":
@@ -723,8 +800,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _serve_state(self) -> None:
         with _lock:
             payload = dict(_state)
-        # Live PTT mode (read from context, not stored in _state)
-        payload["ptt_mode"] = "on" if context.get_ptt_enabled() else "off"
+        payload.update(_live_extras())
         body = json.dumps(payload).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

@@ -37,6 +37,10 @@ _lock = threading.Lock()
 _state: dict[str, dict[str, Any]] = {}
 _loaded = False
 
+# The last call that answered, for the dashboard's model pill. In memory only:
+# the log file has the history, this is just "who spoke last".
+_last_ok: dict[str, Any] | None = None
+
 _DEFAULT_COOLDOWN_SEC = 90.0
 
 
@@ -105,6 +109,11 @@ def status() -> str:
     return ". ".join(lines)
 
 
+def last_used() -> dict[str, Any] | None:
+    """The most recent successful call: role, provider, model, ts, latency_ms."""
+    return dict(_last_ok) if _last_ok else None
+
+
 def _log_attempt(role: str, candidate: dict, outcome: str, latency_ms: float, error: str = "") -> None:
     entry = {
         "ts": time.time(),
@@ -117,6 +126,9 @@ def _log_attempt(role: str, candidate: dict, outcome: str, latency_ms: float, er
     }
     if error:
         entry["error"] = error[:300]
+    if outcome == "ok":
+        global _last_ok
+        _last_ok = entry
     try:
         with _LOG_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")

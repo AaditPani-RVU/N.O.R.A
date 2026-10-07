@@ -2390,6 +2390,132 @@
     @media (prefers-reduced-motion: reduce) {
       .w-cloud, .w-fall, .w-flash, .w-orb { animation: none !important; }
     }
+
+    /* ══════════════════════════════════════════════════════════
+       v5 — THE IDLE SCREEN EARNS ITS SPACE
+
+       Most of the time NORA is idle, and idle used to mean the largest
+       box on the screen saying "awaiting input" while two cards showed
+       nothing at all. The transcript now shows the day while it is empty,
+       empty cards fold away, and the type got a floor.
+       ══════════════════════════════════════════════════════════ */
+
+    /* ── Type floor ──
+       7–8px with 3–5px tracking looked like a HUD and read like noise.
+       Nothing below 9px; small labels keep their caps but tighten up. */
+    .badge, .pill { font-size: 9px; letter-spacing: 1.6px; }
+    .sbox .sl, .wcell .wl, .load-lbl, .g-read span, .slabel { font-size: 9px; letter-spacing: 1.4px; }
+    .g-subs, .mus-album, .act-time, .ana-cnt { font-size: 9px; }
+    .mus-status, .mus-times { font-size: 9px; letter-spacing: 1.4px; }
+    .stg, .convo-stat, .convo-act, .cam-btn { font-size: 9px; letter-spacing: 1.6px; }
+    .chip { font-size: 9.5px; letter-spacing: 1.2px; }
+    #cmd-hints { font-size: 9px; letter-spacing: 1.2px; }
+    .widget-title { letter-spacing: 3px; }
+    .act-item { font-size: 10.5px; }
+    .ana-row { font-size: 10px; }
+
+    /* ── Today, in the empty transcript ── */
+    .ce-frame.today {
+      align-items: stretch; gap: 20px; text-align: left; letter-spacing: 0.3px;
+      width: min(660px, 88%); padding: 32px 40px 26px;
+    }
+    .td-date {
+      font-family: var(--disp); font-size: 13px; font-weight: 600; letter-spacing: 3px;
+      text-transform: uppercase; color: var(--dim);
+    }
+    .td-next { display: flex; flex-direction: column; gap: 6px; min-height: 64px; }
+    .td-next-when {
+      font-size: 11px; letter-spacing: 1.6px; color: var(--c); text-transform: uppercase;
+      text-shadow: 0 0 10px var(--cg); min-height: 1em;
+    }
+    .td-next-what {
+      font-family: var(--disp); font-size: 34px; font-weight: 600; line-height: 1.05;
+      color: #eaf6ff; text-shadow: 0 0 24px rgba(var(--rgb),0.35);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .td-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+    .td-head {
+      font-family: var(--disp); font-size: 10.5px; letter-spacing: 3px; color: var(--c);
+      padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--cd);
+    }
+    .td-list { list-style: none; }
+    .td-list li {
+      display: grid; grid-template-columns: 68px 1fr; gap: 10px; align-items: baseline;
+      padding: 6px 0; border-bottom: 1px solid rgba(var(--rgb),0.06);
+      font-size: 12px; letter-spacing: 0.3px; color: var(--txt);
+    }
+    .td-list time { color: var(--c); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .td-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .td-list em { font-style: normal; color: var(--dim); }
+    .td-list li.on time { color: #00ff88; text-shadow: 0 0 8px rgba(0,255,136,0.5); }
+    .td-list li.td-none { display: block; color: var(--dim); font-size: 11px; border-bottom: 0; }
+    .td-list li.td-sub {
+      display: block; padding: 2px 0 4px; border-bottom: 0;
+      font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim);
+    }
+    #convo-empty .ce-frame.today .hint {
+      align-self: center; font-size: 10px; letter-spacing: 1px; opacity: 0.7; margin-top: 2px;
+    }
+    @media (max-width: 900px) {
+      .td-cols { grid-template-columns: 1fr; gap: 16px; }
+      .td-next-what { font-size: 26px; }
+      .ce-frame.today { padding: 22px 18px; }
+    }
+
+    /* ── Camera folds to a row until it is on ── */
+    #camera-card:not(.live) .cam-box { display: none; }
+    #camera-card:not(.live) .cam-btn { margin-top: 0; }
+    #camera-card:not(.live) .widget-head { margin-bottom: 9px; }
+
+    /* ── Spotify at rest: the last sleeve, dimmed, instead of an empty grid ── */
+    #music-card.resting #mus-cover { filter: saturate(0.4) brightness(0.55); }
+    #music-card.resting .mus-glow { opacity: 0.28; }
+    #music-card.resting .mus-track { color: var(--dim); text-shadow: none; }
+
+    /* ── Activity (was System Uptime) ── */
+    .act-top { display: grid; grid-template-columns: 96px 1fr; gap: 16px; align-items: center; }
+    #g-ok { width: 96px; }
+    #g-ok .g-read b { font-size: 21px; }
+    .act-nums { display: flex; flex-direction: column; gap: 7px; }
+    .act-nums div {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+      border-bottom: 1px solid rgba(var(--rgb),0.08); padding-bottom: 5px;
+    }
+    .act-nums b {
+      font-family: var(--disp); font-size: 20px; font-weight: 600; line-height: 1; color: var(--c);
+      text-shadow: 0 0 12px rgba(var(--rgb),0.35); font-variant-numeric: tabular-nums;
+    }
+    .act-nums span { font-size: 10px; color: var(--dim); }
+    .hours {
+      display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; align-items: end;
+      height: 38px; margin-top: 14px;
+    }
+    .hours i {
+      height: max(2px, var(--h)); border-radius: 1px;
+      background: linear-gradient(180deg, var(--c), rgba(var(--rgb),0.30));
+    }
+    .hours i[style*="--h:0%"] { background: rgba(var(--rgb),0.14); }
+    .hours i.future { opacity: 0.3; }
+    .hours i.now { background: linear-gradient(180deg, #eaf6ff, var(--c)); box-shadow: 0 0 8px var(--cg); }
+    .hours-axis { display: flex; justify-content: space-between; margin-top: 4px; font-size: 9px; color: var(--dim); opacity: 0.75; }
+
+    /* ── Header pills ── */
+    #hdr-model .dot { background: var(--c); box-shadow: 0 0 5px var(--c); animation: none; }
+    #hdr-model-lbl { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── NORA's state, on cards that took their own colour ──
+       A tinted card no longer turns violet while NORA thinks. A ring just
+       inside its frame does (outside would be clipped by the panel), so the
+       whole screen still breathes with her.
+       --orb-rgb is pinned on <body>, where --rgb still means the orb's. */
+    body { --orb-rgb: var(--rgb); }
+    body[data-orb="listening"] .widget[data-tint],
+    body[data-orb="thinking"]  .widget[data-tint],
+    body[data-orb="speaking"]  .widget[data-tint] {
+      box-shadow: inset 0 0 0 1px rgba(var(--orb-rgb),0.60),
+                  inset 0 0 22px -6px rgba(var(--orb-rgb),0.45),
+                  0 0 34px -20px rgba(var(--rgb),0.95);
+    }
   </style>
 </head>
 <body>
@@ -2423,9 +2549,8 @@
     </div>
     <div class="hdr-right">
       <div class="pill" id="hdr-latency" title="Round-trip of the last exchange">RTT&nbsp;<b id="hdr-latency-val">—</b></div>
-      <div class="pill"><div class="dot"></div>ONLINE</div>
-      <div class="pill"><div class="dot"></div>NLP</div>
-      <div class="pill"><div class="dot"></div>AUDIO</div>
+      <div class="pill" id="hdr-link" title="Connection to NORA"><div class="dot"></div><span id="hdr-link-lbl">CONNECTING</span></div>
+      <div class="pill" id="hdr-model" title="The model that answered last"><div class="dot"></div><span id="hdr-model-lbl">NO MODEL YET</span></div>
       <button id="gear" type="button" title="Appearance settings" aria-label="Appearance settings">⚙</button>
     </div>
   </header>
@@ -2525,6 +2650,22 @@
           <div class="sbox"><div class="sl">PEAK</div><div class="sv" id="lat-max">—</div></div>
         </div>
       </div>
+
+      <div class="widget" id="activity-card">
+        <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
+        <div class="widget-head">
+          <div class="widget-title"><div class="sq"></div>COMMAND LOG</div>
+          <div style="display:flex;gap:5px;align-items:center">
+            <div class="badge" id="act-badge">LIVE</div>
+            <div class="badge" id="hist-badge" style="cursor:pointer" title="Load full history">HISTORY</div>
+          </div>
+        </div>
+        <div class="widget-body">
+          <div class="act-list" id="act-list">
+            <div class="act-empty" id="act-empty">NO RECENT ACTIVITY</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- CENTER -->
@@ -2574,10 +2715,23 @@
         </div>
         <div id="convo-scroll"><div id="convo-list"></div></div>
         <div id="convo-empty">
-          <div class="ce-frame">
-            <div class="ce-eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-            <span class="ce-lead">AWAITING INPUT<span class="caret">▋</span></span>
-            <span class="hint">HOLD SPACE TO SPEAK · PRESS / TO TYPE</span>
+          <div class="ce-frame today">
+            <div class="td-date" id="td-date"></div>
+            <div class="td-next" id="td-next">
+              <div class="td-next-when" id="td-next-when"></div>
+              <div class="td-next-what" id="td-next-what">Checking your calendar…</div>
+            </div>
+            <div class="td-cols">
+              <div class="td-col">
+                <div class="td-head">CALENDAR</div>
+                <ol class="td-list" id="td-events"></ol>
+              </div>
+              <div class="td-col">
+                <div class="td-head">REMINDERS</div>
+                <ol class="td-list" id="td-rems"></ol>
+              </div>
+            </div>
+            <span class="hint"><span class="caret">▋</span> Hold space to speak, or press / to type</span>
           </div>
         </div>
         <button id="convo-jump" type="button" hidden>NEW ↓</button>
@@ -2634,17 +2788,22 @@
       <div class="widget">
         <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
         <div class="widget-head">
-          <div class="widget-title"><div class="sq"></div>SYSTEM UPTIME</div>
-          <div class="badge live" id="up-badge">RUNNING</div>
+          <div class="widget-title"><div class="sq"></div>ACTIVITY</div>
+          <div class="badge live" id="up-badge" title="How long this dashboard has been open">UP <span id="uptime">00:00:00</span></div>
         </div>
-        <div class="uptime-val" id="uptime">00:00:00</div>
-        <div class="uptime-sub">ACTIVE SESSION DURATION</div>
-        <div class="uptime-grid">
-          <div class="sbox"><div class="sl">SESSION</div><div class="sv" id="cmd-cnt">0</div></div>
-          <div class="sbox"><div class="sl">SYS LOAD</div><div class="sv" id="load-txt">LOW</div></div>
-          <div class="sbox"><div class="sl">ALL-TIME</div><div class="sv" id="ana-total">—</div></div>
-          <div class="sbox"><div class="sl">SUCCESS</div><div class="sv" id="ana-rate">—</div></div>
+        <div class="act-top">
+          <div class="gauge" id="g-ok">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="g-track" cx="32" cy="32" r="27" pathLength="100"/><circle class="g-fill" cx="32" cy="32" r="27" pathLength="100"/></svg>
+            <div class="g-read"><b id="ana-rate">—</b><span>SUCCESS</span></div>
+          </div>
+          <div class="act-nums">
+            <div><b id="ana-today">—</b><span>today</span></div>
+            <div><b id="cmd-cnt">0</b><span>this session</span></div>
+            <div><b id="ana-total">—</b><span>all time</span></div>
+          </div>
         </div>
+        <div class="hours" id="ana-hours" title="Commands per hour today"></div>
+        <div class="hours-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
         <div style="margin-top:9px">
           <div class="load-lbl">TOP COMMANDS</div>
           <div id="ana-top" style="margin-top:4px;display:flex;flex-direction:column;gap:3px"></div>
@@ -2698,21 +2857,6 @@
         <div class="mus-vol-note">SYSTEM OUTPUT</div>
       </div>
 
-      <div class="widget" id="activity-card">
-        <div class="widget-flow"></div><i class="cnr cnr-tr"></i><i class="cnr cnr-bl"></i>
-        <div class="widget-head">
-          <div class="widget-title"><div class="sq"></div>COMMAND LOG</div>
-          <div style="display:flex;gap:5px;align-items:center">
-            <div class="badge" id="act-badge">LIVE</div>
-            <div class="badge" id="hist-badge" style="cursor:pointer" title="Load full history">HISTORY</div>
-          </div>
-        </div>
-        <div class="widget-body">
-          <div class="act-list" id="act-list">
-            <div class="act-empty" id="act-empty">NO RECENT ACTIVITY</div>
-          </div>
-        </div>
-      </div>
     </div>
 
   </div>
@@ -3983,7 +4127,6 @@ function setGauge(id, pct) {
 function setLoadSegs(pct) {
   const on = Math.round(pct / 100 * 20);
   Array.from(ldSegs.children).forEach((s, i) => { s.className = 'seg'+(i<on?(pct>85?' on crit':pct>65?' on warn':' on'):''); });
-  document.getElementById('load-txt').textContent = pct > 85 ? 'CRIT' : pct > 65 ? 'HIGH' : pct > 35 ? 'MOD' : 'LOW';
 }
 
 // ═══════════════════════════════════════════════════
@@ -4272,7 +4415,26 @@ let seqPrimed     = false;
 let lastLocationSeq = -1;
 let lastTakeoverSeq = -1;
 
+// Header pills that say something: whether the dashboard is actually
+// connected, and which model answered last (they used to be three
+// permanently green lights).
+function setLink(mode) {
+  const pill=document.getElementById('hdr-link'), lbl=document.getElementById('hdr-link-lbl');
+  lbl.textContent = {live:'LIVE', polling:'POLLING', auth:'NEEDS TOKEN', offline:'OFFLINE'}[mode] || mode.toUpperCase();
+  pill.classList.toggle('warn', mode !== 'live');
+}
+function setModel(m) {
+  if (!m || !m.model) return;
+  const name = String(m.model).split('/').pop();
+  document.getElementById('hdr-model-lbl').textContent = name.toUpperCase();
+  const ago = m.ts ? Math.max(0, Math.round(Date.now()/1000 - m.ts)) : null;
+  document.getElementById('hdr-model').title =
+    `${m.provider || ''} · ${m.role || ''}` + (m.latency_ms ? ` · ${Math.round(m.latency_ms)} ms` : '')
+    + (ago != null ? ` · ${ago < 90 ? ago + 's' : Math.round(ago/60) + ' min'} ago` : '');
+}
+
 function applyState(d) {
+  setModel(d.model);
   const stage = d.stage || (d.speaking ? 'speaking' : 'idle');
   setStage(stage);
   if (d.ptt_mode === 'on') { pttModePill.className='on'; pttModeLbl.textContent='PTT MODE'; }
@@ -4451,7 +4613,7 @@ function connectWS() {
     : `${scheme}://${location.hostname}:8765${qs}`;
   try { ws = new WebSocket(url); } catch (_) { startPolling(); return; }
   ws.onopen  = () => {
-    usingWS=true; wsInd.textContent='WS'; wsInd.className='ws';
+    usingWS=true; wsInd.textContent='WS'; wsInd.className='ws'; setLink('live');
     clearTimeout(reconnTimer); if (pollInt) { clearInterval(pollInt); pollInt=null; }
     // Also authenticate by message. The query string is the primary path, but a
     // reverse proxy is free to rewrite it; the server ignores this packet when
@@ -4468,12 +4630,12 @@ function connectWS() {
       if (m.type === 'audio_stop') stopAudio(m.seq);
       if (m.type === 'error') {
         // Surface auth failure instead of reconnect-looping in silence.
-        wsInd.textContent = 'AUTH?'; wsInd.className = '';
+        wsInd.textContent = 'AUTH?'; wsInd.className = ''; setLink('auth');
         localStorage.removeItem('nora_token');
       }
     } catch (_) {}
   };
-  ws.onclose = ws.onerror = () => { usingWS=false; wsInd.textContent='HTTP'; wsInd.className=''; reconnTimer=setTimeout(connectWS,5000); startPolling(); };
+  ws.onclose = ws.onerror = () => { usingWS=false; wsInd.textContent='HTTP'; wsInd.className=''; setLink('polling'); reconnTimer=setTimeout(connectWS,5000); startPolling(); };
 }
 
 function startPolling() {
@@ -4536,23 +4698,40 @@ function fmtDur(s) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
+function lastPlayed() {
+  try { return JSON.parse(localStorage.getItem('nora_last_played') || 'null'); } catch (_) { return null; }
+}
+function rememberLastPlayed(v) {
+  try { localStorage.setItem('nora_last_played', JSON.stringify(v)); } catch (_) {}
+}
 async function pollMusic() {
   try {
     const d = await (await fetch('/music')).json();
-    const track=d.track||d.last_track||'', artist=d.artist||d.last_artist||'',
-          src=d.source||d.last_source||'', st=(d.status||'idle').toLowerCase();
+    let track=d.track||d.last_track||'', artist=d.artist||d.last_artist||'',
+          src=d.source||d.last_source||'';
+    const st=(d.status||'idle').toLowerCase();
+    // Nothing loaded in the player: show what played last, dimmed, instead of
+    // an empty grid. Remembered per browser; a fresh one just shows the grid.
+    let art = d.art_url || '';
+    if (art && track) rememberLastPlayed({ track, artist, art });
+    const resting = !art && st !== 'playing' && st !== 'paused';
+    if (resting) {
+      const last = lastPlayed();
+      if (last) { art = last.art; track = track || last.track; artist = artist || last.artist; }
+    }
+    musCard.classList.toggle('resting', resting && !!art);
     musTrack.textContent  = track  ? track.toUpperCase()  : 'NO TRACK';
     musArtist.textContent = artist ? artist.toUpperCase() : '—';
     musSrc.textContent    = src    ? src.toUpperCase()    : '—';
     musStatus.className   = 'mus-status'+(st==='playing'?' playing':st==='paused'?' paused':'');
-    musStatLbl.textContent = st.toUpperCase();
+    musStatLbl.textContent = resting && art ? 'LAST PLAYED' : st.toUpperCase();
     musToggle.textContent  = st==='playing'?'PAUSE':'PLAY';
     // The album name only earns its line when it says something the title
     // does not — singles are named after their own album constantly.
     const album = d.album || '';
     musAlbum.textContent = (album && album.toLowerCase() !== track.toLowerCase())
                            ? album.toUpperCase() : '';
-    setCover(d.art_url || '');
+    setCover(art);
     musArt.classList.toggle('playing', st === 'playing');
     musCard.classList.toggle('playing', st === 'playing');
     // The album line comes and goes with the track, which changes how much
@@ -4884,13 +5063,94 @@ camBtn.addEventListener('click', async () => {
 });
 
 // ═══════════════════════════════════════════════════
+//  TODAY — what the empty transcript shows while NORA is idle
+// ═══════════════════════════════════════════════════
+let todayData = null;
+const tdEsc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Spelled out rather than toLocaleTimeString, whose 12/24-hour choice
+// follows the browser's locale — NORA says "2:15 PM", so the screen does too.
+const tdClock = d => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+function tdUntil(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return 'now';
+  if (m < 60) return `in ${m} min`;
+  const h = Math.floor(m / 60), r = m % 60;
+  return `in ${h} h` + (r && h < 4 ? ` ${r} min` : '');
+}
+function renderToday() {
+  const now = new Date();
+  document.getElementById('td-date').textContent =
+    now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  const d = todayData;
+  if (!d) return;
+  const evs = (d.events || []).map(e => ({ ...e, s: new Date(e.start), e: e.end ? new Date(e.end) : null }));
+  // Timed events still to come (or under way) today, then tomorrow's.
+  const live = evs.filter(e => e.day === 'today' && (e.all_day || (e.e || e.s) > now));
+  const tomorrow = evs.filter(e => e.day === 'tomorrow');
+  const rems = d.reminders || [];
+
+  const evList = document.getElementById('td-events');
+  const rows = live.length ? live : tomorrow;
+  const dayTag = live.length ? '' : '<li class="td-sub">Tomorrow</li>';
+  if (d.calendar === 'signed_out')      evList.innerHTML = '<li class="td-none">Google Calendar isn\'t signed in.</li>';
+  else if (d.calendar === 'error')      evList.innerHTML = '<li class="td-none">Couldn\'t reach Google Calendar.</li>';
+  else if (d.calendar === 'loading')    evList.innerHTML = '<li class="td-none">Checking…</li>';
+  else if (!rows.length)                evList.innerHTML = '<li class="td-none">Nothing today or tomorrow.</li>';
+  else evList.innerHTML = dayTag + rows.slice(0, 4).map(e =>
+    `<li class="${!e.all_day && e.s <= now ? 'on' : ''}"><time>${e.all_day ? 'All day' : tdClock(e.s)}</time><span>${tdEsc(e.title)}</span></li>`).join('');
+
+  const remList = document.getElementById('td-rems');
+  remList.innerHTML = rems.length
+    ? rems.slice(0, 4).map(r => {
+        const at = new Date(r.next_run * 1000), soon = at - now < 3600e3;
+        return `<li><time>${soon ? tdUntil(at - now) : tdClock(at)}</time><span>${tdEsc(r.what)}${r.recurring ? ' <em title="Repeats">↻</em>' : ''}</span></li>`;
+      }).join('')
+    : '<li class="td-none">None set. Try “remind me in 20 minutes to stretch.”</li>';
+
+  // The one thing worth reading from across the room: whatever comes next.
+  const nextEv = live.find(e => !e.all_day && e.s > now);
+  const nextRem = rems.find(r => r.next_run * 1000 > now);
+  const evAt = nextEv ? nextEv.s.getTime() : Infinity, remAt = nextRem ? nextRem.next_run * 1000 : Infinity;
+  const when = document.getElementById('td-next-when'), what = document.getElementById('td-next-what');
+  if (evAt === Infinity && remAt === Infinity) {
+    when.textContent = '';
+    what.textContent = live.some(e => !e.all_day && e.s <= now) ? 'In progress now' : 'Nothing else scheduled today';
+  } else if (evAt <= remAt) {
+    when.textContent = 'Next · ' + tdUntil(evAt - now);
+    what.textContent = nextEv.title;
+  } else {
+    when.textContent = 'Reminder · ' + tdUntil(remAt - now);
+    what.textContent = nextRem.what;
+  }
+}
+async function pollToday() {
+  try {
+    const r = await fetch('/today');
+    if (r.ok) todayData = await r.json();
+  } catch (_) {}
+  renderToday();
+  // The server answers from a snapshot it refreshes in the background, so
+  // the first poll can arrive before the calendar has.
+  if (todayData && todayData.calendar === 'loading') setTimeout(pollToday, 4000);
+}
+pollToday(); setInterval(pollToday, 60000); setInterval(renderToday, 30000);
+
+// ═══════════════════════════════════════════════════
 //  ANALYTICS
 // ═══════════════════════════════════════════════════
 async function pollAnalytics() {
   try {
     const d=await (await fetch('/analytics')).json();
     if (d.total_episodes!=null) document.getElementById('ana-total').textContent=d.total_episodes;
-    if (d.success_rate!=null)   document.getElementById('ana-rate').textContent=d.success_rate+'%';
+    if (d.success_rate!=null) {
+      document.getElementById('ana-rate').textContent=d.success_rate+'%';
+      // Success is the one gauge where low is bad, so it reads inverted.
+      const g=document.getElementById('g-ok');
+      g.style.setProperty('--p', d.success_rate);
+      g.classList.toggle('warn', d.success_rate < 85 && d.success_rate >= 65);
+      g.classList.toggle('crit', d.success_rate < 65);
+    }
+    if (Array.isArray(d.today_by_hour)) renderHours(d.today_by_hour);
     const topEl=document.getElementById('ana-top');
     if (Array.isArray(d.top_actions)&&d.top_actions.length) {
       const max=d.top_actions[0].count||1;
@@ -4899,6 +5159,13 @@ async function pollAnalytics() {
   } catch (_) {}
 }
 pollAnalytics(); setInterval(pollAnalytics,30000);
+
+function renderHours(hours) {
+  const el=document.getElementById('ana-hours'), now=new Date().getHours();
+  const max=Math.max(1,...hours);
+  document.getElementById('ana-today').textContent=hours.reduce((a,b)=>a+b,0);
+  el.innerHTML=hours.map((n,h)=>`<i class="${h===now?'now':''}${h>now?' future':''}" style="--h:${n?Math.max(10,Math.round(n/max*100)):0}%" title="${String(h).padStart(2,'0')}:00 — ${n} command${n===1?'':'s'}"></i>`).join('');
+}
 
 // ═══════════════════════════════════════════════════
 //  PUSH-TO-TALK + COMMAND BAR
