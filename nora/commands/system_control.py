@@ -7,8 +7,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import pyautogui
-
 from nora.command_engine import register
 
 logger = logging.getLogger("nora.commands.system_control")
@@ -138,7 +136,13 @@ def take_screenshot() -> str:
     desktop = Path.home() / "Desktop"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = desktop / f"screenshot_{timestamp}.png"
-    screenshot = pyautogui.screenshot()
+    # Imported here: pyautogui raises on import without an X display, which
+    # took the whole module (volume, mute, lock) down with it under systemd.
+    try:
+        import pyautogui
+        screenshot = pyautogui.screenshot()
+    except Exception as exc:
+        return f"I can't take a screenshot here: {exc}"
     screenshot.save(str(filepath))
     return f"Screenshot saved to {filepath}"
 
