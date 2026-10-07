@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -29,6 +30,22 @@ WAKE_PHRASES = [
 ]
 
 STOP_PHRASES = ("stop", "cancel", "cancel that", "pause everything", "shut up", "quiet")
+# "Stop, what day is it?" is how people talk over NORA: stop, then ask. Only a
+# question after the stop word is kept as the turn; "stop the music" stays a stop.
+_QUESTION_AFTER_STOP = re.compile(
+    r"^(?:what|what's|whats|when|where|who|who's|why|how|which|is|are|can|could|"
+    r"do|does|did|will|would|should|tell me|give me|show me)\b")
+
+
+def _question_after_stop(text: str) -> str | None:
+    """The question in "stop, what day is it", or None if it's just a stop."""
+    t = text.strip()
+    low = t.lower()
+    for p in sorted(STOP_PHRASES, key=len, reverse=True):
+        if low.startswith(p) and low[len(p):len(p) + 1] in (" ", ",", ".", "!", "-"):
+            rest = t[len(p):].lstrip(" ,.!-")
+            return rest if _QUESTION_AFTER_STOP.match(rest.lower()) else None
+    return None
 
 
 def _warm_lazy_singletons() -> None:
@@ -246,7 +263,13 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
     proactive.notify_command_issued()
 
     # â"€â"€ Fast-path interrupts â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-    if any(p == text_lower or text_lower.startswith(p + " ") for p in STOP_PHRASES):
+    question = _question_after_stop(text)
+    if question is not None:
+        from nora.commands.interrupt import stop_all
+        stop_all()
+        text = question
+        text_lower = text.lower().strip().rstrip(".,!?")
+    elif any(p == text_lower or text_lower.startswith(p + " ") for p in STOP_PHRASES):
         from nora.commands.interrupt import stop_all
         stop_all()
         deps.frustration.record(text_lower, rms=rms, success=True)
