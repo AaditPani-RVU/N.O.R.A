@@ -2920,6 +2920,7 @@
 <script src="/takeovers.js"></script>
 <script src="/briefing.js"></script>
 <script src="/remote.js"></script>
+<script src="/gev.js"></script>
 <script>
 'use strict';
 
@@ -4545,7 +4546,15 @@ function applyState(d) {
     // "desktop" is the odd one out: it is a control surface, not an orb
     // takeover, so it rides the same channel but lands on its own overlay
     // and never auto-hides. "off" still means everything goes away.
-    if (kind === 'desktop') {
+    if (kind === 'globe') {
+      // The live globe (Sharp H): a panel framing God's Eye View, flown to
+      // the view that shows NORA's answer. Stays until closed.
+      if (window.NORA_TAKEOVERS) NORA_TAKEOVERS.hide();
+      if (window.NORA_BRIEFING) NORA_BRIEFING.hide();
+      if (window.NORA_REMOTE) NORA_REMOTE.hide();
+      if (window.NORA_GEV) NORA_GEV.show(d.takeover);
+    } else if (kind === 'desktop') {
+      if (window.NORA_GEV) NORA_GEV.hide();
       if (window.NORA_TAKEOVERS) NORA_TAKEOVERS.hide();
       if (window.NORA_BRIEFING) NORA_BRIEFING.hide();
       if (window.NORA_REMOTE) NORA_REMOTE.show();
@@ -4557,6 +4566,7 @@ function applyState(d) {
       if (window.NORA_REMOTE) NORA_REMOTE.hide();
       if (window.NORA_BRIEFING) NORA_BRIEFING.show(d.takeover);
     } else if (window.NORA_TAKEOVERS) {
+      if (window.NORA_GEV) NORA_GEV.hide();
       if (window.NORA_REMOTE) NORA_REMOTE.hide();
       if (window.NORA_BRIEFING) NORA_BRIEFING.hide();
       if (kind === 'off') NORA_TAKEOVERS.hide();

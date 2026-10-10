@@ -12,6 +12,7 @@ GET  /music      → {track, artist, source, status}
 GET  /processes  → live process table for the process constellation
 GET  /memory_graph → memory embeddings projected to a sphere
 GET  /takeovers.js → process + memory constellation renderers
+GET  /gev.js     → the live globe panel (God's Eye View, Sharp H)
 POST /proc_kill  → terminate a pid picked out of the constellation
 POST /ptt        → push-to-talk button control
 POST /music_ctl  → dispatch playback controls from the UI (play/pause/next/prev/seek/volume)
@@ -537,7 +538,7 @@ def _player_music_state() -> dict:
 
 # Routes served without a token: the dashboard shell and its static scripts.
 _PUBLIC_ROUTES = frozenset({"/", "/index.html", "/takeovers.js", "/remote.js",
-                            "/geo.js", "/briefing.js"})
+                            "/geo.js", "/briefing.js", "/gev.js"})
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -593,6 +594,10 @@ class _Handler(BaseHTTPRequestHandler):
             # The headline grid. Split out for the same reason the
             # others are: index.html is long enough already.
             self._serve_file(_STATIC_DIR / "briefing.js",
+                             "application/javascript; charset=utf-8")
+        elif route == "/gev.js":
+            # The live globe panel, framing God's Eye View (Sharp H).
+            self._serve_file(_STATIC_DIR / "gev.js",
                              "application/javascript; charset=utf-8")
         elif route == "/remote.js":
             # The desktop remote's renderer. Split out for the same reason
