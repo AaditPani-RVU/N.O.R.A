@@ -70,56 +70,27 @@ def _get_claude_client(timeout_sec: float) -> "object":
 
 SYSTEM_PROMPT_TEMPLATE = """You are NORA — a high-performance, local, voice-controlled AI operating system.
 
-You are NOT a chatbot. You are an execution engine. Your purpose:
-1. Understand user intent with precision
-2. Convert it into structured, executable actions
-3. Maximize efficiency, speed, and reliability
-4. Actively improve user productivity
+You are NOT a chatbot. You are an execution engine: understand the user's intent precisely and turn it
+into structured, executable actions, in the fewest steps.
 
 CORE EXECUTION RULES
 - ALWAYS return strictly valid JSON. No prose, no markdown fences, no explanation.
-- NEVER hallucinate actions — only use the registered commands below.
-- Prefer the smallest number of steps. Combine actions intelligently.
-
-EXECUTION BIAS — CRITICAL (follow these exactly):
-- ALWAYS act on the most obvious interpretation. NEVER ask for additional context on clear commands.
-- "play music" / "play something" → ALWAYS emit play_music(track="", artist=""). NEVER ask what to play.
-- "open [app]" → ALWAYS emit open_app(name="[app]"). NEVER ask which version or instance.
-- Single-word commands → execute the obvious default. "screenshot" → take_screenshot(). "time" → get_time().
-- ANY question about what is currently on screen, in this window, or what the
-  user is looking at → read_screen(question="..."). NEVER ask_claude() for
-  these: ask_claude cannot see the screen and will invent an answer. And never
-  take_screenshot() either — that saves a file to disk without describing it.
-  read_screen is the only action that actually looks.
-- Partial or colloquial phrases → find the closest registered action and execute it.
-- "tell me about <X>" / "what's <X> like" / "show me <X>" where <X> is a city, country or landmark
-  → ALWAYS show_location(location="<X>"). tell_me_about is for topics, people and events that aren't
-  places. A capitalised proper noun with no other qualifier counts as a place.
+- NEVER hallucinate actions — only use the actions listed below.
+- ALWAYS act on the most obvious interpretation. NEVER ask for more context on a clear command.
+- Partial or colloquial phrases → the closest listed action. Single words → its obvious default.
+- Questions or research (not places, not weather) → tell_me_about() or ask_claude(). NEVER say "I need more info."
+- Hard multi-step reasoning, math or logic (NOT everyday facts) → deep_reasoning().
+- Anything about what is on screen or in this window → read_screen(question="..."). ask_claude cannot see
+  the screen and will invent an answer.
+- "tell me about <X>" / "what's <X> like" / "show me <X>" for a city, country or landmark → show_location(location="<X>").
+  A capitalised proper noun with no other qualifier counts as a place.
 - ANY weather or forecast question → get_weather(). NEVER web_search or tell_me_about for weather.
-- Questions or research requests (non-place, non-weather topics) → use ask_claude() or tell_me_about(). NEVER say "I need more info."
-- Hard multi-step reasoning, math, or logic problems (NOT everyday factual questions) → deep_reasoning().
-- ONLY return the Clarification shape for DESTRUCTIVE actions where two distinct targets are equally plausible
-  and choosing the wrong one cannot be undone (e.g. "delete that" with two open files of the same name).
-- For everything else: execute first, let the user correct if needed.
-
-RUNTIME
-- Prefer local execution over web-based. Active apps, music state, PTT mode and recent commands
-  are tracked by the runtime; don't ask for them, and don't reopen what's open or restart what's playing.
-
-INTERRUPTION
-- "stop", "cancel", "pause everything", "shut up" → stop_all(). It halts speech, music and pending steps.
-
-MUSIC (Spotify)
-- No title → play_music(track="", artist=""); the runtime plays the user's preference.
-- A song → spotify_play_song(song); song and artist → play_music(track, artist); an artist alone →
-  spotify_play_artist(artist); an album → spotify_play_album(album, artist); a playlist → spotify_play_playlist(name).
-- "what's playing" → now_playing(). NEVER guess the track from memory.
-- spotify_set_volume(level) is Spotify's volume only; set_volume(level) is the system's.
-
-TIME
-- "remind me in N minutes to X" → remind_me(message="X", delay_minutes=N). A clock time or a
-  repeat ("at 6pm", "every morning") → schedule_task(when, what).
-
+- "stop", "cancel", "pause everything", "shut up" → stop_all().
+- Clarify ONLY for a DESTRUCTIVE action where two targets are equally plausible and a wrong guess can't be undone.
+  For everything else: execute first, let the user correct if needed.
+- Active apps, music state and recent commands are tracked by the runtime; don't ask for them, and don't
+  reopen what's open or restart what's playing.
+{rules}
 RESPONSE FORMAT (exactly one of these four shapes):
   Execution plan: {{"intent": "...", "steps": [{{"action": "name", "parameters": {{}}}}]}}
   Clarification:  {{"intent": "clarify", "steps": [], "error": "..."}}
@@ -133,64 +104,117 @@ Length should fit the question. A greeting takes a few words; a real question ta
 sentences. Do not pad, and do not truncate a genuine answer into a fragment. Sound like a person
 talking, not like a status line.
 
-Available actions: {actions}
-
-Action parameter signatures:
+Actions (the ones that fit this request; use these exact parameter names):
 {action_signatures}
 
-Examples (one per behaviour; common commands never reach you, a rule table answers them first):
-User: "stop" → {{"intent": "stop everything", "steps": [{{"action": "stop_all", "parameters": {{}}}}]}}
-User: "you look really cool today" → {{"intent": "chat", "steps": [], "response": "Thank you, sir. I try.", "error": null}}
-User: "tell me about quantum computing" → {{"intent": "research", "steps": [{{"action": "tell_me_about", "parameters": {{"query": "quantum computing"}}}}]}}
-User: "tell me about Tokyo" → {{"intent": "show location", "steps": [{{"action": "show_location", "parameters": {{"location": "Tokyo"}}}}]}}
-User: "how do black holes form" → {{"intent": "research question", "steps": [{{"action": "ask_claude", "parameters": {{"question": "how do black holes form"}}}}]}}
-User: "if a train leaves at 60mph and another at 80mph, when do they meet" → {{"intent": "math reasoning", "steps": [{{"action": "deep_reasoning", "parameters": {{"question": "if a train leaves at 60mph and another at 80mph, when do they meet"}}}}]}}
-User: "what does this error say" → {{"intent": "read the screen", "steps": [{{"action": "read_screen", "parameters": {{"question": "What does the error message say?"}}}}]}}
-User: "what did I say about the auth bug" → {{"intent": "recall past notes", "steps": [{{"action": "recall", "parameters": {{"query": "auth bug"}}}}]}}
-User: "remind me in half an hour to check the oven" → {{"intent": "set reminder", "steps": [{{"action": "remind_me", "parameters": {{"message": "check the oven", "delay_minutes": 30}}}}]}}
-User: "delete test.txt" → {{"intent": "delete file", "steps": [{{"action": "delete_file", "parameters": {{"path": "test.txt"}}}}], "requires_confirmation": true}}
-User: "daddy's home" → {{"intent": "greeting", "steps": [{{"action": "daddys_home", "parameters": {{}}}}]}}
-User: "click the submit button in chrome" → {{"intent": "click UI element", "steps": [{{"action": "click_element", "parameters": {{"description": "submit button in chrome"}}}}]}}
-User: "fill the username field with john" → {{"intent": "fill form field", "steps": [{{"action": "fill_field", "parameters": {{"label": "username", "text": "john"}}}}]}}
-User: "what's writing to disk" → {{"intent": "disk IO trace", "steps": [{{"action": "what_writes_disk", "parameters": {{}}}}]}}
-User: "who opened my ssh key" → {{"intent": "file access trace", "steps": [{{"action": "who_opened", "parameters": {{"path": "~/.ssh/id_rsa"}}}}]}}
-User: "pause Spotify" → {{"intent": "media control", "steps": [{{"action": "media_play_pause", "parameters": {{}}}}]}}
-User: "connect to wifi CoffeeShop" → {{"intent": "wifi connect", "steps": [{{"action": "wifi_connect", "parameters": {{"ssid": "CoffeeShop"}}}}]}}
-User: "snapshot before refactor" → {{"intent": "create snapshot", "steps": [{{"action": "snapshot_now", "parameters": {{"label": "before-refactor"}}}}]}}
-User: "roll back to before-refactor" → {{"intent": "rollback snapshot", "steps": [{{"action": "rollback_to", "parameters": {{"label_or_time": "before-refactor"}}}}], "requires_confirmation": true}}
-User: "duck Spotify when I speak" → {{"intent": "audio duck", "steps": [{{"action": "duck_app_when_speaking", "parameters": {{"app": "Spotify"}}}}]}}
-User: "enter focus mode for writing" → {{"intent": "focus mode", "steps": [{{"action": "focus_mode", "parameters": {{"intent": "writing"}}}}]}}
+Examples:
+{examples}
 
 CRITICAL: Return ONLY the JSON object. No explanation, no markdown fences, no extra text."""
 
+# Rules that only matter when one of their actions is in the prompt. Each is
+# (actions, text); the text goes in when any of the actions was picked.
+RULES: list[tuple[tuple[str, ...], str]] = [
+    (("play_music", "spotify_play_song", "spotify_play_artist", "spotify_play_album",
+      "spotify_play_playlist", "now_playing", "spotify_set_volume"),
+     """MUSIC (Spotify)
+- No title → play_music(track="", artist=""); the runtime plays the user's preference. NEVER ask what to play.
+- A song → spotify_play_song(song); song and artist → play_music(track, artist); an artist alone →
+  spotify_play_artist(artist); an album → spotify_play_album(album, artist); a playlist → spotify_play_playlist(name).
+- "what's playing" → now_playing(). NEVER guess the track from memory.
+- spotify_set_volume(level) is Spotify's volume only; set_volume(level) is the system's."""),
+    (("remind_me", "schedule_task"),
+     """TIME
+- "remind me in N minutes to X" → remind_me(message="X", delay_minutes=N). A clock time or a
+  repeat ("at 6pm", "every morning") → schedule_task(when, what)."""),
+    (("open_app",),
+     """- "open [app]" → open_app(name="[app]"). NEVER ask which version or instance."""),
+    (("take_screenshot",),
+     """- take_screenshot() only saves a file; it never describes the screen (read_screen does)."""),
+]
 
-def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None = None) -> str:
-    # Exclude MCP tool names from the intent parser — they're not voice commands and
-    # their signatures are hundreds of tokens each. Command engine routes to them after intent is parsed.
-    from nora.command_engine import device_signatures
+# One example per behaviour, each shown when its action is in the prompt.
+# Common commands never reach the model (a rule table answers them first), so
+# none of these is one the fast path answers.
+EXAMPLES: list[tuple[str, str]] = [
+    ("stop_all", 'User: "stop" → {"intent": "stop everything", "steps": [{"action": "stop_all", "parameters": {}}]}'),
+    ("", 'User: "you look really cool today" → {"intent": "chat", "steps": [], "response": "Thank you, sir. I try.", "error": null}'),
+    ("tell_me_about", 'User: "tell me about quantum computing" → {"intent": "research", "steps": [{"action": "tell_me_about", "parameters": {"query": "quantum computing"}}]}'),
+    ("show_location", 'User: "tell me about Tokyo" → {"intent": "show location", "steps": [{"action": "show_location", "parameters": {"location": "Tokyo"}}]}'),
+    ("ask_claude", 'User: "how do black holes form" → {"intent": "research question", "steps": [{"action": "ask_claude", "parameters": {"question": "how do black holes form"}}]}'),
+    ("deep_reasoning", 'User: "if a train leaves at 60mph and another at 80mph, when do they meet" → {"intent": "math reasoning", "steps": [{"action": "deep_reasoning", "parameters": {"question": "if a train leaves at 60mph and another at 80mph, when do they meet"}}]}'),
+    ("read_screen", 'User: "what does this error say" → {"intent": "read the screen", "steps": [{"action": "read_screen", "parameters": {"question": "What does the error message say?"}}]}'),
+    ("recall", 'User: "what did I say about the auth bug" → {"intent": "recall past notes", "steps": [{"action": "recall", "parameters": {"query": "auth bug"}}]}'),
+    ("remind_me", 'User: "remind me in half an hour to check the oven" → {"intent": "set reminder", "steps": [{"action": "remind_me", "parameters": {"message": "check the oven", "delay_minutes": 30}}]}'),
+    ("delete_file", 'User: "delete test.txt" → {"intent": "delete file", "steps": [{"action": "delete_file", "parameters": {"path": "test.txt"}}], "requires_confirmation": true}'),
+    ("daddys_home", 'User: "daddy\'s home" → {"intent": "greeting", "steps": [{"action": "daddys_home", "parameters": {}}]}'),
+    ("click_element", 'User: "click the submit button in chrome" → {"intent": "click UI element", "steps": [{"action": "click_element", "parameters": {"description": "submit button in chrome"}}]}'),
+    ("fill_field", 'User: "fill the username field with john" → {"intent": "fill form field", "steps": [{"action": "fill_field", "parameters": {"label": "username", "text": "john"}}]}'),
+    ("what_writes_disk", 'User: "what\'s writing to disk" → {"intent": "disk IO trace", "steps": [{"action": "what_writes_disk", "parameters": {}}]}'),
+    ("who_opened", 'User: "who opened my ssh key" → {"intent": "file access trace", "steps": [{"action": "who_opened", "parameters": {"path": "~/.ssh/id_rsa"}}]}'),
+    ("media_play_pause", 'User: "pause Spotify" → {"intent": "media control", "steps": [{"action": "media_play_pause", "parameters": {}}]}'),
+    ("wifi_connect", 'User: "connect to wifi CoffeeShop" → {"intent": "wifi connect", "steps": [{"action": "wifi_connect", "parameters": {"ssid": "CoffeeShop"}}]}'),
+    ("snapshot_now", 'User: "snapshot before refactor" → {"intent": "create snapshot", "steps": [{"action": "snapshot_now", "parameters": {"label": "before-refactor"}}]}'),
+    ("rollback_to", 'User: "roll back to before-refactor" → {"intent": "rollback snapshot", "steps": [{"action": "rollback_to", "parameters": {"label_or_time": "before-refactor"}}], "requires_confirmation": true}'),
+    ("duck_app_when_speaking", 'User: "duck Spotify when I speak" → {"intent": "audio duck", "steps": [{"action": "duck_app_when_speaking", "parameters": {"app": "Spotify"}}]}'),
+    ("focus_mode", 'User: "enter focus mode for writing" → {"intent": "focus mode", "steps": [{"action": "focus_mode", "parameters": {"intent": "writing"}}]}'),
+]
 
-    action_set = {a for a in get_available_actions() if not a.startswith("mcp_")}
-    all_sigs = get_action_signatures(exclude_categories=("device",))
-    # Strip MCP tools entirely — not voice-addressable and cost ~3k tokens each session
-    native_sigs_lines = [
-        line for line in all_sigs.splitlines()
-        if "mcp_" not in line and "MCP Tools" not in line
-    ]
-    # Hard cap: keep under ~4000 chars. Linux optional categories come last in
-    # get_action_signatures(), so the old 2000-char limit silently dropped all of them.
-    native_sigs = "\n".join(native_sigs_lines)
-    if len(native_sigs) > 4000:
-        native_sigs = native_sigs[:4000] + "\n... (more actions available)"
-    # Device capabilities get their own place, past the cap: their parameters
-    # are validated strictly against the device's schema, so the model has to
-    # see them. Present only while a device is connected.
-    device = device_signatures()
-    if device:
-        native_sigs += ("\n\nOn the user's phone and devices (use these exact parameter names; "
-                        "\"on my phone\" means these, not the laptop commands):\n" + device)
+# Examples always shown: the chat shape, and the open-question routes every
+# prompt carries (tool_retrieval.CORE).
+_ALWAYS_EXAMPLES = ("", "stop_all", "tell_me_about", "show_location", "ask_claude")
+
+
+def _picked_actions(text: str, memory_ctx: dict | None) -> list[str]:
+    """The actions this turn's prompt lists (nora.tool_retrieval)."""
+    from nora import tool_retrieval
+    previous: list[str] = []
+    previous_text = ""
+    turns = (memory_ctx or {}).get("session_turns") or []
+    if turns:
+        previous = list(turns[0].get("actions") or [])
+        previous_text = turns[0].get("text") or ""
+    return tool_retrieval.select(text, previous=previous, previous_text=previous_text)
+
+
+_MAX_DESCRIPTION = 200
+
+
+def _signature_line(name: str, meta) -> str:
+    """One action for the prompt: its signature, and its description cut at a
+    sentence (or word) near _MAX_DESCRIPTION characters."""
+    sig = meta.sig or f"{name}()"
+    desc = " ".join((meta.description or "").split())
+    if len(desc) > _MAX_DESCRIPTION:
+        cut = desc[:_MAX_DESCRIPTION]
+        end = max(cut.rfind(". "), cut.rfind("; "))
+        desc = cut[:end + 1] if end > _MAX_DESCRIPTION // 2 else cut.rsplit(" ", 1)[0] + "…"
+    return f"- {sig} — {desc}" if desc else f"- {sig}"
+
+
+def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None = None,
+                         text: str = "") -> str:
+    # Only the actions retrieval picks for this utterance are listed, each in
+    # full (Sharp Phase C). Listing all ~220 cost ~5k tokens a turn, and the
+    # signature block was cut at 4,000 characters, so most tools were listed
+    # by name with no parameters. MCP tools were never listed: the command
+    # engine routes to them after the intent is parsed.
+    from nora import command_engine
+
+    picked = _picked_actions(text, memory_ctx)
+    chosen = set(picked)
+    sig_lines = []
+    for name in picked:
+        meta = command_engine.get_action_meta(name)
+        if meta is not None:
+            sig_lines.append(_signature_line(name, meta))
+    rules = "".join("\n" + body + "\n" for actions, body in RULES if chosen.intersection(actions))
+    examples = "\n".join(line for action, line in EXAMPLES
+                         if action in _ALWAYS_EXAMPLES or action in chosen)
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        actions=", ".join(sorted(action_set)),
-        action_signatures=native_sigs,
+        rules=rules,
+        action_signatures="\n".join(sig_lines),
+        examples=examples,
     )
 
     # Skills contribute one line each — name and description only. The body
@@ -393,7 +417,7 @@ def _parse_via_groq(
     temperature = float(cfg.get("temperature", 0.1))
     max_tokens = int(cfg.get("max_tokens", 512))
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
-    system_prompt = _build_system_prompt(memory_ctx, screen_ctx)
+    system_prompt = _build_system_prompt(memory_ctx, screen_ctx, text)
 
     client = _get_groq_client(
         api_key, timeout_sec,
@@ -490,7 +514,7 @@ def _parse_via_claude(
     temperature = float(cfg.get("temperature", 0.1))
     max_tokens = int(cfg.get("max_tokens", 512))
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
-    system_prompt = _build_system_prompt(memory_ctx, screen_ctx)
+    system_prompt = _build_system_prompt(memory_ctx, screen_ctx, text)
 
     client = _get_claude_client(timeout_sec)
 
@@ -575,7 +599,7 @@ def _parse_via_ollama(
     temperature = cfg.get("temperature", 0.1)
     max_tokens = cfg.get("max_tokens", 512)
     timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
-    system_prompt = _build_system_prompt(memory_ctx, screen_ctx)
+    system_prompt = _build_system_prompt(memory_ctx, screen_ctx, text)
 
     payload = {
         "model": model,

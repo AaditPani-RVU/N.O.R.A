@@ -137,6 +137,9 @@ def test_offline_eval_has_no_regressions():
     lines: list[str] = []
     report = run(load(CASES_PATH), out=lines.append)
     assert report["regressions"] == 0, "\n".join(lines)
+    # The intent model is shown the right action for at least 95% of cases.
+    hit, total = report["retrieval"]
+    assert hit >= 0.95 * total, f"tool retrieval missed {report['retrieval_misses']}"
 
 
 def test_trace_records_stages_and_model_calls(tmp_path, monkeypatch):

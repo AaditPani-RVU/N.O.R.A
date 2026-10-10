@@ -632,18 +632,20 @@ class DeadlineTest(HubTestCase):
 
 
 class IntentPromptTest(HubTestCase):
-    async def test_device_signatures_survive_the_prompt_cap(self) -> None:
-        """The action block is capped at 4000 characters and the device section
-        came last: the model saw phone.set_timer's name, never its `seconds`,
-        and sent {"duration": "10 minutes"}."""
+    async def test_device_signatures_reach_the_prompt_in_full(self) -> None:
+        """The action block was once capped at 4000 characters with the device
+        section last: the model saw phone.set_timer's name, never its
+        `seconds`, and sent {"duration": "10 minutes"}. The prompt now lists
+        the actions picked for the utterance, each with its parameters."""
         from nora import intent_parser
         command_engine.discover_commands()
         caps = [{"name": "phone.set_timer", "tier": 1, "description": "A countdown timer on the phone",
                  "params_schema": {"type": "object", "required": ["seconds"], "properties": {
                      "seconds": {"type": "integer", "minimum": 1, "maximum": 86400}}}}]
         await self.paired(capabilities=caps)
-        prompt = intent_parser._build_system_prompt()
+        prompt = intent_parser._build_system_prompt(text="set a ten minute timer on my phone")
         self.assertIn("phone.set_timer(seconds: 1..86400)", prompt)
+        prompt = intent_parser._build_system_prompt(text="take me to college")
         self.assertIn("navigate_to(destination", prompt)
 
 

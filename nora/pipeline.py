@@ -73,6 +73,8 @@ def _warm_lazy_singletons() -> None:
             logger.warning("warm-up: %s failed (%s) — first use will pay the load", label, e)
 
     _warm("cognitive memory", lambda: cognitive_memory.get_context_for_prompt("warm up", n=1))
+    from nora import tool_retrieval
+    _warm("tool retrieval", tool_retrieval.warm)
     # Noise, not zeros: transcribe() now returns "" for a silent clip without
     # loading anything, so warming it with silence would warm nothing and leave
     # the model load on the first real turn. Amplitude sits above the speech

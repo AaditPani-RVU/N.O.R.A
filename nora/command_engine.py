@@ -191,23 +191,6 @@ def _fmt(name: str, meta: CommandMeta) -> str:
     return f"- {sig}"
 
 
-def device_signatures(max_description: int = 90) -> str:
-    """The device section of the action block on its own, descriptions cut
-    short. The intent prompt caps the full block, and this section comes last,
-    so without its own place the model saw the phone's capability *names* and
-    never their parameters: it sent phone.set_timer {"duration": "10 minutes"}.
-    """
-    lines = []
-    for name, m in sorted(_meta.items()):
-        if m.category != "device":
-            continue
-        desc = m.description
-        if len(desc) > max_description:
-            desc = desc[:max_description].rsplit(" ", 1)[0] + "…"
-        lines.append(_fmt(name, CommandMeta(sig=m.sig, description=desc)))
-    return "\n".join(lines)
-
-
 def get_action_signatures(exclude_categories: tuple[str, ...] = ()) -> str:
     """Build the action signatures block for the system prompt from registered metadata."""
     lines: list[str] = []

@@ -27,7 +27,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from nora.evals import CASES_PATH, REPORTS_DIR
-from nora.evals.cases import Case, load, matches
+from nora.evals.cases import Case, expected_actions, load, matches
 from nora.evals.harness import on_phone, phone_connected, route_model, route_offline
 
 # Seconds between model calls and the token budget for one run, per provider.
@@ -72,7 +72,7 @@ def run(cases: list[Case], *, model: str = "", candidate: dict | None = None, li
     space = pace if space is None else space
     budget = cap if budget is None else budget
 
-    from nora import command_engine
+    from nora import command_engine, tool_retrieval
     command_engine.discover_commands()
 
     results: list[dict] = []
@@ -84,13 +84,22 @@ def run(cases: list[Case], *, model: str = "", candidate: dict | None = None, li
         for case in cases:
             with on_phone(case.via):
                 route, sent_text = route_offline(case.text, prior=case.prior)
+            # Would the intent model have been shown the right action? Asked
+            # of every case, not only the model's: it is the same question
+            # for any phrasing (Sharp Phase C).
+            wanted = expected_actions(case.expect)
+            covered = None
+            if wanted:
+                picked = set(tool_retrieval.select(sent_text))
+                covered = any(w <= picked for w in wanted)
             call: dict = {}
             served = "offline"
             if route is None:
                 served = "model"
                 if (candidate is None or case.id in skip or (limit and sent >= limit)
                         or (budget and spent >= budget) or unavailable_run >= 3):
-                    results.append({"case": case, "route": None, "served": "pending"})
+                    results.append({"case": case, "route": None, "served": "pending",
+                                            "covered": covered})
                     continue
                 wait = space - (time.monotonic() - last_call)
                 if sent and wait > 0:
@@ -102,7 +111,8 @@ def run(cases: list[Case], *, model: str = "", candidate: dict | None = None, li
                 unavailable_run = unavailable_run + 1 if call.get("unavailable") else 0
                 spent += call["prompt_tokens"] + call["completion_tokens"]
             ok = route.kind != "error" and matches(case.expect, route)
-            results.append({"case": case, "route": route, "served": served, "ok": ok, "call": call})
+            results.append({"case": case, "route": route, "served": served, "ok": ok, "call": call,
+                            "covered": covered})
             if verbose or not ok:
                 mark = "ok  " if ok else ("KNOWN" if case.known else "FAIL")
                 out(f"{mark} {case.id:<22} {served:<7} {route.describe()[:70]:<70} | {case.text[:60]}")
@@ -166,6 +176,14 @@ def _summarise(results: list[dict], *, model: str, spent: int, out=print) -> dic
         overall = sum(r["ok"] for r in scored)
         out(f"routing accuracy, all scored: {overall}/{len(scored)} ({_pct(overall, len(scored))})")
         report["accuracy"] = overall / len(scored)
+
+    retrieval = [r for r in results if r.get("covered") is not None]
+    if retrieval:
+        hit = sum(r["covered"] for r in retrieval)
+        out(f"tool retrieval: the expected action was offered in {hit}/{len(retrieval)} "
+            f"({_pct(hit, len(retrieval))})")
+        report["retrieval"] = [hit, len(retrieval)]
+        report["retrieval_misses"] = [r["case"].id for r in retrieval if not r["covered"]]
 
     fams: dict[str, list[bool]] = defaultdict(list)
     for r in scored:

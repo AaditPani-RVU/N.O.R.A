@@ -132,3 +132,16 @@ def matches(expect: dict, route: Route) -> bool:
                 and all(a == w["action"] and _params_match(w.get("params", {}), _canonical(a, p))
                         for (a, p), w in zip(route.steps, want)))
     raise ValueError(f"unknown expectation: {expect}")
+
+
+def expected_actions(expect: dict) -> list[set[str]]:
+    """The action sets that would satisfy `expect`, one per alternative; empty
+    for a chat or stop expectation. Tool retrieval is scored against these:
+    a case is covered when every action of one alternative was picked."""
+    if "any" in expect:
+        return [a for e in expect["any"] for a in expected_actions(e)]
+    if "action" in expect:
+        return [{expect["action"]}]
+    if "steps" in expect:
+        return [{s["action"] for s in expect["steps"]}]
+    return []

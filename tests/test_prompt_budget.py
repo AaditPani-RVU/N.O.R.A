@@ -104,22 +104,50 @@ class PromptBudgetTest(unittest.TestCase):
         logging.disable(logging.NOTSET)
 
     def test_the_intent_prompt_stays_under_budget(self) -> None:
-        # About 4,500 tokens at ~3.7 characters a token. It was 23,800
-        # characters (~6,400 tokens) before: two turns a minute could never fit
-        # in Groq's 8,000 tokens a minute, and the free tier's 200k a day ran
-        # out after about 28 turns.
-        prompt = intent_parser._build_system_prompt()
-        self.assertLess(len(prompt), 18_000, f"intent prompt grew to {len(prompt)} chars")
+        # Sharp Phase C: <= 2k tokens, at ~3.7 characters a token. It was
+        # 23,800 characters (~6,400 tokens) once, and ~18,400 with every action
+        # listed by name: two turns a minute could never fit in Groq's 8,000
+        # tokens a minute. Now only the actions picked for the utterance go in.
+        for text in ("how do black holes form", "play something by radiohead",
+                     "set a reminder for tomorrow at 6pm to call mom",
+                     "connect to my bluetooth headphones", "what's on my screen"):
+            with self.subTest(text):
+                prompt = intent_parser._build_system_prompt(text=text)
+                self.assertLess(len(prompt), 7_400, f"intent prompt grew to {len(prompt)} chars")
+
+    def test_rules_and_examples_follow_the_picked_actions(self) -> None:
+        music = intent_parser._build_system_prompt(text="play something by radiohead")
+        self.assertIn("MUSIC (Spotify)", music)
+        self.assertIn("spotify_play_artist(", music)
+        other = intent_parser._build_system_prompt(text="connect to wifi CoffeeShop")
+        self.assertNotIn("MUSIC (Spotify)", other)
+        self.assertIn("wifi_connect", other)
+        self.assertIn('User: "connect to wifi CoffeeShop"', other)
+        self.assertNotIn('User: "duck Spotify when I speak"', other)
+        for core in ("ask_claude(", "tell_me_about(", "read_screen(", "stop_all("):
+            self.assertIn(core, other)
 
     def test_no_example_is_one_the_fast_path_answers(self) -> None:
         # Those never reach the model; as examples they are pure cost.
-        examples = re.findall(r'User: "(.*?)" →', intent_parser.SYSTEM_PROMPT_TEMPLATE)
+        examples = [re.match(r'User: "(.*?)" →', line).group(1)
+                    for _, line in intent_parser.EXAMPLES]
         self.assertGreater(len(examples), 15)
         answered = [e for e in examples if fast_path.resolve(e) is not None]
         self.assertEqual(answered, [])
 
+    def test_every_example_and_rule_names_a_real_action(self) -> None:
+        from nora import command_engine
+        known = set(command_engine.get_available_actions())
+        for action, _ in intent_parser.EXAMPLES:
+            if action:
+                self.assertIn(action, known)
+        for actions, _ in intent_parser.RULES:
+            self.assertTrue(known.intersection(actions), actions)
+
     def test_the_template_has_no_mojibake(self) -> None:
         self.assertNotIn("â†", intent_parser.SYSTEM_PROMPT_TEMPLATE)
+        for _, line in intent_parser.EXAMPLES:
+            self.assertNotIn("â†", line)
 
 
 class ReminderDurationTest(unittest.TestCase):
