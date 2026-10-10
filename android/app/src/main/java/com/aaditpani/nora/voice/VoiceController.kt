@@ -134,6 +134,7 @@ class VoiceController(private val app: Context, private val host: Host) {
     fun interrupt() = main.launch {
         val t = turn ?: return@launch
         if (_ui.value.phase != VoicePhase.SPEAKING && _ui.value.phase != VoicePhase.THINKING) return@launch
+        Log.i(TAG, "interrupted ${t.id}")
         stopBargeIn()
         t.queue.stop()
         host.bargeIn(t.id)
@@ -158,6 +159,7 @@ class VoiceController(private val app: Context, private val host: Host) {
         var lastPartial = 0L
         var endOfSpeech = 0L
         var heardAny = false
+        var stopping = false
         rec.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() { heardAny = true }
@@ -188,13 +190,27 @@ class VoiceController(private val app: Context, private val host: Host) {
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
+        // No silence extras: the on-device recogniser counts them from the
+        // moment the mic opens, so a breath before the first word ended the
+        // session ("recogniser error 7" ~0.7 s after every such tap). The end
+        // of what was said is judged here instead, once speech has begun.
         rec.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, SILENCE_MS)
-            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, SILENCE_MS))
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true))
+        Log.i(TAG, "listening")
+        main.launch {
+            while (recognizer === rec && !stopping) {
+                delay(100)
+                val last = maxOf(lastLoud, lastPartial)
+                if (heardAny && last > 0 && System.currentTimeMillis() - last > SILENCE_MS) {
+                    stopping = true
+                    Log.i(TAG, "end of speech: ${SILENCE_MS} ms quiet")
+                    rec.stopListening()
+                }
+            }
+        }
     }
 
     /**
@@ -222,6 +238,7 @@ class VoiceController(private val app: Context, private val host: Host) {
         }
         val tts = host.tts
         val id = host.sendVoice(text, tts)
+        Log.i(TAG, "heard \"${text.take(60)}\" -> turn $id")
         if (id == null) {
             end("Not connected to the core.")
             return
@@ -234,7 +251,7 @@ class VoiceController(private val app: Context, private val host: Host) {
             // Silence from the core past this reads as a hang; a short word
             // in the phone's voice says she heard (Sharp Phase C).
             delay(ACK_AFTER_MS)
-            if (turn === t && t.firstSay == null) t.queue.ack(ACKS.random())
+            if (turn === t && t.firstSay == null && t.queue.ack(ACKS.random())) Log.i(TAG, "ack ${t.id}")
         }
     }
 
@@ -262,6 +279,7 @@ class VoiceController(private val app: Context, private val host: Host) {
     /** Everything NORA said has been played and the turn is over. */
     private fun finished(t: Turn) {
         if (turn !== t) return
+        Log.i(TAG, "turn ${t.id} played")
         stopBargeIn()
         record(t)
         turn = null
@@ -276,6 +294,7 @@ class VoiceController(private val app: Context, private val host: Host) {
     }
 
     private fun end(note: String?) {
+        Log.i(TAG, "session ends${note?.let { ": $it" } ?: ""}")
         recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
@@ -297,7 +316,10 @@ class VoiceController(private val app: Context, private val host: Host) {
     fun onSay(replyTo: String?, text: String, audio: AudioSpec?): Boolean {
         val t = turn ?: return false
         if (replyTo != t.id) return false
-        if (t.firstSay == null) t.firstSay = System.currentTimeMillis()
+        if (t.firstSay == null) {
+            t.firstSay = System.currentTimeMillis()
+            Log.i(TAG, "first say ${t.id}")
+        }
         // The phone voice was asked for: ignore any audio (there shouldn't be any).
         t.queue.line(text, if (t.tts == TTS_CORE) audio else null)
         return true
@@ -328,12 +350,14 @@ class VoiceController(private val app: Context, private val host: Host) {
 
     private fun outputFor(): PhoneVoiceOutput = output ?: PhoneVoiceOutput(app, object : PhoneVoiceOutput.Events {
         override fun soundStarted(voice: String) {
-            turn?.queue?.soundStarted(voice)
+            val q = turn?.queue
+            q?.soundStarted(voice)
             main.launch {
-                if (turn != null && _ui.value.phase == VoicePhase.THINKING) {
-                    _ui.update { it.copy(phase = VoicePhase.SPEAKING) }
-                    startBargeIn()
-                }
+                if (turn == null) return@launch
+                if (_ui.value.phase == VoicePhase.THINKING) _ui.update { it.copy(phase = VoicePhase.SPEAKING) }
+                // Not during "One sec": talking over it would cancel the
+                // answer queued behind it before a word of it was heard.
+                if (q?.ackPlaying != true) startBargeIn()
             }
         }
 
@@ -384,8 +408,12 @@ class VoiceController(private val app: Context, private val host: Host) {
         private const val SILENCE_MS = 700
         private const val SPEAKER_MARGIN_DB = 20.0
         private const val HEADSET_MARGIN_DB = 12.0
-        /** How long after the turn is sent the core may be silent before "One sec". */
-        private const val ACK_AFTER_MS = 600L
+        /**
+         * How long after the turn is sent the core may be silent before "One
+         * sec". Chat and fast-path answers start within ~1.2 s; at 600 ms the
+         * ack began just before them and held each back by about a second.
+         */
+        private const val ACK_AFTER_MS = 1500L
         private val ACKS = listOf("One sec.", "Just a moment.", "Let me see.")
     }
 }

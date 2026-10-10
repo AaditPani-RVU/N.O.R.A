@@ -185,6 +185,9 @@ class SpeechQueue(private val out: VoiceOutput, private val clock: () -> Long = 
     @get:Synchronized
     val busy: Boolean get() = playing != null || queue.isNotEmpty()
 
+    @get:Synchronized
+    val ackPlaying: Boolean get() = playing is Segment.Ack
+
     private fun next() {
         if (stopped) return
         val seg = queue.removeFirstOrNull()

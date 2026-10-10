@@ -159,7 +159,7 @@ the last is capped at 8 s (`llm_router.attempt_timeout_sec`). **Nemotron's
 thinking is off** for intent. **Streaming**: chat replies to a device go
 out a sentence at a time, with the first sentence checked for leaked
 reasoning. **Acknowledgement**: the phone says "One sec" if the core is
-silent 600 ms after the turn is sent, reported as `ack_ms`, apart from
+silent 1.5 s after the turn is sent (600 ms, as planned, delayed fast answers), reported as `ack_ms`, apart from
 `first_audio_ms`.
 
 Nemotron on the 45 model cases (NVIDIA, no Groq budget spent):

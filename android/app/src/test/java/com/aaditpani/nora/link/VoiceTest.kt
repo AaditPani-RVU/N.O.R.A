@@ -134,7 +134,9 @@ class VoiceTest {
         q.soundStarted("phone")
         q.line("Paris.", null)
         assertEquals(listOf("speak One sec."), out.log)
+        assertTrue(q.ackPlaying)   // barge-in waits for the answer itself
         q.segmentDone()
+        assertFalse(q.ackPlaying)
         assertEquals(listOf("speak One sec.", "speak Paris."), out.log)
         q.soundStarted("phone")
         // The acknowledgement is timed apart; first sound is the answer's.
