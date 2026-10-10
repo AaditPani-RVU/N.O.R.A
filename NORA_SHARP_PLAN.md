@@ -250,6 +250,29 @@ live turn still fits. Not measured: a real outage, and the first turn
 against a provider that hangs, which still waits out
 `attempt_timeout_sec` per candidate before NORA knows.
 
+**Phase F, built 2026-10-10** (branch `sharp/f-one-nora`). **One record
+path**: every turn already went through `pipeline.handle_turn`, but
+NORA's side of the transcript was recorded by whoever spoke it, the laptop
+speaker and the hub, so Telegram's replies were never kept. The turn now
+records each line said on any channel except the laptop speaker, which
+records itself (it knows how much was said before an interruption). Each
+transcript line carries its device (`local`, `dashboard`, `keyboard`,
+`telegram`, or the phone's id); text typed on the dashboard was recorded as
+the laptop's mic before. A parity test runs the same words through the
+laptop mic, the dashboard, Telegram, phone chat and phone voice, and fails
+if any channel misses the transcript (either side), the session index,
+memory or the input guard. **Routines**: the user model now keeps the dates
+each pattern and sequence was seen on, and a suggestion needs 3 different
+days (`proactive.min_pattern_days`), so a weekly one ("Saturday
+afternoon") needs three Saturdays. History from before has no dates, so
+existing patterns stay quiet until they recur. **Memory screen**: a
+MEMORY tab on the phone lists what the user told NORA to keep
+(`inject_knowledge`) and forgets one on a confirmed tap; `nora/memories.py`
+takes the fact out of every store recall reads (knowledge and episode
+collections, session index, ambient log, transcript), so the words it was
+said in aren't found again either. The phone side is built and
+unit-tested, not yet installed on the Pixel.
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent

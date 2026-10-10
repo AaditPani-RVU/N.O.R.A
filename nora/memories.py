@@ -85,20 +85,6 @@ def forget(memory_id: str) -> dict[str, Any]:
     return {"ok": True, "text": fact, "removed": removed}
 
 
-def forget_matching(text: str) -> dict[str, Any]:
-    """Forget the remembered fact that best matches `text` (by voice:
-    "forget my locker code")."""
-    words = set(_norm(text).split()) - {"my", "the", "a", "an", "that", "about", "is", "what"}
-    best, score = None, 0
-    for m in list_memories():
-        s = len(words & set(_norm(m["text"]).split()))
-        if s > score:
-            best, score = m, s
-    if best is None:
-        return {"ok": False, "text": "", "removed": {}}
-    return forget(best["id"])
-
-
 # ── one store each ───────────────────────────────────────────────────────────
 
 def _purge_collection(col, fact: str, always: list[str] | None = None) -> int:
