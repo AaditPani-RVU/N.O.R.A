@@ -81,6 +81,12 @@ nora_tool_trust.json
 nora_jobs.json
 nora_schedules.json
 nora_sessions.db
+# Phase 4 store (with SQLite WAL sidecars) and the backups/migrated copies left beside it.
+nora_core.db
+nora_core.db-shm
+nora_core.db-wal
+nora_*.pre-*
+nora_*.json.migrated
 
 nora_consent_log.json
 nora_reversible_log.json
@@ -94,6 +100,7 @@ TELEMACHUS_PORT_PLAN.md
 # a repo: the token grants calendar + gmail.modify until it is revoked.
 credentials.json
 google_token.json
+google_token.json.*
 # Google names the download client_secret_<id>.apps.googleusercontent.com.json.
 # Matching only "credentials.json" left the file people actually get untracked
 # but not ignored — one `git add -A` from being committed.
