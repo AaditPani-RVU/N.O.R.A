@@ -112,6 +112,8 @@ def test_held_out_phrasings(text, action, params):
     ("who is that", "tell_me_about"),
     ("who's playing right now", "tell_me_about"),
     ("who's using the most network", "tell_me_about"),
+    ("who is my manager", "tell_me_about"),
+    ("who's your favourite singer", "tell_me_about"),
     # "lay" that means lay
     ("lay down for a bit", "play_on_phone"),
     ("lay out my day", "play_on_phone"),

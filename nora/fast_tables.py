@@ -271,7 +271,7 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
         # Not "who are you", "who's calling", "who is that" or "who sang
         # this": NORA herself, the phone, or something on screen or playing.
         ("facts", [
-            r"who(?:'?s|\s+is|\s+was)\s+(?!(?:you|u|ya|yourself|nora|jarvis|i|me|that|this|it|he|she|they|them"
+            r"who(?:'?s|\s+is|\s+was)\s+(?!(?:you|u|ya|yourself|nora|jarvis|i|me|my|your|our|that|this|it|he|she|they|them"
             r"|there|here|calling|texting|messaging|ringing|on\s+the\s+phone|at\s+the\s+door|using|playing"
             r"|singing|better|best|right|wrong)\b)(?P<who>[\w .,&'-]{2,80})",
             r"who\s+(?:runs|owns|founded|leads|heads|started|created|invented)\s+"
