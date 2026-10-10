@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import time
 
-from nora import context, memory, spotify_api
+from nora import context, memory, music_names, spotify_api
 from nora.command_engine import register
 from nora.config import get_config
 
@@ -205,6 +205,12 @@ def play_music(track: str = "", artist: str = "") -> str:
     With no track, replays the user's remembered preference — this is what
     "play music" / "play something" maps to.
     """
+    fixed, heard = music_names.repair("play_music", {"track": track, "artist": artist})
+    said = _play_music(fixed["track"], fixed["artist"])
+    return f"{heard} {said}" if heard else said
+
+
+def _play_music(track: str, artist: str) -> str:
     if not _ensure_running():
         return _not_running_msg()
 
@@ -235,7 +241,7 @@ def play_music(track: str = "", artist: str = "") -> str:
     if not found:
         logger.info("No track match for '%s' / '%s'; trying artist", track, artist)
         if artist:
-            return spotify_play_artist(artist)
+            return _play_artist(artist)
         return _play_search(f"{track} {artist}".strip())
 
     return _play_resolved(
@@ -265,6 +271,12 @@ def spotify_play_song(song: str = "") -> str:
 def spotify_play_artist(artist: str = "") -> str:
     if not artist:
         return "Which artist would you like?"
+    fixed, heard = music_names.repair("spotify_play_artist", {"artist": artist})
+    said = _play_artist(fixed["artist"])
+    return f"{heard} {said}" if heard else said
+
+
+def _play_artist(artist: str) -> str:
     if not _ensure_running():
         return _not_running_msg()
     if not spotify_api.is_configured():
@@ -285,6 +297,13 @@ def spotify_play_artist(artist: str = "") -> str:
 def spotify_play_album(album: str = "", artist: str = "") -> str:
     if not album:
         return "Which album would you like?"
+    fixed, heard = music_names.repair("spotify_play_album", {"album": album, "artist": artist})
+    artist = fixed["artist"]
+    said = _play_album(album, artist)
+    return f"{heard} {said}" if heard else said
+
+
+def _play_album(album: str, artist: str) -> str:
     if not _ensure_running():
         return _not_running_msg()
     if not spotify_api.is_configured():

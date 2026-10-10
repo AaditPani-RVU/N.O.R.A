@@ -16,7 +16,7 @@ import asyncio
 import logging
 import re
 
-from nora import spotify_api, spotify_user
+from nora import music_names, spotify_api, spotify_user
 from nora.command_engine import register
 from nora.schemas import StepResult
 
@@ -130,11 +130,14 @@ async def play_on_phone(query: str, kind: str = "any", shuffle: bool = False) ->
     kind = kind if kind in _KINDS else "any"
     if not query:
         return StepResult(action="play_on_phone", success=False, message="Play what?")
+    fixed, heard = music_names.repair("play_on_phone", {"query": query, "kind": kind})
+    query = fixed["query"]
 
     loop = asyncio.get_running_loop()
     uri, label, note = await loop.run_in_executor(None, _resolve, query, kind)
     if uri is None and spotify_user.canonical(query) == _OFFLINE:
         return StepResult(action="play_on_phone", success=False, message=note)
+    note = " ".join(p for p in (heard, note) if p)
 
     if uri:
         played = await loop.run_in_executor(None, _via_connect, uri, label, shuffle)

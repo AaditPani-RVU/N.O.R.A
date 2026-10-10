@@ -22,10 +22,13 @@ logger = logging.getLogger("nora.prefetch")
 
 
 def _jobs() -> list[tuple[str, float, Callable[[], None]]]:
+    from nora import music_names
     from nora.commands import google_services, weather
     return [
         ("weather", 600.0, weather.prefetch),
         ("calendar", 170.0, google_services.prefetch_calendar),
+        # Checks hourly; rebuilds once the names are a day old (Sharp D).
+        ("music names", 3600.0, music_names.prefetch),
     ]
 
 

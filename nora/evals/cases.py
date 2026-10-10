@@ -95,7 +95,12 @@ def _norm(value: Any) -> str:
 
 def _canonical(action: str, params: dict) -> dict:
     """Params as the command will read them, where it accepts more than one
-    spelling: remind_me takes `duration: "one minute"` as well as minutes."""
+    spelling: remind_me takes `duration: "one minute"` as well as minutes, and
+    the music commands repair misheard names ("deaf tools" → Deftones)."""
+    from nora import music_names
+    from nora.evals import NAMES_PATH
+    with music_names.frozen(NAMES_PATH):
+        params, _ = music_names.repair(action, params)
     if action != "remind_me":
         return params
     from nora.commands.notifications import duration_minutes

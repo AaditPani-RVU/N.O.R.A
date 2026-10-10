@@ -14,7 +14,10 @@ Setup, once:
 
 The login is Authorization Code with PKCE, scopes playlist-read-private,
 playlist-read-collaborative, user-read-playback-state and
-user-modify-playback-state. Since March 2026 Spotify only serves
+user-modify-playback-state, plus the listening-history ones (followed, top,
+recent, saved) whose names `nora.music_names` repairs misheard requests
+against. A login from before a scope was asked for keeps working without
+it; run login again to grant it. Since March 2026 Spotify only serves
 development-mode apps whose owner has Premium; the user's account does.
 The token lands in spotify_user_token.json (0600, gitignored) and refreshes
 itself; `python -m nora.spotify_user logout` deletes it.
@@ -45,7 +48,8 @@ TOKEN_PATH = Path(os.environ.get("NORA_SPOTIFY_TOKEN_PATH", _ROOT / "spotify_use
 
 AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 SCOPES = ("playlist-read-private playlist-read-collaborative "
-          "user-read-playback-state user-modify-playback-state")
+          "user-read-playback-state user-modify-playback-state "
+          "user-follow-read user-top-read user-read-recently-played user-library-read")
 _PLAYBACK_SCOPE = "user-modify-playback-state"
 DEFAULT_REDIRECT = "http://127.0.0.1:8888/callback"
 
@@ -233,6 +237,61 @@ def find_playlist(query: str, strict: bool = False) -> dict[str, Any] | None:
 # Premium, which the user has, and Spotify running on the phone — otherwise the
 # phone isn't a Connect device and play_on_phone falls back to the phone.
 
+# ── The names in the library (Sharp D: name repair) ──────────────────────────
+
+# What each listening-history source needs, and how to read a page of it. A
+# login from before these were asked for still has its playlists' tracks.
+_HISTORY = (
+    ("user-follow-read", "/me/following", {"type": "artist", "limit": 50}),
+    ("user-top-read", "/me/top/artists", {"limit": 50, "time_range": "long_term"}),
+    ("user-top-read", "/me/top/tracks", {"limit": 50, "time_range": "long_term"}),
+    ("user-read-recently-played", "/me/player/recently-played", {"limit": 50}),
+    ("user-library-read", "/me/tracks", {"limit": 50}),
+)
+
+
+def _granted(scope: str) -> bool:
+    return scope in str(_load().get("scope", "")).split()
+
+
+def library(max_pages: int = 200) -> list[dict[str, Any]]:
+    """Tracks and artists the user listens to: [{track, artists}], with
+    track "" for an artist on its own (a followed or top artist). From their
+    playlists' items, plus followed, top, recent and saved when the login
+    granted those. Slow (a request per page): run it in the background."""
+    out: list[dict[str, Any]] = []
+    pages = 0
+
+    def add(item: dict[str, Any]) -> None:
+        if item.get("type") == "artist":
+            if item.get("name"):
+                out.append({"track": "", "artists": [item["name"]]})
+            return
+        names = [a.get("name", "") for a in item.get("artists") or [] if a.get("name")]
+        if item.get("name") and names:
+            out.append({"track": str(item["name"]), "artists": names})
+
+    def walk(url: str | None, params: dict[str, Any] | None) -> None:
+        nonlocal pages
+        while url and pages < max_pages:
+            page = _get(url, params)
+            pages += 1
+            if not page:
+                return
+            page = page.get("artists", page)          # /me/following wraps its page
+            for it in page.get("items") or []:
+                if isinstance(it, dict):
+                    add(it.get("item") or it.get("track") or it)
+            url, params = page.get("next"), None
+
+    for p in playlists():
+        walk(f"{spotify_api.API_BASE}/playlists/{p['uri'].rsplit(':', 1)[-1]}/items", {"limit": 100})
+    for scope, path, params in _HISTORY:
+        if _granted(scope):
+            walk(f"{spotify_api.API_BASE}{path}", dict(params))
+    return out
+
+
 class PlaybackError(RuntimeError):
     """Spotify refused or failed to play; the message is for the user."""
 
@@ -240,7 +299,7 @@ class PlaybackError(RuntimeError):
 def can_play() -> bool:
     """Linked with the playback scopes (a login from before they were asked
     for has only the playlist ones)."""
-    return _PLAYBACK_SCOPE in str(_load().get("scope", "")).split()
+    return _granted(_PLAYBACK_SCOPE)
 
 
 def _send(method: str, path: str, params: dict | None = None, body: dict | None = None):

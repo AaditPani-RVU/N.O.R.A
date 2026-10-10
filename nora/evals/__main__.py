@@ -20,13 +20,14 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import statistics
 import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from nora.evals import CASES_PATH, REPORTS_DIR
+from nora.evals import CASES_PATH, NAMES_PATH, REPORTS_DIR
 from nora.evals.cases import Case, expected_actions, load, matches
 from nora.evals.harness import on_phone, phone_connected, route_model, route_offline
 
@@ -239,7 +240,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="start at a different case each day (with --limit: a moving slice)")
     ap.add_argument("--no-report", action="store_true", help="don't save the report")
     ap.add_argument("-v", "--verbose", action="store_true", help="print every case, not just failures")
+    ap.add_argument("--freeze-names", action="store_true",
+                    help="copy NORA's current music names into the eval set and exit")
     args = ap.parse_args(argv)
+
+    if args.freeze_names:
+        from nora import music_names
+        if not music_names.CACHE_PATH.exists():
+            print("no music names yet: NORA builds them once Spotify is linked")
+            return 2
+        shutil.copyfile(music_names.CACHE_PATH, NAMES_PATH)
+        print(f"froze {len(music_names.artists())} artists into {NAMES_PATH}")
+        return 0
 
     if not args.cases.exists():
         print(f"no eval set at {args.cases}; build one from python -m nora.evals.harvest")

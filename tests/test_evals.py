@@ -52,8 +52,18 @@ def test_manifest_matches_the_app():
     ({"steps": [{"action": "open_app"}, {"action": "play_music"}]},
      Route("model", steps=[("open_app", {})]), False),
 ])
-def test_matches(expect, route, ok):
+def test_matches(expect, route, ok, tmp_path, monkeypatch):
+    # No music names: "deaf tools" stays as heard (see the next test for repair).
+    monkeypatch.setattr("nora.evals.NAMES_PATH", tmp_path / "none.json")
     assert matches(expect, route) is ok
+
+
+def test_matches_scores_music_names_as_repaired(tmp_path, monkeypatch):
+    names = tmp_path / "names.json"
+    names.write_text(json.dumps({"artists": {"Deftones": 3, "Pink Floyd": 2}, "tracks": {}}))
+    monkeypatch.setattr("nora.evals.NAMES_PATH", names)
+    assert matches({"action": "play_on_phone", "params": {"query": "deftones"}},
+                   Route("fast", steps=[("play_on_phone", {"query": "risk by deaf tools"})]))
 
 
 def test_load_rejects_duplicates_and_bad_via(tmp_path):

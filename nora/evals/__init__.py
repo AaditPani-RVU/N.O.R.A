@@ -25,3 +25,6 @@ ROOT = Path(__file__).resolve().parents[2]
 EVAL_DIR = ROOT / "evals"
 CASES_PATH = EVAL_DIR / "cases.jsonl"
 REPORTS_DIR = EVAL_DIR / "reports"
+# The music names misheard requests are repaired against, frozen when the
+# cases were labelled: `python -m nora.evals --freeze-names` refreshes it.
+NAMES_PATH = EVAL_DIR / "music_names.json"
