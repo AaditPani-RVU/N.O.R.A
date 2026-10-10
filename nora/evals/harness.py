@@ -21,7 +21,8 @@ from nora.evals.cases import Route
 
 EVAL_DEVICE = "d_eval_phone"
 _UNAVAILABLE = ("APITimeoutError", "APIConnectionError", "InternalServerError",
-                "ServiceUnavailable", "NotFoundError", "timed out", "503", "502", "404")
+                "ServiceUnavailable", "NotFoundError", "timed out", "503", "502", "404",
+                "OverBudget")   # held back by nora.budget: says nothing about the model
 _MANIFEST = Path(__file__).with_name("phone_manifest.json")
 
 
