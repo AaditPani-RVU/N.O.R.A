@@ -70,6 +70,62 @@ class TestSnippetParsing(unittest.TestCase):
         self.assertIn("Rs 111", text)
 
 
+class _Page:
+    def __init__(self, text: str, status: int = 200):
+        self.text, self.status_code = text, status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(self.status_code)
+
+    def json(self):
+        return {}
+
+
+class TestKeylessBackends(unittest.TestCase):
+    """2026-10-10: with no Brave key set up, DuckDuckGo Lite was the only
+    backend, and it answered with a bot check, so "has the Iran-US issue been
+    resolved" was answered from model memory."""
+
+    def test_ddg_html_page_is_parsed(self):
+        page = ('<a class="result__a" href="x">Everest - Britannica</a>'
+                '<a class="result__snippet" href="x">Reaching <b>8,849</b> m &amp; rising</a>')
+        with mock.patch.object(ws.requests, "post", lambda *a, **k: _Page(page)):
+            [hit] = ws._ddg_html_search("everest")
+        self.assertEqual(hit["text"], "Reaching 8,849 m & rising")
+        self.assertEqual(hit["title"], "Everest - Britannica")
+
+    def test_news_headlines_carry_their_date_and_stay_recent(self):
+        rss = ("<rss><item><title>Iran tells US: only talks &amp; no war</title><link>x</link>"
+               "<pubDate>Sat, 04 Oct 2026 08:00:00 GMT</pubDate></item></rss>")
+        asked = {}
+
+        def fake_get(url, params=None, **k):
+            asked.update(params or {})
+            return _Page(rss)
+
+        with mock.patch.object(ws.requests, "get", fake_get):
+            [hit] = ws._news_search("iran us talks")
+        self.assertEqual((hit["text"], hit["age"]), ("Iran tells US: only talks & no war", "04 Oct 2026"))
+        self.assertIn("when:", asked["q"])
+
+    def test_a_dead_brave_key_falls_through_to_duckduckgo(self):
+        with mock.patch.dict("os.environ", {"BRAVE_API_KEY": "k"}), \
+             mock.patch.object(ws.requests, "get", lambda *a, **k: _Page("{}", 422)), \
+             mock.patch.object(ws, "_ddg_html_search", return_value=[{"text": "ddg", "title": "", "url": "", "age": ""}]):
+            self.assertEqual([h["text"] for h in ws._fetch_snippets("how tall is everest")], ["ddg"])
+
+    def test_a_question_about_now_gets_headlines_first(self):
+        news = [{"text": "headline", "title": "", "url": "", "age": "09 Oct 2026"}]
+        web = [{"text": "web", "title": "", "url": "", "age": ""}]
+        with mock.patch.object(ws, "_brave_search", return_value=[]), \
+             mock.patch.object(ws, "_ddg_html_search", return_value=web), \
+             mock.patch.object(ws, "_news_search", return_value=news):
+            self.assertEqual([h["text"] for h in ws._fetch_snippets("is hormuz open right now")],
+                             ["headline", "web"])
+            self.assertEqual([h["text"] for h in ws._fetch_snippets("how tall is everest")], ["web"])
+
+
 class TestSourceExtraction(unittest.TestCase):
     def test_urls_are_pulled_from_executed_tools(self):
         extras = {"executed_tools": [

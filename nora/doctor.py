@@ -148,6 +148,28 @@ def check_spotify() -> list[Finding]:
     return [Finding("spotify", True, "Spotify token refreshes")]
 
 
+def check_search() -> list[Finding]:
+    """Can "what's happening with X" still reach the web? When it can't, the
+    answer comes from model memory, stale and said in the present tense."""
+    import os
+    from nora.commands import web_search as ws
+    findings: list[Finding] = []
+    key = os.environ.get("BRAVE_API_KEY", "")
+    if key and "your_brave" not in key:
+        if ws._brave_search("weather") or not ws._brave_dead:
+            findings.append(Finding("search:brave", True, "Brave search answers"))
+        else:
+            findings.append(Finding("search:brave", False,
+                                    "Brave refuses the search key, so searches go to DuckDuckGo",
+                                    "renew BRAVE_API_KEY in .env, or remove it"))
+    if ws._ddg_html_search("weather today") or ws._ddg_search("weather today"):
+        findings.append(Finding("search:web", True, "DuckDuckGo answers"))
+    elif not any(f.ok for f in findings):
+        findings.append(Finding("search:web", False,
+                                "no web search answers, so current questions come from model memory"))
+    return findings
+
+
 def check_hub() -> list[Finding]:
     cfg = get_config().get("hub", {}) or {}
     if not cfg.get("enabled"):
@@ -203,6 +225,7 @@ CHECKS: list[tuple[str, Callable[[], list[Finding]]]] = [
     ("hub", check_hub),
     ("devices", check_phone),
     ("commands", check_commands),
+    ("search", check_search),
 ]
 
 

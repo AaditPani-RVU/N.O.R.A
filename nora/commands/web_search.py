@@ -5,8 +5,10 @@ Three tiers, tried in order (config.yaml → web_search):
   1. **live search** — the llm_router "live_search" role (groq/compound-mini)
      runs its own web searches server-side and answers from what it read. This
      is the only tier that can answer "right now" questions truthfully.
-  2. **snippets** — Brave (BRAVE_API_KEY) or DuckDuckGo Lite, summarised by the
-     router's "research" role. Facts come from the snippets, not the weights.
+  2. **snippets** — Brave (BRAVE_API_KEY), else DuckDuckGo's HTML page, else
+     its Lite page; for "now / latest / today" questions, dated Google News
+     headlines too. Summarised by the router's "research" role: facts come
+     from the snippets, not the weights.
   3. **model only** — last resort, and the prompt makes it admit that.
 
 Every tier is told today's date. Without it the model answers "current fuel
@@ -63,6 +65,16 @@ def _spoken(text: str) -> str:
 
 # ── Search backends ────────────────────────────────────────────────────────────
 
+_brave_dead = False
+_UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                     "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"}
+
+
+def _unescape(text: str) -> str:
+    import html
+    return html.unescape(re.sub(r"<[^>]+>", "", text)).strip()
+
+
 def _brave_search(query: str, count: int = 5) -> list[dict]:
     """Brave Search REST API — returns {title, text, url} dicts."""
     key = os.environ.get("BRAVE_API_KEY", "")
@@ -80,6 +92,14 @@ def _brave_search(query: str, count: int = 5) -> list[dict]:
             params=params,
             timeout=6,
         )
+        if getattr(resp, "status_code", 200) in (401, 403, 422):
+            # A dead key: say so once a process, not once a search in DEBUG.
+            global _brave_dead
+            if not _brave_dead:
+                _brave_dead = True
+                logger.warning("Brave rejected BRAVE_API_KEY (%s); searching without it",
+                               resp.status_code)
+            return []
         resp.raise_for_status()
         results = resp.json().get("web", {}).get("results", [])
         out = []
@@ -128,10 +148,58 @@ def _ddg_search(query: str, count: int = 5) -> list[dict]:
         return []
 
 
+def _ddg_html_search(query: str, count: int = 5) -> list[dict]:
+    """DuckDuckGo's HTML results page, by POST — free, no key. The Lite page
+    started answering with a 202 bot check (2026-10-10) while this one still
+    returned results."""
+    try:
+        resp = requests.post("https://html.duckduckgo.com/html/", data={"q": query},
+                             headers=_UA, timeout=6)
+        resp.raise_for_status()
+        titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', resp.text, re.S)
+        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', resp.text, re.S)
+        out = []
+        for i, snippet in enumerate(snippets[:count]):
+            text = _unescape(snippet)
+            if text:
+                title = _unescape(titles[i]) if i < len(titles) and len(titles) == len(snippets) else ""
+                out.append({"title": title, "text": text, "url": "", "age": ""})
+        return out
+    except Exception as e:
+        logger.debug("DDG HTML search error: %s", e)
+        return []
+
+
+def _news_search(query: str, count: int = 3) -> list[dict]:
+    """Dated headlines from Google News' RSS search — free, no key. For "what's
+    happening now" the date on a result matters as much as its text, and
+    `when:` keeps a well-ranked story from June out of an October answer."""
+    days = max(1, int(_cfg().get("freshness_days", 7)))
+    try:
+        resp = requests.get("https://news.google.com/rss/search",
+                            params={"q": f"{query} when:{days}d", "hl": "en-IN", "gl": "IN",
+                                    "ceid": "IN:en"},
+                            headers=_UA, timeout=6)
+        resp.raise_for_status()
+        out = []
+        for title, date in re.findall(r"<item><title>(.*?)</title>.*?<pubDate>(.*?)</pubDate>",
+                                      resp.text, re.S)[:count]:
+            out.append({"title": "", "text": _unescape(title), "url": "",
+                        "age": " ".join(date.split()[1:4])})      # "09 Oct 2026"
+        return out
+    except Exception as e:
+        logger.debug("news search error: %s", e)
+        return []
+
+
 def _fetch_snippets(query: str) -> list[dict]:
-    """Try Brave first, fall back to DDG."""
+    """Brave, else DuckDuckGo (HTML page, then Lite); dated headlines first
+    for a question about now."""
     count = int(_cfg().get("max_snippets", 5))
-    return _brave_search(query, count) or _ddg_search(query, count)
+    web = _brave_search(query, count) or _ddg_html_search(query, count) or _ddg_search(query, count)
+    if _is_fresh_query(query):
+        return _news_search(query) + web[:count]
+    return web
 
 
 def _format_snippets(snippets: list[dict]) -> str:

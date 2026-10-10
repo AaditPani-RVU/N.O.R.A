@@ -128,3 +128,15 @@ class HubProbeTest(HubTestCase):
             (f,) = doctor.check_hub()
         self.assertFalse(f.ok)
         self.assertIn("restart nora", f.fix)
+
+
+def test_a_refused_search_key_is_reported_with_its_fix(monkeypatch):
+    """A key that stops working must be noticed, not silently skipped."""
+    from nora.commands import web_search as ws
+    monkeypatch.setenv("BRAVE_API_KEY", "dead")
+    monkeypatch.setattr(ws, "_brave_dead", True)
+    monkeypatch.setattr(ws, "_brave_search", lambda q, count=5: [])
+    monkeypatch.setattr(ws, "_ddg_html_search", lambda q, count=5: [{"text": "x"}])
+    found = {f.check: f for f in doctor.check_search()}
+    assert not found["search:brave"].ok and "BRAVE_API_KEY" in found["search:brave"].fix
+    assert found["search:web"].ok
