@@ -67,6 +67,10 @@ def _resolve(text: str, via: str = "phone"):
     # memory and Claude
     ("remember that my sister's birthday is on the 12th", "inject_knowledge", {}),
     ("ask claude to review my last commit", "ask_claude", {"question": "review my last commit"}),
+    # who someone is, looked up
+    ("who's the prime minister of the UK", "tell_me_about", {}),
+    ("who is Sundar Pichai", "tell_me_about", {}),
+    ("who runs OpenAI these days", "tell_me_about", {}),
     # small talk, answered locally
     ("hi there, how's it going?", "chat", {}),
     ("sounds good", "chat", {}),
@@ -99,6 +103,12 @@ def test_held_out_phrasings(text, action, params):
     ("remember I have to call mom tomorrow", "inject_knowledge"),
     # acks only on their own
     ("okay play some music", "chat"),
+    # "who" about NORA, the phone, or what's playing
+    ("who are you", "tell_me_about"),
+    ("who is calling", "tell_me_about"),
+    ("who is that", "tell_me_about"),
+    ("who's playing right now", "tell_me_about"),
+    ("who's using the most network", "tell_me_about"),
     # weather words in other senses
     ("what's the weather app called", "get_weather"),
 ])

@@ -110,6 +110,12 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             return None
         return I("ask claude", "ask_claude", {"question": q})
 
+    def look_up(m):
+        # "who is the CEO of Anthropic": who holds a post, or who someone is
+        # now, changes after the model's training. Asked in chat, it answered
+        # from memory; a lookup answers from today's web.
+        return I("look up", "tell_me_about", {"query": m.string.strip(" ?.!")})
+
     def remember_fact(m):
         fact = m.group("fact").strip(" ,.")
         return I("remember", "inject_knowledge", {"text": fact})
@@ -260,6 +266,17 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             r"(?:.*?\s)?ask\s+claude\s+(?:to\s+|about\s+|for\s+|if\s+|whether\s+)(?P<q>(?!it$|this$|that$).{4,300})",
             r"(?P<pre>.{4,300}?)[.,]?\s+(?:ask|check\s+with)\s+claude(?:\s+(?:for|about)\s+(?:it|this|that))?",
         ], ask_claude),
+
+        # ── who someone is: a lookup, not model memory (Sharp D) ──────────
+        # Not "who are you", "who's calling", "who is that" or "who sang
+        # this": NORA herself, the phone, or something on screen or playing.
+        ("facts", [
+            r"who(?:'?s|\s+is|\s+was)\s+(?!(?:you|u|ya|yourself|nora|jarvis|i|me|that|this|it|he|she|they|them"
+            r"|there|here|calling|texting|messaging|ringing|on\s+the\s+phone|at\s+the\s+door|using|playing"
+            r"|singing|better|best|right|wrong)\b)(?P<who>[\w .,&'-]{2,80})",
+            r"who\s+(?:runs|owns|founded|leads|heads|started|created|invented)\s+"
+            r"(?!(?:you|this|that|it|them)\b)(?P<who>[\w .,&'-]{2,80})",
+        ], look_up),
 
         # ── what NORA can do ──────────────────────────────────────────────
         ("capabilities", [
