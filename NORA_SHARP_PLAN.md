@@ -164,23 +164,38 @@ silent 1.5 s after the turn is sent (600 ms, as planned, delayed fast answers), 
 
 Nemotron on the 45 model cases (NVIDIA, no Groq budget spent):
 
-| | before C | retrieval | + thinking off |
-|---|---|---|---|
-| right | 32–33 | 36 | 36 |
-| errors (empty / bad JSON) | 7–8 | 5 | 0 |
-| p50 / p90 | 5.8–7.8 s / 12–15 s | 6.8 / 13.7 s | 3.1 / 5.6 s |
-| prompt tokens | ~6,000 | 2,260 | 1,896 |
+| | before C | retrieval | + thinking off | + context trim |
+|---|---|---|---|---|
+| right | 32–33 | 36 | 36 | 38 |
+| errors (empty / bad JSON) | 7–8 | 5 | 0 | 0 |
+| p50 / p90 | 5.8–7.8 s / 12–15 s | 6.8 / 13.7 s | 3.1 / 5.6 s | 2.9 / 3.2 s |
+| prompt tokens | ~6,000 | 2,260 | 1,896 | 1,623 |
 
 Groq `gpt-oss-120b`, the first choice, on 5 model cases spaced a minute
 apart (10.7k tokens): 4/5 (the miss is a known D case), prompt 1,903 tokens
-(was ~4,650), p50 3.5 s (was 3.7–3.9 s). Its time is hidden reasoning, not
-prompt: `reasoning_effort: low` for intent is the next thing to try,
-against the eval set before it ships.
+(was ~4,650). Live on the phone its intent call takes 1.0–1.6 s, so
+`reasoning_effort: low` was not tried; the eval harness's 3.5 s was not
+what turns saw.
 
-Not yet: the exit criterion's on-phone part (20 real-mix voice turns, with
-and without the acknowledgement) needs the new app on the Pixel. The prompt
-size with a live session's context (profile, transcript, repo) is measured
-there too; the eval's turns carry none.
+**First day on the phone (2026-10-10).** Three things the eval could not
+show. (1) Most mic taps ended within a second: the on-device recogniser
+counted its 700 ms silence from when the mic opened, so a pause before
+speaking ended the session. The app now judges the end of speech itself.
+(2) Model turns reached first words at 3.6–6.8 s while intent took
+1.0–1.6 s: the repo-context block refreshed git and `gh pr list` (~2.8 s)
+inside prompt building. It refreshes in the background now, and is only in
+the prompt for questions about code. (3) The live prompt was 2,657 tokens,
+mostly the same turns said three times; trimmed, the same conversation is
+1,942 (counted by gpt-oss). Also found: DuckDuckGo Lite, the only search
+backend (Brave was never set up), answered with a bot check, so current
+questions were answered from model memory; search now uses DuckDuckGo's
+HTML page and dated Google News headlines, and `nora doctor` checks it.
+"One sec" moved from 600 ms to 1.5 s after it was seen delaying chat
+answers that arrive at ~1.2 s.
+
+Not yet: the exit criterion's on-phone part, 20 real-mix voice turns with
+these fixes, reported with and without the acknowledgement
+(`python -m nora.evals.latency`).
 
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
