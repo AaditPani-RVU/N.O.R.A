@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -135,9 +136,36 @@ def load_context_pack(repo_path: str | None = None) -> dict[str, Any]:
     return pack
 
 
-def format_for_prompt() -> str:
-    """Compact string representation for system prompt injection (≤120 tokens)."""
-    pack = load_context_pack()
+_refreshing = threading.Lock()
+
+
+def _refresh_in_background() -> None:
+    def run() -> None:
+        try:
+            invalidate_cache()
+            load_context_pack()
+        except Exception as e:
+            logger.debug("repo context refresh failed: %s", e)
+        finally:
+            _refreshing.release()
+    if _refreshing.acquire(blocking=False):
+        threading.Thread(target=run, daemon=True, name="repo-context").start()
+
+
+def format_for_prompt(wait: bool = False) -> str:
+    """Compact string representation for system prompt injection (≤120 tokens).
+
+    Never waits for git or GitHub unless `wait`: a stale pack is returned
+    as it is and refreshed in the background. A refresh runs four git
+    commands and `gh pr list` over the network, ~2.8 s; with a 30 s cache,
+    most voice turns paid that before the model was even asked (Sharp C).
+    """
+    stale = time.time() - _cache_ts >= _CACHE_TTL or not _cache_data
+    if stale and not wait:
+        _refresh_in_background()
+        pack = _cache_data
+    else:
+        pack = load_context_pack()
     if not pack:
         return ""
     name = Path(pack["repo_path"]).name

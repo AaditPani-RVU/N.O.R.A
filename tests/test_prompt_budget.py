@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -249,6 +250,66 @@ class PromptBudgetTest(unittest.TestCase):
         self.assertNotIn("â†", intent_parser.SYSTEM_PROMPT_TEMPLATE)
         for _, line in intent_parser.EXAMPLES:
             self.assertNotIn("â†", line)
+
+
+class LiveContextTest(unittest.TestCase):
+    """Sharp Phase C: what a mid-conversation prompt carries, and what it
+    no longer waits for."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from nora import command_engine
+        logging.disable(logging.CRITICAL)
+        command_engine.discover_commands()
+        logging.disable(logging.NOTSET)
+
+    def setUp(self) -> None:
+        from nora import dialogue
+        dialogue.clear()
+        self.addCleanup(dialogue.clear)
+        long = ("The Strait of Hormuz is a narrow waterway between Iran and Oman. "
+                + " ".join(f"Fact number {i} about shipping lanes and tankers." for i in range(8)))
+        dialogue.record_user("tell me about the strait of hormuz")
+        dialogue.record_nora(long)
+        self.ctx = {"session_turns": [{
+            "text": "tell me about the strait of hormuz", "intent": "show location",
+            "actions": ["show_location"], "result_summary": long[:100], "success": True,
+            "reply": long, "ts": 0}]}
+
+    def test_the_repo_block_is_only_for_questions_about_code(self) -> None:
+        from nora import repo_context
+        with mock.patch.object(repo_context, "format_for_prompt", return_value="[Repo: X]"):
+            other = intent_parser._build_system_prompt(self.ctx, None, "is the strait open or closed")
+            code = intent_parser._build_system_prompt(self.ctx, None, "why is my code failing")
+        self.assertNotIn("[Repo: X]", other)
+        self.assertIn("[Repo: X]", code)
+
+    def test_a_turn_is_said_once_not_three_times(self) -> None:
+        prompt = intent_parser._build_system_prompt(self.ctx, None, "is it open")
+        # NORA's long answer appears once, cut short, in the verbatim dialogue.
+        self.assertEqual(prompt.count("narrow waterway"), 1)
+        self.assertIn("show location [show_location, ok]", prompt)
+        line = next(l for l in prompt.splitlines() if l.startswith("NORA: "))
+        self.assertLessEqual(len(line), len("NORA: ") + intent_parser._DIALOGUE_CHARS["NORA"] + 1)
+
+    def test_the_repo_pack_never_makes_a_turn_wait(self) -> None:
+        from nora import repo_context
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_pack(repo_path=None):
+            started.set()
+            release.wait(5)
+            return {"repo_path": "/x/JARVIS", "branch": "main"}
+
+        with mock.patch.object(repo_context, "load_context_pack", side_effect=slow_pack), \
+                mock.patch.object(repo_context, "_cache_data", {}), \
+                mock.patch.object(repo_context, "_cache_ts", 0.0):
+            t0 = time.monotonic()
+            self.assertEqual(repo_context.format_for_prompt(), "")   # nothing cached yet
+            self.assertLess(time.monotonic() - t0, 0.5)
+            self.assertTrue(started.wait(2), "a refresh starts in the background")
+            release.set()
 
 
 class ReminderDurationTest(unittest.TestCase):

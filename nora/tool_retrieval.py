@@ -229,6 +229,12 @@ def scores(text: str) -> dict[str, float]:
     return dict(sorted(out.items(), key=lambda kv: -kv[1]))
 
 
+def ranked_core(text: str, top: int = 5) -> list[str]:
+    """The CORE actions that rank among the `top` for `text` on their own
+    merit, not just because every prompt carries them."""
+    return [n for n in list(scores(text))[:top] if n in CORE]
+
+
 def select(text: str, *, previous: list[str] | None = None,
            previous_text: str = "", k: int | None = None) -> list[str]:
     """The actions to show the intent model for `text`: CORE, the `k` best
@@ -259,3 +265,16 @@ def warm() -> None:
         _semantic(_get_index(), "warm up")
     except Exception as e:
         logger.debug("tool retrieval warm-up failed: %s", e)
+
+
+def warm_soon() -> None:
+    """Embed newly registered actions in the background, if the embedder is
+    already up. A phone connecting adds its capabilities; left alone, the
+    first turn after every reconnect paid ~1.2 s to embed them."""
+    try:
+        from nora import cognitive_memory
+        if not cognitive_memory._embedder_ready:
+            return
+    except Exception:
+        return
+    threading.Thread(target=warm, daemon=True, name="tool-retrieval-warm").start()

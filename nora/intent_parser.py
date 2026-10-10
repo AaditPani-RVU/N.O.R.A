@@ -160,9 +160,11 @@ EXAMPLES: list[tuple[str, str]] = [
     ("focus_mode", 'User: "enter focus mode for writing" → {"intent": "focus mode", "steps": [{"action": "focus_mode", "parameters": {"intent": "writing"}}]}'),
 ]
 
-# Examples always shown: the chat shape, and the open-question routes every
-# prompt carries (tool_retrieval.CORE).
-_ALWAYS_EXAMPLES = ("", "stop_all", "tell_me_about", "show_location", "ask_claude")
+# Examples always shown: the chat shape and the two research routes. The
+# other core actions' rules are in the prompt's head; their examples go in
+# only when retrieval ranks them for the utterance itself, which keeps a
+# mid-conversation prompt near 2k tokens (Sharp Phase C).
+_ALWAYS_EXAMPLES = ("", "tell_me_about", "ask_claude")
 
 
 def _picked_actions(text: str, memory_ctx: dict | None) -> list[str]:
@@ -192,6 +194,28 @@ def _signature_line(name: str, meta) -> str:
     return f"- {sig} — {desc}" if desc else f"- {sig}"
 
 
+# Per utterance in the verbatim dialogue. A long answer (a notifications
+# summary, a researched reply) was carried whole into every later prompt;
+# its opening is what a follow-up refers back to.
+_DIALOGUE_CHARS = {"User": 200, "NORA": 160}
+
+
+def _recent_dialogue(n: int = 6) -> str:
+    try:
+        from nora import dialogue as _dlg
+        lines = []
+        for turn in _dlg.history(n):
+            who = "User" if turn.speaker == "user" else "NORA"
+            said = " ".join(turn.text.split())
+            cap = _DIALOGUE_CHARS[who]
+            if len(said) > cap:
+                said = said[:cap].rsplit(" ", 1)[0] + "…"
+            lines.append(f"{who}: {said}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None = None,
                          text: str = "") -> str:
     # Only the actions retrieval picks for this utterance are listed, each in
@@ -203,6 +227,8 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
 
     picked = _picked_actions(text, memory_ctx)
     chosen = set(picked)
+    from nora import tool_retrieval
+    ranked = chosen - set(tool_retrieval.CORE) | set(tool_retrieval.ranked_core(text))
     sig_lines = []
     for name in picked:
         meta = command_engine.get_action_meta(name)
@@ -210,7 +236,7 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
             sig_lines.append(_signature_line(name, meta))
     rules = "".join("\n" + body + "\n" for actions, body in RULES if chosen.intersection(actions))
     examples = "\n".join(line for action, line in EXAMPLES
-                         if action in _ALWAYS_EXAMPLES or action in chosen)
+                         if action in _ALWAYS_EXAMPLES or action in ranked)
     prompt = SYSTEM_PROMPT_TEMPLATE.format(
         rules=rules,
         action_signatures="\n".join(sig_lines),
@@ -290,48 +316,55 @@ def _build_system_prompt(memory_ctx: dict | None = None, screen_ctx: dict | None
     except Exception:
         pass
 
-    # Inject repo context pack (branch, dirty files, recent commits)
+    # Repo context pack (branch, dirty files, recent commits), only when the
+    # words are about the user's code ("my code", "the repo", "this error",
+    # "nora"). It is ~150 tokens no other request uses (Sharp Phase C). Not
+    # "a coding tool was picked": "is the strait open or closed" ranks
+    # github_my_prs first.
     try:
+        from nora import conversation as _conv
         from nora.repo_context import format_for_prompt as _repo_fmt
-        repo_block = _repo_fmt()
+        repo_block = _repo_fmt() if _conv.mentions_repo(text) else ""
         if repo_block:
             prompt += "\n\n" + repo_block
     except Exception:
         pass
 
+    transcript = _recent_dialogue()
     session_turns = memory_ctx.get("session_turns", [])
     if session_turns:
         turn_lines = [
-            "RECENT SESSION — CRITICAL: use this to resolve follow-ups.",
-            "If the user says 'are you sure', 'really?', 'is that right', 'that's wrong', "
-            "'correct that', or references 'they/it/that' without a clear noun — treat it as "
-            "a conversational follow-up to the last turn, NOT a new research request. "
-            "Return the Conversation shape with a direct spoken reply using this context.",
+            "RECENT SESSION — use it to resolve follow-ups. 'Are you sure', 'really?', 'that's wrong', "
+            "or 'they/it/that' with no clear noun is a follow-up to the last turn, not a new request: "
+            "answer it in the Conversation shape from this context.",
         ]
-        for turn in reversed(session_turns):
-            status = "[ok]" if turn.get("success") else "[fail]"
-            line = f'  {status} User: "{turn["text"]}" -> {turn["intent"]}'
-            if turn.get("result_summary"):
-                line += f' | Result: {turn["result_summary"][:80]}'
-            # What NORA said back. Without it the model saw only half of each
-            # exchange and could not resolve "why did you say that".
-            if turn.get("reply"):
-                line += f' | You said: "{turn["reply"][:120]}"'
-            turn_lines.append(line)
+        if transcript:
+            # The verbatim dialogue below has both sides' words; all this adds
+            # is what each turn did and whether it worked.
+            done = []
+            for turn in reversed(session_turns):
+                status = "ok" if turn.get("success") else "failed"
+                acts = ", ".join(turn.get("actions") or []) or "spoken reply"
+                done.append(f"{turn['intent']} [{acts}, {status}]")
+            turn_lines.append("  Turns so far, oldest first: " + "; ".join(done))
+        else:
+            for turn in reversed(session_turns):
+                status = "[ok]" if turn.get("success") else "[fail]"
+                line = f'  {status} User: "{turn["text"]}" -> {turn["intent"]}'
+                if turn.get("result_summary"):
+                    line += f' | Result: {turn["result_summary"][:80]}'
+                # What NORA said back. Without it the model saw only half of
+                # each exchange and could not resolve "why did you say that".
+                if turn.get("reply"):
+                    line += f' | You said: "{turn["reply"][:120]}"'
+                turn_lines.append(line)
         prompt += "\n\n" + "\n".join(turn_lines)
 
     # Verbatim recent dialogue — the structured turn list above summarises
     # intents, but pronoun resolution needs the actual words.
-    try:
-        from nora import dialogue as _dlg
-        transcript = _dlg.as_transcript(6)
-        if transcript:
-            prompt += (
-                "\n\nVERBATIM RECENT DIALOGUE (resolve pronouns and follow-ups against this):\n"
-                + transcript
-            )
-    except Exception:
-        pass
+    if transcript:
+        prompt += ("\n\nVERBATIM RECENT DIALOGUE (resolve pronouns and follow-ups against this):\n"
+                   + transcript)
 
     # Multimodal context fusion — inject screen snippet for deictic commands
     if screen_ctx:
@@ -418,6 +451,9 @@ def _parse_via_groq(
     max_tokens = int(cfg.get("max_tokens", 512))
     timeout_sec = timeout_sec or float(get_config().get("timeouts", {}).get("llm_sec", 20))
     system_prompt = _build_system_prompt(memory_ctx, screen_ctx, text)
+    # When the prompt was ready: the time from `routed` to here is NORA's own,
+    # before any model is asked. It hid ~2.8 s of git and GitHub calls once.
+    trace.mark("prompt")
 
     client = _get_groq_client(
         api_key, timeout_sec,

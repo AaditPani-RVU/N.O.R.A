@@ -289,6 +289,8 @@ class Hub:
                 name, self._proxy(session.device_id, name), device=session.device_id,
                 sig=protocol.signature_hint(entry), description=desc,
                 risk=_TIER_RISK.get(tier, "high"), tier=tier)
+        from nora import tool_retrieval
+        tool_retrieval.warm_soon()
 
     def _sink(self, session: Session):
         def send(text: str, kind: str) -> bool:
