@@ -18,7 +18,7 @@ if [[ "$repo" != "$HOME/Projects/JARVIS" ]]; then
 fi
 
 mkdir -p "$units"
-for u in nora.service nora-autolock.service nora-backup.service nora-backup.timer nora-evals.service nora-evals.timer; do
+for u in nora.service nora-autolock.service nora-backup.service nora-backup.timer nora-evals.service nora-evals.timer nora-globe.service; do
     install -m 0644 "$repo/deploy/systemd/$u" "$units/$u"
 done
 systemctl --user daemon-reload
@@ -27,6 +27,10 @@ systemctl --user daemon-reload
 systemctl --user enable nora-autolock.service
 systemctl --user enable --now nora-backup.timer
 systemctl --user enable --now nora-evals.timer
+# The globe (Sharp H) needs its checkout and `npm install` first.
+if [ -f "$HOME/Projects/gods-eye-view/package.json" ]; then
+    systemctl --user enable --now nora-globe.service
+fi
 systemctl --user enable nora.service
 if systemctl --user is-active --quiet nora.service; then
     echo "NORA service already running; restart it to pick up changes."
