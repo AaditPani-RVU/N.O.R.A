@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import functools
 import logging
 import re
 from dataclasses import dataclass, field
@@ -366,22 +367,38 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
                 text, n=2
             ).get("relevant_context", [])
 
+            # To a device, the reply streams: each sentence goes out as soon as
+            # the model has written it, and the phone starts speaking the
+            # first while the rest is generated (Sharp Phase C). The laptop's
+            # speaker already pipelines a whole reply sentence by sentence.
+            said: list[str] = []
+            respond = deps.respond
+            if (channel.kind == "device" and deps.respond is conversation.respond
+                    and conversation.streaming_enabled()):
+                def _say_part(line: str) -> None:
+                    if not said:
+                        ui_server.notify_stage("speaking")
+                    said.append(line)
+                    speak(line, mood="chat")
+                respond = functools.partial(conversation.respond, say_part=_say_part)
+
             try:
                 reply = await asyncio.wait_for(
                     loop.run_in_executor(
-                        None, contextvars.copy_context().run, deps.respond, text, _chat_ctx, _act
+                        None, contextvars.copy_context().run, respond, text, _chat_ctx, _act
                     ),
                     timeout=deps.llm_timeout,
                 )
             except asyncio.TimeoutError:
                 logger.warning("Conversation reply timed out")
-                reply = phrasing.get("too_slow")
+                reply = " ".join(said) or phrasing.get("too_slow")
             except Exception as exc:
                 logger.warning(f"Conversation reply failed: {exc}")
-                reply = phrasing.get("recovered")
+                reply = " ".join(said) or phrasing.get("recovered")
 
-            ui_server.notify_stage("speaking")
-            speak(reply, mood="chat")
+            if not said:
+                ui_server.notify_stage("speaking")
+                speak(reply, mood="chat")
             ui_server.notify_stage("idle")
 
             # Chat turns reach the session buffer too. They never did

@@ -533,7 +533,7 @@ class ConversationRespondTest(unittest.TestCase):
         dialogue.record_nora("Paris.")
         captured: dict = {}
 
-        def fake(system, messages, act):
+        def fake(system, messages, act, stream=None):
             captured["messages"] = messages
             captured["system"] = system
             return "Because it's the seat of government."
@@ -576,6 +576,88 @@ class ConversationRespondTest(unittest.TestCase):
         long = conversation.build_system_prompt(Act.QUESTION)
         self.assertNotEqual(short, long)
         self.assertIn("five words", short)
+
+
+class StreamingTest(unittest.TestCase):
+    """Sharp Phase C: a reply is said a sentence at a time as it is written."""
+
+    def test_sentences_go_out_as_they_finish(self):
+        said: list[str] = []
+        stream = conversation.SentenceStream(said.append)
+        for piece in ["Paris is the cap", "ital of France. It", " has the Louvre", "! Want more"]:
+            stream.feed(piece)
+            if piece.startswith(" has"):
+                # The first sentence was out before the model had finished.
+                self.assertEqual(said, ["Paris is the capital of France."])
+        stream.feed("?")
+        stream.finish()
+        self.assertEqual(said, ["Paris is the capital of France.", "It has the Louvre!", "Want more?"])
+        self.assertEqual(stream.text(), " ".join(said))
+
+    def test_short_abbreviations_do_not_end_a_sentence(self):
+        said: list[str] = []
+        stream = conversation.SentenceStream(said.append)
+        stream.feed("Dr. Who is a show. ")
+        stream.finish()
+        self.assertEqual(said, ["Dr. Who is a show."])
+
+    def test_leaked_reasoning_is_held_back(self):
+        said: list[str] = []
+        stream = conversation.SentenceStream(said.append)
+        stream.feed("The user asked about Paris. We need to answer briefly. Paris is lovely. ")
+        stream.finish()
+        self.assertEqual(said, [])
+        self.assertTrue(stream.held)
+
+    def test_the_sentence_cap_holds(self):
+        said: list[str] = []
+        stream = conversation.SentenceStream(said.append, max_sentences=2)
+        stream.feed("One is here. Two is here. Three is here. ")
+        stream.finish()
+        self.assertEqual(said, ["One is here.", "Two is here."])
+
+    def test_respond_streams_through_say_part(self):
+        said: list[str] = []
+
+        def fake(system, messages, act, stream=None):
+            for piece in ("It is the seat of ", "government. And it's big. "):
+                stream.feed(piece)
+            return "It is the seat of government. And it's big."
+
+        with mock.patch.object(conversation, "_generate", side_effect=fake):
+            reply = conversation.respond("why paris", None, Act.QUESTION, say_part=said.append)
+        self.assertEqual(said, ["It is the seat of government.", "And it's big."])
+        self.assertEqual(reply, "It is the seat of government. And it's big.")
+
+    def test_a_held_stream_falls_back_to_the_whole_reply(self):
+        said: list[str] = []
+
+        def fake(system, messages, act, stream=None):
+            stream.feed("The user asked why. ")
+            return "Because it is."
+
+        with mock.patch.object(conversation, "_generate", side_effect=fake):
+            reply = conversation.respond("why paris", None, Act.QUESTION, say_part=said.append)
+        self.assertEqual(said, [])
+        self.assertEqual(reply, "Because it is.")
+
+    def test_a_model_that_fails_mid_answer_is_not_followed_by_another(self):
+        from nora import model_router
+        calls, pieces = [], []
+
+        def fake_call(candidate, messages, max_tokens, temperature, timeout, extras, on_text=None):
+            calls.append(candidate["name"])
+            on_text("Half an answer. ")
+            raise RuntimeError("connection reset")
+
+        candidates = [{"name": "first", "model": "m"}, {"name": "second", "model": "m"}]
+        with mock.patch.object(model_router, "_candidates_for", return_value=candidates), \
+             mock.patch.object(model_router, "_call_openai_compatible", fake_call), \
+             mock.patch.object(model_router, "note_failure", return_value="busy"), \
+             mock.patch.object(model_router, "_log_attempt"):
+            with self.assertRaises(model_router.AllCandidatesFailed):
+                model_router.complete("chat", [], on_text=pieces.append)
+        self.assertEqual(calls, ["first"])
 
 
 class AckTest(unittest.TestCase):

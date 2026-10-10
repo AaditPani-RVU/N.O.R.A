@@ -245,6 +245,42 @@ class PipelineSmokeTest(unittest.TestCase):
         self.assertTrue(turn.spoken, "a conversational turn must say something")
 
 
+class ChatStreamingTest(unittest.TestCase):
+    """Sharp Phase C: to a device, a chat reply goes out sentence by sentence
+    and is not said a second time at the end."""
+
+    @classmethod
+    def setUpClass(cls):
+        command_engine.discover_commands()
+
+    def _turn(self, kind: str) -> list[str]:
+        from nora import channel as _channel, conversation
+        turn = Turn()
+        deps = turn.deps()
+        deps.respond = conversation.respond
+        spoken: list[str] = []
+        ch = _channel.Channel(device_id="d_test" if kind == "device" else _channel.LOCAL_DEVICE,
+                              kind=kind, speak=lambda text, *a, **k: spoken.append(text))
+
+        def fake(system, messages, act, stream=None):
+            if stream is not None:
+                stream.feed("Rust is fast. ")
+                stream.feed("It is also safe. ")
+            return "Rust is fast. It is also safe."
+
+        with scripted(turn), mock.patch.object(conversation, "_generate", side_effect=fake):
+            outcome = asyncio.run(pipeline.handle_turn("what do you think about rust", deps,
+                                                       channel=ch))
+        self.assertEqual(outcome.kind, "chat")
+        return spoken
+
+    def test_a_device_hears_each_sentence_once(self):
+        self.assertEqual(self._turn("device"), ["Rust is fast.", "It is also safe."])
+
+    def test_the_laptop_speaks_the_whole_reply(self):
+        self.assertEqual(self._turn("voice"), ["Rust is fast. It is also safe."])
+
+
 class LoopControlTest(unittest.TestCase):
     """The turns that steer the loop itself rather than doing work."""
 

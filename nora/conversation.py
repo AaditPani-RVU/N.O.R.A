@@ -566,7 +566,80 @@ def _conv_cfg() -> dict:
     return get_config().get("conversation", {}) or {}
 
 
-def _generate(system: str, messages: list[dict], act: Act) -> str:
+def streaming_enabled() -> bool:
+    """conversation.stream in config.yaml; on unless set false."""
+    return bool(_conv_cfg().get("stream", True))
+
+
+# A sentence ends at . ! or ? followed by a space, once it is long enough not
+# to be "Dr." or "e.g." on its own.
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])[\"')\]]*\s+")
+_MIN_SENTENCE = 12
+
+
+class SentenceStream:
+    """Says a streamed reply a sentence at a time (Sharp Phase C).
+
+    Fed the model's pieces as they arrive; each finished sentence is cleaned
+    for speech and handed to `say` straight away, so the first is spoken
+    while the rest is still being written. The first sentence is checked for
+    leaked reasoning before anything is said: if it is the model talking to
+    itself, nothing is streamed and the reply takes the ordinary path.
+    """
+
+    def __init__(self, say, max_sentences: int = 0):
+        self._say = say
+        self._max = max_sentences
+        self._buf = ""
+        self._raw = ""
+        self.said: list[str] = []
+        self.held = False                # the first sentence looked like reasoning
+
+    @property
+    def started(self) -> bool:
+        return bool(self.said)
+
+    def feed(self, piece: str) -> None:
+        self._raw += piece
+        self._buf += piece
+        while not self.held:
+            m = None
+            for cand in _SENTENCE_END_RE.finditer(self._buf):
+                if cand.start() >= _MIN_SENTENCE:
+                    m = cand
+                    break
+            if m is None:
+                return
+            sentence, self._buf = self._buf[:m.start()], self._buf[m.end():]
+            self._emit(sentence)
+
+    def finish(self) -> None:
+        """Say whatever is left once the model is done."""
+        if not self.held and self._buf.strip():
+            self._emit(self._buf)
+        self._buf = ""
+
+    def _emit(self, sentence: str) -> None:
+        if self._max and len(self.said) >= self._max:
+            return
+        if not self.said and (looks_like_analysis(self._raw) or _THINK_RE.search(self._raw)
+                              or "<think>" in self._raw.lower()):
+            self.held = True
+            return
+        line = for_speech(sentence)
+        if not line:
+            if not self.said:
+                self.held = True
+            return
+        self.said.append(line)
+        self._say(line)
+
+    def text(self) -> str:
+        return " ".join(self.said)
+
+
+def _generate(system: str, messages: list[dict], act: Act,
+              stream: "SentenceStream | None" = None) -> str:
     """Call the chat model, falling back through router → intent LLM."""
     cfg = _conv_cfg()
     temperature = float(cfg.get("temperature", 0.7))
@@ -585,11 +658,15 @@ def _generate(system: str, messages: list[dict], act: Act) -> str:
             temperature=temperature,
             timeout_sec=timeout_sec,
             validate=lambda t: not looks_like_analysis(t),
+            on_text=stream.feed if stream is not None else None,
         )
         logger.info("conversation: replied via %s", candidate)
         return text
     except Exception as exc:
         logger.warning("conversation: model_router failed — %s", exc)
+
+    if stream is not None and stream.started:
+        return ""                        # part of an answer was said; don't start another
 
     # 2. Whatever the intent parser is configured to use.
     try:
@@ -682,13 +759,19 @@ def _honour_promise(text: str, reply: str, act: Act) -> str:
     return reply
 
 
-def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None) -> str:
+def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None,
+            say_part=None) -> str:
     """Produce a spoken reply for a conversational utterance.
 
     Records the user's turn into ``nora.dialogue``; NORA's side is recorded by
     ``speaker.speak`` once it has actually been spoken.  Always returns
     something speakable — a model outage degrades to a varied apology, never
     to silence.
+
+    With `say_part`, the reply is streamed: each sentence is passed to it as
+    soon as the model has written it, and the reply returned is what was said
+    that way. If nothing was (the first sentence looked like leaked
+    reasoning, or no model answered), the caller speaks the reply as usual.
     """
     started = time.monotonic()
     act = act or dialogue.classify(text)
@@ -711,8 +794,16 @@ def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None) -
     if not history or history[-1]["role"] != "user":
         history = history + [{"role": "user", "content": text}]
 
-    raw = _generate(system, history, act)
-    reply = for_speech(raw, max_sentences=int(_conv_cfg().get("max_sentences", 6)))
+    max_sentences = int(_conv_cfg().get("max_sentences", 6))
+    stream = SentenceStream(say_part, max_sentences) if say_part is not None else None
+    raw = _generate(system, history, act, stream)
+    if stream is not None and stream.started:
+        stream.finish()
+        reply = stream.text()
+        logger.info("conversation: act=%s streamed %d sentence(s), %.0fms", act.value,
+                    len(stream.said), (time.monotonic() - started) * 1000)
+        return _honour_promise(text, reply, act)
+    reply = for_speech(raw, max_sentences=max_sentences)
 
     if not reply:
         reply = phrasing.get("chat_unavailable", "I'm having trouble reaching my models right now.")
