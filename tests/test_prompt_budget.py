@@ -58,7 +58,7 @@ class RateLimitFailoverTest(unittest.TestCase):
         self.calls: list[str] = []
 
     def _script(self, fast_fails: bool):
-        def fake(text, cfg, memory_ctx=None, screen_ctx=None, net_attempts=3):
+        def fake(text, cfg, memory_ctx=None, screen_ctx=None, net_attempts=3, timeout_sec=None):
             self.calls.append(cfg["model"])
             if cfg["model"] == "m1" and fast_fails:
                 raise _rate_limited("30")
@@ -82,8 +82,8 @@ class RateLimitFailoverTest(unittest.TestCase):
         self.assertEqual(self.calls, ["m1"])
         self.assertLessEqual(model_router._cooldown_until("fast"), time.time())
 
-    def test_the_last_candidate_is_tried_even_while_cooling(self) -> None:
-        model_router._mark_exhausted("fast", 60)
+    def test_when_all_are_cooling_the_one_back_soonest_is_tried(self) -> None:
+        model_router._mark_exhausted("fast", 120)
         model_router._mark_exhausted("backup", 60)
         with self._script(fast_fails=False):
             intent_parser._parse_via_router("hi")
@@ -93,6 +93,107 @@ class RateLimitFailoverTest(unittest.TestCase):
         intent_parser._groq_clients.clear()
         client = intent_parser._get_groq_client("k", 5.0, base_url="https://a.example/v1", key_env="K")
         self.assertEqual(client.max_retries, 0)
+
+
+def _status_error(code: int):
+    from openai import APIStatusError
+    req = httpx.Request("POST", "https://a.example/v1/chat/completions")
+    return APIStatusError(f"Error code: {code}", response=httpx.Response(code, request=req), body=None)
+
+
+class CandidateHealthTest(unittest.TestCase):
+    """Sharp Phase C: a candidate that is gone, down or hanging is skipped
+    for a while, the way a rate-limited one already was."""
+
+    def setUp(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="nora-router-"))
+        for p in (mock.patch.object(intent_parser, "_intent_candidates", return_value=_CANDIDATES),
+                  mock.patch.object(model_router, "_STATE_PATH", tmp / "state.json"),
+                  mock.patch.object(model_router, "_state", {}),
+                  mock.patch.object(model_router, "_loaded", True)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_failures_are_told_apart(self) -> None:
+        from openai import APIConnectionError, APITimeoutError
+        req = httpx.Request("POST", "https://a.example/v1")
+        kinds = {
+            "rate_limited": _rate_limited(),
+            "gone": _status_error(404),
+            "auth": EnvironmentError("NVIDIA_API_KEY not set"),
+            "busy": _status_error(503),
+        }
+        for want, exc in kinds.items():
+            self.assertEqual(model_router.classify_failure(exc), want)
+        self.assertEqual(model_router.classify_failure(_status_error(410)), "gone")
+        self.assertEqual(model_router.classify_failure(APITimeoutError(request=req)), "busy")
+        self.assertEqual(model_router.classify_failure(APIConnectionError(request=req)), "busy")
+        # An unusable answer says nothing about the candidate's health.
+        self.assertEqual(model_router.classify_failure(ValueError("No valid JSON found")), "reply")
+        self.assertEqual(model_router.classify_failure(_status_error(400)), "reply")
+
+    def test_a_withdrawn_model_is_skipped_for_hours(self) -> None:
+        model_router.note_failure("fast", _status_error(404))
+        self.assertGreater(model_router._cooldown_until("fast"), time.time() + 3 * 3600)
+
+    def test_a_busy_model_backs_off_and_recovers(self) -> None:
+        waits = []
+        for _ in range(7):
+            model_router.note_failure("fast", _status_error(503))
+            waits.append(round(model_router._cooldown_until("fast") - time.time()))
+        self.assertEqual(waits[:3], [30, 60, 120])
+        self.assertEqual(waits[-1], model_router.BUSY_COOLDOWN_MAX_SEC)
+        model_router._clear_cooldown("fast")
+        model_router.note_failure("fast", _status_error(503))
+        self.assertAlmostEqual(model_router._cooldown_until("fast") - time.time(), 30, delta=1)
+
+    def test_a_bad_reply_does_not_cool_a_candidate(self) -> None:
+        model_router.note_failure("fast", ValueError("No valid JSON found in response"))
+        self.assertLessEqual(model_router._cooldown_until("fast"), time.time())
+
+    def test_a_hanging_candidate_fails_over_and_is_then_skipped(self) -> None:
+        from openai import APITimeoutError
+        calls, timeouts = [], []
+
+        def fake(text, cfg, memory_ctx=None, screen_ctx=None, net_attempts=3, timeout_sec=None):
+            calls.append(cfg["model"])
+            timeouts.append(timeout_sec)
+            if cfg["model"] == "m1":
+                raise APITimeoutError(request=httpx.Request("POST", "https://a.example/v1"))
+            return IntentResponse(intent="ok", steps=[])
+
+        cfg = {"timeouts": {"llm_sec": 45}, "llm_router": {"attempt_timeout_sec": 8}}
+        with mock.patch.object(intent_parser, "_parse_via_groq", side_effect=fake), \
+                mock.patch.object(intent_parser, "get_config", return_value=cfg), \
+                mock.patch.object(model_router, "get_config", return_value=cfg):
+            intent_parser._parse_via_router("hi")
+            intent_parser._parse_via_router("hi again")
+        self.assertEqual(calls, ["m1", "m2", "m2"])
+        # The first gets its share, not the turn's whole 45 s; the last, all of it.
+        self.assertEqual(timeouts, [8, 45, 45])
+
+    def test_the_chat_path_skips_a_gone_model_too(self) -> None:
+        calls = []
+
+        def call(candidate, *a, **k):
+            calls.append(candidate["name"])
+            if candidate["name"] == "fast":
+                raise _status_error(404)
+            return "hello"
+
+        with mock.patch.object(model_router, "_candidates_for", return_value=_CANDIDATES), \
+                mock.patch.object(model_router, "_call_openai_compatible", side_effect=call), \
+                mock.patch.object(model_router, "_log_attempt"):
+            self.assertEqual(model_router.complete("chat", [])[1], "backup")
+            self.assertEqual(model_router.complete("chat", [])[1], "backup")
+        self.assertEqual(calls, ["fast", "backup", "backup"])
+        self.assertEqual(model_router.cooldown_reason("fast"), "gone")
+
+    def test_a_gone_model_is_not_the_last_resort(self) -> None:
+        model_router.note_failure("fast", _status_error(404))
+        model_router._mark_exhausted("backup", 600)
+        plan = model_router.order(_CANDIDATES)
+        self.assertEqual([c["name"] for c, skip in plan if not skip], ["backup"])
 
 
 class PromptBudgetTest(unittest.TestCase):

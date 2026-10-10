@@ -396,7 +396,7 @@ def check_ollama_connection() -> bool:
 
 def _parse_via_groq(
     text: str, cfg: dict, memory_ctx: dict | None = None,
-    screen_ctx: dict | None = None, net_attempts: int = 3,
+    screen_ctx: dict | None = None, net_attempts: int = 3, timeout_sec: float | None = None,
 ) -> IntentResponse:
     """Call an OpenAI-compatible endpoint to parse intent.
 
@@ -416,7 +416,7 @@ def _parse_via_groq(
     model = cfg.get("model", "openai/gpt-oss-120b")
     temperature = float(cfg.get("temperature", 0.1))
     max_tokens = int(cfg.get("max_tokens", 512))
-    timeout_sec = float(get_config().get("timeouts", {}).get("llm_sec", 20))
+    timeout_sec = timeout_sec or float(get_config().get("timeouts", {}).get("llm_sec", 20))
     system_prompt = _build_system_prompt(memory_ctx, screen_ctx, text)
 
     client = _get_groq_client(
@@ -681,37 +681,32 @@ def _parse_via_router(
     router's *configuration* rather than its call path.
     """
     import time as _time
-    from openai import RateLimitError
     from nora import model_router
 
     errors: list[str] = []
-    candidates = _intent_candidates()
+    total = float(get_config().get("timeouts", {}).get("llm_sec", 20))
+    plan = model_router.order(_intent_candidates())
+    last_tried = max((i for i, (_, skip) in enumerate(plan) if not skip), default=-1)
 
-    for i, candidate in enumerate(candidates):
+    for i, (candidate, skip) in enumerate(plan):
         name = candidate.get("name", candidate.get("model", "?"))
-        # Rate-limited a moment ago: don't spend a round trip learning it
-        # again. The last candidate is always tried rather than failing flat.
-        wait = model_router._cooldown_until(name) - _time.time()
-        if wait > 0 and i < len(candidates) - 1:
-            logger.info("intent: skipping %s (rate-limited for %.0fs more)", name, wait)
+        # Rate-limited, gone or hanging a moment ago: don't spend a round trip
+        # learning it again (model_router.order keeps one to try if all are).
+        if skip:
+            logger.info("intent: skipping %s (%s for %.0fs more)", name,
+                        model_router.cooldown_reason(name) or "cooling down",
+                        model_router._cooldown_until(name) - _time.time())
             errors.append(f"{name}: cooling down")
             continue
         try:
             result = _parse_via_groq(text, candidate_cfg(candidate), memory_ctx, screen_ctx,
-                                     net_attempts=1)
+                                     net_attempts=1,
+                                     timeout_sec=model_router.attempt_timeout(total, i == last_tried))
             model_router._clear_cooldown(name)
             return result
-        except RateLimitError as e:
-            retry_after = None
-            try:
-                retry_after = float(e.response.headers.get("retry-after", ""))
-            except (TypeError, ValueError, AttributeError):
-                pass
-            model_router._mark_exhausted(name, retry_after)
-            logger.warning("intent: %s rate-limited (retry after %ss) — next candidate", name, retry_after)
-            errors.append(f"{name}: rate-limited")
         except Exception as e:
-            logger.warning("intent: %s failed — %s", name, e)
+            kind = model_router.note_failure(name, e)
+            logger.warning("intent: %s failed (%s) — %s", name, kind, e)
             errors.append(f"{name}: {e}")
 
     raise RuntimeError("all intent candidates failed: " + " | ".join(errors))

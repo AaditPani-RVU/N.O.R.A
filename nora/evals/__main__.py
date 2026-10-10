@@ -245,6 +245,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no eval set at {args.cases}; build one from python -m nora.evals.harvest")
         return 2
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    if args.model:
+        # The keys live in .env, as NORA reads them; without this every call
+        # failed on a missing key and was scored as a wrong answer.
+        from nora.doctor import _load_env
+        _load_env()
     cases = load(args.cases)
     if args.tag:
         cases = [c for c in cases if set(c.tags) & set(args.tag)]
