@@ -175,6 +175,10 @@ class LinkPrefs(context: Context) {
     var followUp: Boolean
         get() = prefs.getBoolean("follow_up", true)
         set(v) = prefs.edit().putBoolean("follow_up", v).apply()
+    /** Say "One sec" in the phone's voice when the core is slow to answer. */
+    var ack: Boolean
+        get() = prefs.getBoolean("voice_ack", true)
+        set(v) = prefs.edit().putBoolean("voice_ack", v).apply()
     var voiceStats: String?
         get() = prefs.getString("voice_stats", null)
         set(v) = prefs.edit().putString("voice_stats", v).apply()

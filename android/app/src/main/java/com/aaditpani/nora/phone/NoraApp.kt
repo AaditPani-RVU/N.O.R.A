@@ -96,6 +96,7 @@ class LinkController(private val app: Context) {
         override var tts: String by prefs::voiceTts
         override var bargeInOn: Boolean by prefs::bargeIn
         override var followUp: Boolean by prefs::followUp
+        override var ackOn: Boolean by prefs::ack
         override var savedStats: String? by prefs::voiceStats
     })
 

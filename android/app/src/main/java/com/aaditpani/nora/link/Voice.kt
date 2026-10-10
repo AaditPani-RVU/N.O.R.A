@@ -72,6 +72,8 @@ class SpeechQueue(private val out: VoiceOutput, private val clock: () -> Long = 
             var fallBack = false
         }
         class Tts(override val text: String) : Segment()
+        /** The phone's own "One sec" while the core is slow: not the answer. */
+        class Ack(override val text: String) : Segment()
     }
 
     private val queue = ArrayDeque<Segment>()
@@ -86,12 +88,17 @@ class SpeechQueue(private val out: VoiceOutput, private val clock: () -> Long = 
     /** Which voice was heard first: "core" or "phone". */
     @Volatile var firstVoice: String? = null
         private set
+    /** When the acknowledgement was heard, if one was; never counts as first sound. */
+    @Volatile var ackSoundAt: Long? = null
+        private set
+    private var answered = false
     /** Called once everything said has been played and the turn is over. */
     var onIdle: (() -> Unit)? = null
 
     @Synchronized
     fun line(text: String, audio: AudioSpec?) {
         if (stopped || text.isBlank()) return
+        answered = true
         val seg = if (audio != null) Segment.Pcm(audio, text).also { byStream[audio.stream] = it }
         else Segment.Tts(text)
         queue.addLast(seg)
@@ -122,6 +129,17 @@ class SpeechQueue(private val out: VoiceOutput, private val clock: () -> Long = 
         }
     }
 
+    /**
+     * Say [text] in the phone's voice while waiting for the core. Only before
+     * any of the answer has arrived; the answer queues behind it. True if said.
+     */
+    @Synchronized
+    fun ack(text: String): Boolean {
+        if (stopped || answered || turnDone || playing != null) return false
+        playing = Segment.Ack(text).also { out.speak(it.text) }
+        return true
+    }
+
     /** The core finished the turn. Idle comes once the last segment has played. */
     @Synchronized
     fun turnDone() {
@@ -131,6 +149,10 @@ class SpeechQueue(private val out: VoiceOutput, private val clock: () -> Long = 
 
     @Synchronized
     fun soundStarted(voice: String) {
+        if (playing is Segment.Ack) {
+            if (ackSoundAt == null) ackSoundAt = clock()
+            return
+        }
         if (firstSoundAt == null) {
             firstSoundAt = clock()
             firstVoice = voice
@@ -169,7 +191,7 @@ class SpeechQueue(private val out: VoiceOutput, private val clock: () -> Long = 
         playing = seg
         when (seg) {
             null -> if (turnDone) fireIdle()
-            is Segment.Tts -> out.speak(seg.text)
+            is Segment.Tts, is Segment.Ack -> out.speak(seg.text)
             is Segment.Pcm -> {
                 out.startPcm(seg.spec.rate)
                 seg.held.forEach(out::writePcm)
@@ -199,6 +221,7 @@ data class VoiceTiming(
     val firstSound: Long?,
     val tts: String,
     val route: String,
+    val ackSound: Long? = null,
 ) {
     val firstAudioMs: Long? get() = firstSound?.let { it - speechEnd }
 
@@ -207,6 +230,7 @@ data class VoiceTiming(
         .put("stt_ms", recognised - speechEnd)
         .put("core_first_say_ms", firstSay?.let { it - speechEnd } ?: JSONObject.NULL)
         .put("first_audio_ms", firstAudioMs ?: JSONObject.NULL)
+        .put("ack_ms", ackSound?.let { it - speechEnd } ?: JSONObject.NULL)
         .put("tts", tts)
         .put("route", route)
 }

@@ -175,7 +175,9 @@ class VoiceOut:
 # ── latency measurements from devices ────────────────────────────────────────
 
 LATENCY_PATH = Path(__file__).resolve().parents[2] / "nora_voice_latency.jsonl"
-_FIELDS = ("speech_end_ms", "stt_ms", "core_first_say_ms", "first_audio_ms", "tts", "route")
+# ack_ms: when the phone's own "One sec" started, if the core was slow to say
+# anything (Sharp Phase C). Kept apart from first_audio_ms, which is the answer.
+_FIELDS = ("speech_end_ms", "stt_ms", "core_first_say_ms", "first_audio_ms", "ack_ms", "tts", "route")
 
 
 def record_turn(device_id: str, data: dict) -> dict:

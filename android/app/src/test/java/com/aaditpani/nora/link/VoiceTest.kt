@@ -128,6 +128,62 @@ class VoiceTest {
     }
 
     @Test
+    fun anAckPlaysFirstAndTheAnswerQueuesBehindIt() {
+        val (q, out) = queue()
+        assertTrue(q.ack("One sec."))
+        q.soundStarted("phone")
+        q.line("Paris.", null)
+        assertEquals(listOf("speak One sec."), out.log)
+        q.segmentDone()
+        assertEquals(listOf("speak One sec.", "speak Paris."), out.log)
+        q.soundStarted("phone")
+        // The acknowledgement is timed apart; first sound is the answer's.
+        assertEquals(1000L, q.ackSoundAt)
+        assertEquals(1000L, q.firstSoundAt)
+    }
+
+    @Test
+    fun noAckOnceTheAnswerHasStarted() {
+        val (q, out) = queue()
+        q.line("Paris.", null)
+        assertFalse(q.ack("One sec."))
+        assertEquals(listOf("speak Paris."), out.log)
+        assertNull(q.ackSoundAt)
+    }
+
+    @Test
+    fun noAckAfterTheTurnEndedOrWasStopped() {
+        val (q, _) = queue()
+        q.turnDone()
+        assertFalse(q.ack("One sec."))
+        val (q2, _) = queue()
+        q2.stop()
+        assertFalse(q2.ack("One sec."))
+    }
+
+    @Test
+    fun aTurnThatOnlyAckedGoesIdleWhenTheAckEnds() {
+        val (q, _) = queue()
+        var idle = false
+        q.onIdle = { idle = true }
+        q.ack("One sec.")
+        q.turnDone()
+        assertFalse(idle)
+        q.segmentDone()
+        assertTrue(idle)
+    }
+
+    @Test
+    fun theAckIsReportedApartFromFirstAudio() {
+        val t = VoiceTiming(speechEnd = 10_000, recognised = 10_900, firstSay = 13_000, firstSound = 13_300,
+            tts = "phone", route = "phone", ackSound = 11_600)
+        val e = t.toEvent()
+        assertEquals(1600, e.getInt("ack_ms"))
+        assertEquals(3300, e.getInt("first_audio_ms"))
+        assertTrue(VoiceTiming(1, 2, null, null, "phone", "phone").toEvent().isNull("ack_ms"))
+    }
+
+    @Test
     fun timingIsMeasuredFromTheEndOfSpeech() {
         val t = VoiceTiming(speechEnd = 10_000, recognised = 10_300, firstSay = 11_000, firstSound = 11_250,
             tts = "core", route = "bluetooth")

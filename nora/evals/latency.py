@@ -85,6 +85,16 @@ def report(days: float = 7.0, out=print) -> dict:
         out(f"phone voice turns: {len(voice)} (ms from the end of speech, p50/p90): "
             + ", ".join(f"{c.removesuffix('_ms')} {_q(cells[c])}" for c in cols))
         summary["voice"] = {"turns": len(voice), **{c: _q(v) for c, v in cells.items()}}
+        # The phone says "One sec" when the core is slow: the first thing
+        # heard is then the acknowledgement, reported apart from the answer.
+        acked = [v for v in voice if isinstance(v.get("ack_ms"), int)]
+        if acked:
+            heard = [min(t for t in (v.get("ack_ms"), v.get("first_audio_ms")) if isinstance(t, int))
+                     for v in voice
+                     if isinstance(v.get("ack_ms"), int) or isinstance(v.get("first_audio_ms"), int)]
+            out(f"  acknowledged {len(acked)}/{len(voice)}; first sound counting it {_q(heard)}")
+            summary["voice"]["acknowledged"] = len(acked)
+            summary["voice"]["first_sound_ms"] = _q(heard)
     return summary
 
 

@@ -68,6 +68,8 @@ class VoiceController(private val app: Context, private val host: Host) {
         var tts: String
         var bargeInOn: Boolean
         var followUp: Boolean
+        /** Say "One sec" when the core is slow to answer. */
+        var ackOn: Boolean
         var savedStats: String?
     }
 
@@ -228,6 +230,12 @@ class VoiceController(private val app: Context, private val host: Host) {
         t.queue.onIdle = { main.launch { finished(t) } }
         turn = t
         _ui.update { it.copy(phase = VoicePhase.THINKING, level = 0f) }
+        if (host.ackOn) main.launch {
+            // Silence from the core past this reads as a hang; a short word
+            // in the phone's voice says she heard (Sharp Phase C).
+            delay(ACK_AFTER_MS)
+            if (turn === t && t.firstSay == null) t.queue.ack(ACKS.random())
+        }
     }
 
     private fun recogniserFailed(error: Int) {
@@ -351,7 +359,7 @@ class VoiceController(private val app: Context, private val host: Host) {
         if (t.recorded) return
         t.recorded = true
         val timing = VoiceTiming(t.speechEnd, t.recognised, t.firstSay, t.queue.firstSoundAt,
-            t.queue.firstVoice ?: t.tts, route.describe())
+            t.queue.firstVoice ?: t.tts, route.describe(), t.queue.ackSoundAt)
         host.emitTiming(timing.toEvent())
         if (timing.firstAudioMs != null) {
             stats.add(timing)
@@ -376,5 +384,8 @@ class VoiceController(private val app: Context, private val host: Host) {
         private const val SILENCE_MS = 700
         private const val SPEAKER_MARGIN_DB = 20.0
         private const val HEADSET_MARGIN_DB = 12.0
+        /** How long after the turn is sent the core may be silent before "One sec". */
+        private const val ACK_AFTER_MS = 600L
+        private val ACKS = listOf("One sec.", "Just a moment.", "Let me see.")
     }
 }

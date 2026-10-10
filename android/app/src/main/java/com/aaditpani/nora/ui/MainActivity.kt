@@ -736,6 +736,7 @@ private fun VoiceSettings(c: LinkController) {
     var tts by remember { mutableStateOf(c.prefs.voiceTts) }
     var bargeIn by remember { mutableStateOf(c.prefs.bargeIn) }
     var followUp by remember { mutableStateOf(c.prefs.followUp) }
+    var ack by remember { mutableStateOf(c.prefs.ack) }
     var micGranted by remember { mutableStateOf(false) }
     var isAssistant by remember { mutableStateOf(false) }
     val now = rememberNow()
@@ -784,6 +785,14 @@ private fun VoiceSettings(c: LinkController) {
             HudToggle(followUp, { followUp = it; c.prefs.followUp = it })
         }
         Hairline()
+        Row(Modifier.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Tracked("SAY ONE SEC", color = Hud.Txt, size = 10.sp, spacing = 1.5.sp)
+                Detail("When the core takes a moment, the phone says so instead of going quiet.")
+            }
+            HudToggle(ack, { ack = it; c.prefs.ack = it })
+        }
+        Hairline()
         Access("DIGITAL ASSISTANT (HOLD POWER)", isAssistant) {
             ctx.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
         }
@@ -793,7 +802,8 @@ private fun VoiceSettings(c: LinkController) {
             last?.let { r ->
                 fun ms(k: String) = if (r.isNull(k)) "—" else "${r.optLong(k)} ms"
                 Detail("Last: heard ${ms("stt_ms")} · first words ${ms("core_first_say_ms")} · " +
-                    "audio ${ms("first_audio_ms")} (${r.optString("tts")}, ${r.optString("route")})")
+                    "audio ${ms("first_audio_ms")}" + (if (r.isNull("ack_ms") || !r.has("ack_ms")) "" else " · one sec ${ms("ack_ms")}") +
+                    " (${r.optString("tts")}, ${r.optString("route")})")
             }
             Spacer(Modifier.height(6.dp))
             HudButton("RESET MEASUREMENTS", { c.voice.clearStats() }, Modifier.fillMaxWidth(), color = Hud.Light)
