@@ -100,6 +100,7 @@ import com.aaditpani.nora.link.ConfirmPrompt
 import com.aaditpani.nora.link.ConfirmSteps
 import com.aaditpani.nora.link.Delivery
 import com.aaditpani.nora.link.LinkState
+import com.aaditpani.nora.link.Memory
 import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
 import com.aaditpani.nora.link.Sender
@@ -266,7 +267,7 @@ private fun HeaderSweep(accent: Color) {
 private fun Tabs(tab: Int, onTab: (Int) -> Unit, accent: Color, waiting: Int) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("CHAT", "SYSTEM", "LOG").forEachIndexed { i, label ->
+        listOf("CHAT", "SYSTEM", "MEMORY", "LOG").forEachIndexed { i, label ->
             val on = tab == i
             Box(Modifier.weight(1f)
                 .background(accent.copy(alpha = if (on) 0.10f else 0.02f), RoundedCornerShape(2.dp))
@@ -318,6 +319,7 @@ private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>
                 when (tab) {
                     0 -> ChatTab(c, orb, state is LinkState.Connected, messages, confirms, authenticate, typing, voice, talk)
                     1 -> SystemTab(c, state, killed)
+                    2 -> MemoryTab(c, state is LinkState.Connected)
                     else -> LogTab(c)
                 }
             }
@@ -1060,6 +1062,85 @@ private fun tierColor(tier: Int) = when (tier) {
 }
 
 // ── log ──────────────────────────────────────────────────────────────────────
+
+// ── memory (Sharp F) ─────────────────────────────────────────────────────────
+
+/** What NORA was told to remember, read from the core, each one forgettable. */
+@Composable
+private fun MemoryTab(c: LinkController, connected: Boolean) {
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<Memory>?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var forgetting by remember { mutableStateOf<Memory?>(null) }
+
+    fun load() {
+        loading = true
+        scope.launch {
+            val got = c.memories()
+            failed = got == null
+            if (got != null) items = got.items
+            loading = false
+        }
+    }
+    LaunchedEffect(connected) { if (connected) load() }
+
+    Panel("WHAT NORA REMEMBERS", Modifier.padding(vertical = 4.dp), live = !items.isNullOrEmpty(),
+        badge = { Badge(items?.let { "${it.size} KEPT" } ?: "—", live = !items.isNullOrEmpty()) }) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HudButton(if (loading) "READING…" else "REFRESH", { if (!loading) load() }, Modifier.weight(1f),
+                color = Hud.Light)
+        }
+        val list = items
+        when {
+            !connected && list == null -> Detail("Not connected to the core. The list is read from it, not kept on the phone.")
+            failed && list == null -> Detail("The core didn't answer. Try again.")
+            list == null -> Detail("Reading…")
+            list.isEmpty() -> Box(Modifier.fillMaxWidth().padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
+                Tracked("[ NOTHING KEPT ]", color = Hud.Faint, size = 9.sp, spacing = 2.6.sp)
+            }
+            else -> LazyColumn(Modifier.fillMaxSize()) {
+                items(list, key = { it.id }) { m ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(m.text, color = Hud.Txt, fontFamily = Hud.Mono, fontSize = 13.sp, lineHeight = 18.sp)
+                            if (m.tsMs > 0) {
+                                Text(dayStamp.format(Date(m.tsMs)).uppercase(), Modifier.padding(top = 3.dp),
+                                    color = Hud.Faint, fontFamily = Hud.Mono, fontSize = 10.sp, letterSpacing = 0.5.sp)
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        HudButton("FORGET", { forgetting = m }, color = Hud.Red)
+                    }
+                    Hairline()
+                }
+            }
+        }
+    }
+
+    forgetting?.let { m ->
+        Dialog(onDismissRequest = { forgetting = null }) {
+            Box(Modifier.background(Hud.Bg)) {
+                Panel("FORGET", accent = Hud.Red, live = true) {
+                    Detail("NORA forgets this, and the words you said it in, everywhere she could recall them from:")
+                    Code(m.text)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HudButton("CANCEL", { forgetting = null }, Modifier.weight(1f), color = Hud.Light)
+                        HudButton("FORGET", {
+                            forgetting = null
+                            scope.launch {
+                                val after = c.forget(m.id)
+                                failed = after == null || after.forgotten != true
+                                if (after != null) items = after.items
+                            }
+                        }, Modifier.weight(1f), color = Hud.Red, strong = true)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun LogTab(c: LinkController) {

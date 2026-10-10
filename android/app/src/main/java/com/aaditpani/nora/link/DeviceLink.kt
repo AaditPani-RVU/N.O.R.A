@@ -1,6 +1,7 @@
 package com.aaditpani.nora.link
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -20,6 +21,7 @@ import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
@@ -111,6 +113,9 @@ class DeviceLink(
 
     @Volatile private var current: Socket? = null
 
+    /** `memories` requests waiting for the core's reply, by request id. */
+    private val memoryReplies = ConcurrentHashMap<String, CompletableDeferred<JSONObject?>>()
+
     fun start() {
         if (job?.isActive == true) return
         job = scope.launch { runLoop() }
@@ -151,6 +156,27 @@ class DeviceLink(
         if (voiceTts != null) body.put("voice", JSONObject().put("tts", voiceTts))
         val env = Protocol.envelope("utterance", body)
         return if (sock.resend(env)) env.getString("id") else null
+    }
+
+    /**
+     * What NORA was told to remember, or, with [forgetId], the list after
+     * forgetting that one (Sharp F). Null when not connected, refused or
+     * not answered in time.
+     */
+    suspend fun memories(forgetId: String? = null, timeoutMs: Long = 15_000): MemoryList? {
+        val sock = current ?: return null
+        val body = JSONObject().put("op", if (forgetId == null) "list" else "forget")
+        if (forgetId != null) body.put("id", forgetId)
+        val env = Protocol.envelope("memories", body)
+        val id = env.getString("id")
+        val reply = CompletableDeferred<JSONObject?>()
+        memoryReplies[id] = reply
+        return try {
+            if (!sock.resend(env)) null
+            else withTimeoutOrNull(timeoutMs) { reply.await() }?.let(MemoryList::parse)
+        } finally {
+            memoryReplies.remove(id)
+        }
     }
 
     /** The user talked over NORA's answer to [utteranceId]: the core stops making audio for it. */
@@ -262,6 +288,8 @@ class DeviceLink(
             "turn.done" -> chat?.onTurnDone(Protocol.corr(msg), body.optString("outcome"))
             "ping" -> sock.send("pong", corr = msg.getString("id"))
             "ack" -> Protocol.corr(msg)?.let(outbox::remove)
+            "memories" -> Protocol.corr(msg)?.let { memoryReplies[it]?.complete(body) }
+            "error" -> Protocol.corr(msg)?.let { memoryReplies[it]?.complete(null) }
             else -> Unit
         }
     }

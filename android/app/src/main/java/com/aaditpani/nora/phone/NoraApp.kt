@@ -16,6 +16,7 @@ import com.aaditpani.nora.link.Delivery
 import com.aaditpani.nora.link.DeviceLink
 import com.aaditpani.nora.link.LinkConfig
 import com.aaditpani.nora.link.LinkState
+import com.aaditpani.nora.link.MemoryList
 import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
 import com.aaditpani.nora.link.Protocol
@@ -205,6 +206,12 @@ class LinkController(private val app: Context) {
         chat.remove(id)
         send(m.text)
     }
+
+    /** What NORA remembers (the memory screen). Null when not connected. */
+    suspend fun memories(): MemoryList? = link?.memories()
+
+    /** Forget one memory; the list as it now stands, or null if that failed. */
+    suspend fun forget(id: String): MemoryList? = link?.memories(forgetId = id)
 
     /** The user's answer to a confirmation on screen. */
     fun answer(requestId: String, approved: Boolean) {
