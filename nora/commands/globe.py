@@ -22,6 +22,9 @@ _HERE = {"", "here", "me", "my location", "where i am", "my place", "home", "ove
 # Flights over a city by its own boundary can miss the airport outside it;
 # when a name finds none, look this far around its centre instead.
 _FLIGHT_RADIUS_KM = 60
+# GEV tries OpenSky's worldwide snapshot twice, 10 s each, before its
+# regional fallback answers; a shorter wait gave up just before it did.
+_FLIGHT_TIMEOUT_SEC = 35
 # Friendly layer words -> GEV layer ids.
 _LAYERS = {
     "flights": "flights", "planes": "flights", "aircraft": "flights", "air traffic": "flights",
@@ -152,13 +155,14 @@ def flights_near(place: str = "") -> str:
     if area is None:
         return "I don't know where you are right now."
     try:
-        summary, data = gev.call("aircraft_in_area", {"area": area[0], "airborne_only": True, "limit": 50})
+        summary, data = gev.call("aircraft_in_area", {"area": area[0], "airborne_only": True, "limit": 50},
+                                 timeout=_FLIGHT_TIMEOUT_SEC)
         if not data.get("total") and "place" in area[0]:
             cam = (data.get("view") or {}).get("camera") or {}
             if cam.get("lat") is not None:
                 summary, data = gev.call("aircraft_in_area", {
                     "area": {"lat": cam["lat"], "lon": cam["lon"], "radius_km": _FLIGHT_RADIUS_KM},
-                    "airborne_only": True, "limit": 50})
+                    "airborne_only": True, "limit": 50}, timeout=_FLIGHT_TIMEOUT_SEC)
                 summary = f"{data.get('total', 0)} aircraft within {_FLIGHT_RADIUS_KM} km of {place.strip()}."
     except gev.Unavailable:
         return _unavailable()
@@ -256,7 +260,7 @@ def situation_brief(place: str = "") -> str:
     if area is None:
         return "I don't know where you are right now."
     try:
-        summary, data = gev.call("situation_brief", {"area": area[0]}, timeout=20)
+        summary, data = gev.call("situation_brief", {"area": area[0]}, timeout=_FLIGHT_TIMEOUT_SEC)
     except gev.Unavailable:
         return _unavailable()
     except gev.Refused as e:
