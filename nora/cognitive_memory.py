@@ -162,6 +162,11 @@ def _blank_user_model() -> dict[str, Any]:
         "action_bigrams": {},
         # action -> {app: count}  (which apps are open when action fires)
         "action_context": {},
+        # "time_bin|dow|action" -> the dates it was seen on, and "src>dst" ->
+        # the dates that sequence was: a habit is something done on several
+        # days, not five times in one afternoon (Sharp F).
+        "pattern_days": {},
+        "bigram_days": {},
         # Total episodes seen
         "total_episodes": 0,
     }
@@ -199,6 +204,19 @@ def _update_user_model(actions: list[str], active_apps: list[str], ts: float) ->
             m["action_context"][action] = {}
         for app in active_apps:
             m["action_context"][action][app] = m["action_context"][action].get(app, 0) + 1
+
+    day = dt.date().isoformat()
+
+    def seen(table: str, key: str) -> None:
+        days = m.setdefault(table, {}).setdefault(key, [])
+        if day not in days:
+            days.append(day)
+            del days[:-60]
+
+    for action in set(actions):
+        seen("pattern_days", f"{tb}|{dow}|{action}")
+    for i in range(len(actions) - 1):
+        seen("bigram_days", f"{actions[i]}>{actions[i + 1]}")
 
     m["total_episodes"] = m.get("total_episodes", 0) + 1
     _save_user_model()
@@ -373,6 +391,9 @@ def get_behavioral_patterns() -> dict[str, Any]:
                     "when": f"{day_names[int(dow)]} {tb.replace('_', ' ')}",
                     "frequent_action": top[0][0],
                     "count": top[0][1],
+                    # Distinct dates it happened on; 0 for history recorded
+                    # before dates were kept.
+                    "days": len(m.get("pattern_days", {}).get(f"{tb}|{dow}|{top[0][0]}", [])),
                     "secondary": top[1][0] if len(top) > 1 else None,
                 })
 
@@ -385,6 +406,7 @@ def get_behavioral_patterns() -> dict[str, Any]:
                     "trigger": src,
                     "follows": dst,
                     "confidence": count,
+                    "days": len(m.get("bigram_days", {}).get(f"{src}>{dst}", [])),
                 })
     strong_workflows.sort(key=lambda x: -x["confidence"])
 

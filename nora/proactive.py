@@ -28,6 +28,10 @@ CHECK_INTERVAL_SEC = 60          # How often to evaluate patterns
 IDLE_THRESHOLD_SEC = 120         # User must be idle this long before suggestion fires
 SUGGESTION_COOLDOWN_SEC = 1800   # 30 minutes between proactive suggestions
 MIN_PATTERN_CONFIDENCE = 5       # Minimum occurrences before suggesting
+# ...on at least this many different days. One session's burst ("click on"
+# five times on a Saturday afternoon) is not a routine (Sharp F). A weekly
+# pattern ("Saturday afternoon") therefore needs this many weeks.
+MIN_PATTERN_DAYS = 3
 
 # â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
@@ -128,7 +132,7 @@ def _evaluate_proactive() -> None:
         if when_day != current_dow_name or when_tb != current_time_bin.replace("_", " "):
             continue
         if True:
-            if p.get("count", 0) >= MIN_PATTERN_CONFIDENCE:
+            if p.get("count", 0) >= MIN_PATTERN_CONFIDENCE and p.get("days", 0) >= MIN_PATTERN_DAYS:
                 action = p["frequent_action"]
                 if action in _CONTEXT_DEPENDENT_ACTIONS:
                     continue
@@ -143,7 +147,7 @@ def _evaluate_proactive() -> None:
 
     # Check strong workflow suggestions (top bigram with high confidence)
     for wf in patterns.get("workflow_patterns", [])[:3]:
-        if wf.get("confidence", 0) >= MIN_PATTERN_CONFIDENCE * 2:
+        if wf.get("confidence", 0) >= MIN_PATTERN_CONFIDENCE * 2 and wf.get("days", 0) >= MIN_PATTERN_DAYS:
             trigger = wf["trigger"]
             follows = wf["follows"]
             if follows in _CONTEXT_DEPENDENT_ACTIONS:
@@ -171,7 +175,7 @@ def _loop() -> None:
 
 
 def start() -> None:
-    global _running, _thread, IDLE_THRESHOLD_SEC, SUGGESTION_COOLDOWN_SEC, MIN_PATTERN_CONFIDENCE
+    global _running, _thread, IDLE_THRESHOLD_SEC, SUGGESTION_COOLDOWN_SEC, MIN_PATTERN_CONFIDENCE, MIN_PATTERN_DAYS
     if _running:
         return
     try:
@@ -183,6 +187,7 @@ def start() -> None:
         IDLE_THRESHOLD_SEC = cfg.get("idle_threshold_sec", IDLE_THRESHOLD_SEC)
         SUGGESTION_COOLDOWN_SEC = cfg.get("suggestion_cooldown_sec", SUGGESTION_COOLDOWN_SEC)
         MIN_PATTERN_CONFIDENCE = cfg.get("min_pattern_confidence", MIN_PATTERN_CONFIDENCE)
+        MIN_PATTERN_DAYS = cfg.get("min_pattern_days", MIN_PATTERN_DAYS)
     except Exception:
         pass
     _running = True
