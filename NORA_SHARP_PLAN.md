@@ -273,6 +273,38 @@ collections, session index, ambient log, transcript), so the words it was
 said in aren't found again either. The phone side is built and
 unit-tested, not yet installed on the Pixel.
 
+**Phase H, built 2026-10-10** (branch `sharp/h-globe`). God's Eye View
+(`~/Projects/gods-eye-view`, pinned at a08a53c) runs as
+`nora-globe.service`, a Vite server on localhost:5173. GEV serves MCP over
+plain HTTP at `/mcp`, so `nora/gev.py` is one JSON-RPC POST per question,
+with no bridge process. **Adapter** (`nora/commands/globe.py`):
+`flights_near`, `satellite_pass`, `quakes_near`, `situation_brief`,
+`globe_show`, all with flat arguments. Each says GEV's answer in speech
+(local time and compass words for a pass, "magnitude 2.5 or more" for
+"M2.5+", the first part of a place's name) and never hands the raw rows to
+the model. A city's own boundary can miss its flights (Bengaluru by name:
+0; 60 km around it: 9), so a name that finds none widens to a radius.
+"Me" and "here" use the weather's location. The three exit-criterion
+questions and five more phrasings take the fast path (9 eval cases
+`gev-*`, all decided offline and right; offline accuracy 217/218, no
+regressions). Measured over the eval set's 263 utterances, the adapter
+grows the intent prompt by 10 tokens on average and 127 at most (limit
+300). With GEV stopped, every command says the globe isn't running in
+well under a second; with GEV up but its upstream slow (OpenSky timed out
+during testing), it says the live data didn't come back. `nora doctor`
+checks it answers. **Dashboard**: a globe panel (`nora/static/gev.js`)
+frames GEV with `?embed=1` (the service allows only the dashboard's
+localhost origins) and posts each answer's view as `gev:view`. Photoreal
+3D only below 60 km altitude, Esri imagery above. The frame is built on the
+first view and dropped a minute after the panel closes. In headless
+Chrome (software rendering), views were applied in 3.3 s (earthquakes) and
+8.9 s (the ISS: GEV waits until it can follow the satellite); the first
+view took 20 s, which includes loading the globe. Not done: the phone
+(`open_url` needs GEV served over the tailnet, a `tailscale serve`
+change), a week of CPU, GPU and ion measurements, timing on the real
+dashboard, the optional FIRMS and AISStream keys, and G's quarterly check
+for GEV updates.
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent
