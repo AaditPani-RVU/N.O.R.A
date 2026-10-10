@@ -67,6 +67,9 @@ def _resolve(text: str, via: str = "phone"):
     # memory and Claude
     ("remember that my sister's birthday is on the 12th", "inject_knowledge", {}),
     ("ask claude to review my last commit", "ask_claude", {"question": "review my last commit"}),
+    # "play" heard as "lay"
+    ("lay some pink floyd", "play_on_phone", {"query": "pink floyd"}),
+    ("lay my workout playlist", "play_on_phone", {"kind": "playlist"}),
     # who someone is, looked up
     ("who's the prime minister of the UK", "tell_me_about", {}),
     ("who is Sundar Pichai", "tell_me_about", {}),
@@ -109,6 +112,9 @@ def test_held_out_phrasings(text, action, params):
     ("who is that", "tell_me_about"),
     ("who's playing right now", "tell_me_about"),
     ("who's using the most network", "tell_me_about"),
+    # "lay" that means lay
+    ("lay down for a bit", "play_on_phone"),
+    ("lay out my day", "play_on_phone"),
     # weather words in other senses
     ("what's the weather app called", "get_weather"),
 ])

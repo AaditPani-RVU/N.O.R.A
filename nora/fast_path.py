@@ -79,6 +79,10 @@ _TYPOS = [(re.compile(r"\b(?:calender|calndar|calandar|calander)\b", re.I), "cal
           (re.compile(r"\bmachien\b", re.I), "machine"),
           (re.compile(r"\bmu\s+(?=cpu|phone|calendar|battery|screen)", re.I), "my "),
           (re.compile(r"\byouy\b", re.I), "you")]   # tomorrow's spellings: nora.days
+# Misheard, not mistyped: the recogniser drops the "p" of a quick "play"
+# ("Lay some pink floyd"). Only before what is plainly music.
+_MISHEARD = [(re.compile(r"^lay\s+(?=(?:me\s+)?some\b|(?:a|the|that|this)\s+song\b|(?:some\s+)?music\b"
+                         r"|my\s+[\w' ]{1,30}playlist\b)", re.I), "play ")]
 
 
 def _normalise(text: str) -> str:
@@ -88,6 +92,8 @@ def _normalise(text: str) -> str:
     for typo, fix in _TYPOS:
         t = typo.sub(fix, t)
     t = _FILLER_RE.sub("", t)
+    for heard, meant in _MISHEARD:
+        t = heard.sub(meant, t)
     t = _SUFFIX_RE.sub("", t.rstrip(".,!?; "))
     return t.rstrip(".,!?;").strip()
 
