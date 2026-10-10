@@ -227,6 +227,29 @@ known miss. Seen on the way: Nemotron sometimes routes "shuffle my
 downloads on my phone" to the raw `phone.play_media` capability instead
 of `play_on_phone` (1 run in 3).
 
+**Phase E, built 2026-10-10** (branch `sharp/e-survive`), without the
+Gemini Nano spike, which needs the phone in hand. **Budget governor**
+(`nora/budget.py`): every call to a model with a free-tier limit in
+`budget.limits` (both Groq gpt-oss models: 8k/min, 200k/day) asks first and
+records what it spent, from the reply's usage (a stream is estimated). The
+ledger is a locked file, so the nightly evals and the core see one spend.
+A live turn skips a model whose window is already full, with no round trip
+and no cooldown; background work (jobs, hence schedules; the doctor; the
+scout; every `python -m nora.evals` run) leaves `live_reserve` (4k/min,
+40k/day) alone and waits up to 30 s for the minute window, never for the
+day's. **Degraded mode**: when every candidate is already cooling down, the
+one tried anyway gets 1.5 s (`llm_router.probe_timeout_sec`), not the
+turn's 45 s; a failed intent says which outage it is ("I can't reach my
+models" / "I've used up my model allowance") and what still works, instead
+of "I didn't catch that"; chat no longer asks the intent model again after
+the router found every model out. Tests: a simulated outage answers "can't
+right now" in under 2 s on the turn that finds it (connection refused) and
+on every turn after (even with a hanging provider), the fast path keeps
+working, and background spend stops 1k short of the minute's limit, so a
+live turn still fits. Not measured: a real outage, and the first turn
+against a provider that hangs, which still waits out
+`attempt_timeout_sec` per candidate before NORA knows.
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent

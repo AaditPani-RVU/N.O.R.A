@@ -551,7 +551,8 @@ class ConversationRespondTest(unittest.TestCase):
         with mock.patch.object(conversation, "_generate", return_value=""):
             reply = conversation.respond("what do you think about rust", None, Act.QUESTION)
         self.assertTrue(reply)
-        self.assertIn(reply, phrasing._POOLS["chat_unavailable"])
+        # Says it can't reach a model, and what still works without one.
+        self.assertIn("quick things still work", reply)
 
     def test_output_is_shaped_for_speech(self) -> None:
         with mock.patch.object(conversation, "_generate", return_value="**Sure!** Use `rg` 🚀"):

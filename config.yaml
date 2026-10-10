@@ -120,6 +120,10 @@ llm_router:
   # the turn's whole timeouts.llm_sec. Without a cap, one hanging model took
   # the full 45 s and left nothing for the fallbacks (Sharp Phase C).
   attempt_timeout_sec: 8
+  # When every candidate is already known to be out, the one tried anyway
+  # gets this long, so the turn is told "can't right now" in ~2 s instead of
+  # waiting out timeouts.llm_sec (Sharp Phase E, degraded mode).
+  probe_timeout_sec: 1.5
   roles:
     # Cloud-only as of 2026-08-19. The local candidate (qwen3:8b, 5.2 GB) does
     # not fit the GTX 1650's 4 GB and was timing out under real prompt sizes,
@@ -537,6 +541,19 @@ silent_hours:
   enabled: true
   min_history_bins: 20             # Total logged actions needed before a pattern is trusted
   quiet_threshold_frac: 0.03       # A time bin at/below this share of all activity counts as quiet
+
+budget:
+  # One token budget for free-tier models (nora/budget.py, Sharp Phase E).
+  # Live NORA, jobs, the scheduler, the doctor, the scout and the nightly
+  # evals all spend the same Groq key. A live turn skips a model whose window
+  # is full instead of collecting a 429; background work leaves live_reserve
+  # alone and waits (up to background_wait_sec) for the minute window.
+  # Keys are "<host>/<model>"; models not listed (NVIDIA, Ollama) are unmetered.
+  limits:
+    api.groq.com/openai/gpt-oss-120b: {tpm: 8000, tpd: 200000}
+    api.groq.com/openai/gpt-oss-20b: {tpm: 8000, tpd: 200000}
+  live_reserve: {tpm: 4000, tpd: 40000}
+  background_wait_sec: 30
 
 timeouts:
   transcribe_sec: 30               # Max seconds for Whisper transcription before giving up

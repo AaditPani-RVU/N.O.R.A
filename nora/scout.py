@@ -482,4 +482,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from nora import budget
+    with budget.background():          # trials never take live turns' tokens (Sharp E)
+        raise SystemExit(main())

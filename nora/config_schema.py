@@ -121,6 +121,8 @@ class LLMRouterConfig:
     roles: Mapping[str, tuple[ModelEndpoint, ...]] = field(default_factory=dict)
     # Seconds each candidate gets before the next is tried; 0 = no cap.
     attempt_timeout_sec: float = 0.0
+    # Seconds for the last look when every candidate is known to be out.
+    probe_timeout_sec: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -228,7 +230,7 @@ def _build_router(raw: Any, errors: list[str]) -> LLMRouterConfig:
         errors.append(f"llm_router: expected a mapping, got {type(raw).__name__}")
         return LLMRouterConfig()
 
-    unknown = [k for k in raw if k not in ("roles", "attempt_timeout_sec")]
+    unknown = [k for k in raw if k not in ("roles", "attempt_timeout_sec", "probe_timeout_sec")]
     for key in sorted(unknown):
         errors.append(f"llm_router.{key}: unknown setting — endpoints belong under 'roles'")
 
@@ -264,7 +266,12 @@ def _build_router(raw: Any, errors: list[str]) -> LLMRouterConfig:
     if isinstance(attempt, bool) or not isinstance(attempt, (int, float)) or attempt < 0:
         errors.append(f"llm_router.attempt_timeout_sec: expected seconds >= 0, got {attempt!r}")
         attempt = 0
-    return LLMRouterConfig(roles=roles, attempt_timeout_sec=float(attempt))
+    probe = raw.get("probe_timeout_sec", 1.5)
+    if not isinstance(probe, (int, float)) or isinstance(probe, bool) or probe <= 0:
+        errors.append(f"llm_router.probe_timeout_sec: expected seconds > 0, got {probe!r}")
+        probe = 1.5
+    return LLMRouterConfig(roles=roles, attempt_timeout_sec=float(attempt),
+                           probe_timeout_sec=float(probe))
 
 
 def _validate(cfg: NoraConfig, errors: list[str]) -> None:

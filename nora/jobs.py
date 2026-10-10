@@ -328,7 +328,11 @@ def _run_one(job_id: str) -> None:
     _update(job_id, status=job.status, started_at=job.started_at)
 
     try:
-        result = work() or ""
+        # Off-turn work spends what live turns leave over, and waits for the
+        # free tier's minute window rather than taking it (Sharp E).
+        from nora import budget
+        with budget.background():
+            result = work() or ""
         job.result = str(result).strip()
         job.status = STATUS_DONE
     except Exception as e:

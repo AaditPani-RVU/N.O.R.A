@@ -464,11 +464,16 @@ def _parse_via_groq(
         cfg.get("api_base") or "https://api.groq.com/openai/v1",
         model,
     )
+    from nora import budget
+    estimate = budget.estimate([{"content": system_prompt}, {"content": text}], max_tokens)
+
     last_exc: Exception = RuntimeError("no attempts made")
     for net_attempt in range(net_attempts):
         if net_attempt > 0:
             _time.sleep(net_attempt)  # 1s, 2s backoff
         for json_attempt in range(2):
+            # Each try is a call of its own against the free tier (Sharp E).
+            budget.admit(endpoint[0], model, estimate)
             prompt = text if json_attempt == 0 else f"Return ONLY a valid JSON object for this command: {text}"
             logger.info(
                 f"Sending to {model} (net {net_attempt+1}/{net_attempts}, "
@@ -495,6 +500,7 @@ def _parse_via_groq(
                 )
                 response_text = resp.choices[0].message.content or ""
                 usage = getattr(resp, "usage", None)
+                budget.record(endpoint[0], model, int(getattr(usage, "total_tokens", 0) or 0) or estimate)
                 logger.info("intent: %s answered in %.1fs (prompt %s tok, reply %s tok)", model,
                             _time.monotonic() - started, getattr(usage, "prompt_tokens", "?"),
                             getattr(usage, "completion_tokens", "?"))
@@ -723,6 +729,7 @@ def _parse_via_router(
     total = float(get_config().get("timeouts", {}).get("llm_sec", 20))
     plan = model_router.order(_intent_candidates())
     last_tried = max((i for i, (_, skip) in enumerate(plan) if not skip), default=-1)
+    probe = model_router.probing(plan)
 
     for i, (candidate, skip) in enumerate(plan):
         name = candidate.get("name", candidate.get("model", "?"))
@@ -734,10 +741,12 @@ def _parse_via_router(
                         model_router._cooldown_until(name) - _time.time())
             errors.append(f"{name}: cooling down")
             continue
+        allowed = model_router.attempt_timeout(total, i == last_tried)
+        if probe:                    # every model is known to be out: one quick look
+            allowed = model_router.probe_timeout(allowed)
         try:
             result = _parse_via_groq(text, candidate_cfg(candidate), memory_ctx, screen_ctx,
-                                     net_attempts=1,
-                                     timeout_sec=model_router.attempt_timeout(total, i == last_tried))
+                                     net_attempts=1, timeout_sec=allowed)
             model_router._clear_cooldown(name)
             return result
         except Exception as e:
@@ -745,7 +754,7 @@ def _parse_via_router(
             logger.warning("intent: %s failed (%s) — %s", name, kind, e)
             errors.append(f"{name}: {e}")
 
-    raise RuntimeError("all intent candidates failed: " + " | ".join(errors))
+    raise model_router.AllCandidatesFailed("all intent candidates failed: " + " | ".join(errors))
 
 
 def parse_intent(
@@ -872,17 +881,25 @@ def _call_llm(system: str, messages: list[dict]) -> str:
     if provider == "groq":
         import os
         from openai import OpenAI
+        from nora import budget
+        base_url = "https://api.groq.com/openai/v1"
+        payload = [{"role": "system", "content": system}] + messages
+        estimate = budget.estimate(payload, max_tokens)
+        budget.admit(base_url, model, estimate)
         client = OpenAI(
             api_key=os.environ.get("GROQ_API_KEY", ""),
-            base_url="https://api.groq.com/openai/v1",
+            base_url=base_url,
             timeout=timeout_sec,
+            max_retries=0,
         )
         resp = client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
-            messages=[{"role": "system", "content": system}] + messages,
+            messages=payload,
         )
+        usage = getattr(resp, "usage", None)
+        budget.record(base_url, model, int(getattr(usage, "total_tokens", 0) or 0) or estimate)
         return resp.choices[0].message.content or ""
 
     if provider == "claude":

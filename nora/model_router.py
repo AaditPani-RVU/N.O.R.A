@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from nora import trace
+from nora import budget, trace
 from nora.config import get_config
 
 logger = logging.getLogger("nora.model_router")
@@ -124,7 +124,11 @@ def classify_failure(exc: BaseException) -> str:
     busy          5xx, timeout, connection refused, over capacity
     reply         it answered, but the answer was unusable: not a health
                   problem, the next turn may well be fine
+    budget        NORA's own budget said no before asking (nora.budget):
+                  skipped this once, nothing learned about its health
     """
+    if isinstance(exc, budget.OverBudget):
+        return "budget"
     status = getattr(exc, "status_code", None)
     if status is None:
         response = getattr(exc, "response", None)
@@ -154,7 +158,7 @@ def note_failure(candidate_name: str, exc: BaseException) -> str:
             pass
         _mark_exhausted(candidate_name, retry_after)
         return kind
-    if kind == "reply":
+    if kind in ("reply", "budget"):
         return kind
     with _lock:
         _load()
@@ -202,6 +206,39 @@ def order(candidates: list[dict]) -> list[tuple[dict, bool]]:
     fallback = [n for n in names if cooldown_reason(n) != "gone"]
     pick = min(fallback, key=lambda n: until[n]) if fallback else None
     return [(c, n != pick) for c, n in zip(candidates, names)]
+
+
+def probing(plan: list[tuple[dict, bool]]) -> bool:
+    """Whether the only candidate `order` left to try is itself cooling
+    down: every model is known to be out, and this is one last look."""
+    now = time.time()
+    return all(skip or _cooldown_until(c.get("name", c.get("model", "?"))) > now for c, skip in plan)
+
+
+def probe_timeout(budget_sec: float) -> float:
+    """How long that last look gets (Sharp E): long enough for a model that
+    is back to answer, short enough that a turn with every model out is told
+    so within about two seconds instead of waiting out the full timeout."""
+    per = float(get_config().get("llm_router", {}).get("probe_timeout_sec", 1.5) or 1.5)
+    return min(per, budget_sec)
+
+
+def outage_line(error: BaseException | str = "") -> str:
+    """What NORA says when no model answered (Sharp E, degraded mode): which
+    kind of outage it is, and what still works without a model."""
+    text = str(error).lower()
+    with _lock:
+        _load()
+        now = time.time()
+        reasons = {v.get("reason") for v in _state.values() if v.get("cooldown_until", 0) > now}
+    if "tokens used" in text or (reasons and reasons <= {"rate_limited"}):
+        why = "I've used up my model allowance for the moment"
+    elif reasons == {"auth"}:
+        why = "my model providers are refusing my keys"
+    else:
+        why = "I can't reach my models right now"
+    return (f"{why}, so I can't do that one. The quick things still work: time, weather, "
+            f"calendar, music, timers and your phone. Try again in a minute.")
 
 
 def status() -> str:
@@ -265,6 +302,8 @@ def _call_openai_compatible(
     api_key = os.environ.get(candidate.get("api_key_env", ""), "")
     if candidate.get("api_key_env") and not api_key:
         raise EnvironmentError(f"{candidate['api_key_env']} not set")
+    estimate = budget.estimate(messages, max_tokens)
+    budget.admit(candidate["base_url"], candidate["model"], estimate)
 
     # max_retries=0: the SDK's own 429 retries sleep out retry-after before
     # the caller ever sees the 429, so the router's cooldown never engaged.
@@ -293,7 +332,11 @@ def _call_openai_compatible(
             if piece:
                 parts.append(piece)
                 on_text(piece)
-        return "".join(parts)
+        text = "".join(parts)
+        # A stream reports no usage: the prompt as estimated, the reply as said.
+        budget.record(candidate["base_url"], candidate["model"],
+                      estimate - min(max_tokens, 300) + len(text) // 4)
+        return text
     resp = client.chat.completions.create(
         model=candidate["model"],
         max_tokens=max_tokens,
@@ -302,6 +345,9 @@ def _call_openai_compatible(
         extra_body=extra_body,
     )
     message = resp.choices[0].message
+    usage = getattr(resp, "usage", None)
+    budget.record(candidate["base_url"], candidate["model"],
+                  int(getattr(usage, "total_tokens", 0) or 0) or estimate)
     # Provider-specific fields the OpenAI schema has no slot for land in
     # model_extra — Groq's agentic models return the searches they ran there
     # (`executed_tools`), which is how web_search gets its source URLs.
@@ -392,6 +438,7 @@ def complete(
     errors: list[str] = []
     plan = order(candidates)
     last_tried = max((i for i, (_, skip) in enumerate(plan) if not skip), default=-1)
+    probe = probing(plan)
 
     for i, (candidate, skip) in enumerate(plan):
         name = candidate.get("name", candidate.get("model", "?"))
@@ -407,19 +454,21 @@ def complete(
         try:
             if extras_out is not None:
                 extras_out.clear()
-            budget = attempt_timeout(timeout_sec, i == last_tried)
+            allowed = attempt_timeout(timeout_sec, i == last_tried)
+            if probe:
+                allowed = probe_timeout(allowed)
 
             def _piece(piece: str) -> None:
                 streamed[0] = True
                 on_text(piece)
 
             if candidate.get("provider") == "ollama":
-                text = _call_ollama(candidate, messages, max_tokens, temperature, budget, extras_out)
+                text = _call_ollama(candidate, messages, max_tokens, temperature, allowed, extras_out)
                 if on_text is not None and text:
                     _piece(text)
             else:
                 stream_kw = {"on_text": _piece} if on_text is not None else {}
-                text = _call_openai_compatible(candidate, messages, max_tokens, temperature, budget,
+                text = _call_openai_compatible(candidate, messages, max_tokens, temperature, allowed,
                                                extras_out, **stream_kw)
             latency_ms = (time.monotonic() - start) * 1000
             if not text.strip():
@@ -434,7 +483,7 @@ def complete(
         except Exception as e:
             latency_ms = (time.monotonic() - start) * 1000
             kind = note_failure(name, e)
-            outcome = "rate_limited" if kind == "rate_limited" else "error"
+            outcome = kind if kind in ("rate_limited", "budget") else "error"
             _log_attempt(role, candidate, outcome, latency_ms, error=str(e))
             trace.note_model(role, name, latency_ms / 1000, ok=False, error=outcome)
             logger.warning("model_router: %s failed for role=%s (%s) — %s", name, role, kind, e)

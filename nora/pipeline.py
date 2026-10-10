@@ -451,6 +451,14 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
         except Exception as e:
             logger.warning(f"Intent parsing failed: {e}")
             print(f"[NORA] Intent parsing error: {e}")
+            from nora import model_router
+            if isinstance(e, model_router.AllCandidatesFailed):
+                # No model answered: say so, not "I didn't catch that",
+                # which sent the user rephrasing at a dead line (Sharp E).
+                speak(model_router.outage_line(e), mood="error")
+                deps.frustration.record(text_lower, rms=rms, success=False)
+                ui_server.notify_stage("idle")
+                return TurnOutcome(kind="error", text=text, stage="models_down")
             speak(phrasing.get("not_understood"), mood="error")
             deps.frustration.record(text_lower, rms=rms, success=False)
             ui_server.notify_stage("idle")

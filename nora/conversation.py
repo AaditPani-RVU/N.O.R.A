@@ -649,8 +649,8 @@ def _generate(system: str, messages: list[dict], act: Act,
     payload = [{"role": "system", "content": system}] + messages
 
     # 1. The router — chat role, cloud-first with local fallback built in.
+    from nora import model_router
     try:
-        from nora import model_router
         text, candidate = model_router.complete(
             role="chat",
             messages=payload,
@@ -662,6 +662,12 @@ def _generate(system: str, messages: list[dict], act: Act,
         )
         logger.info("conversation: replied via %s", candidate)
         return text
+    except model_router.AllCandidatesFailed as exc:
+        # Every chat model was tried or known to be out. The intent parser's
+        # model is one of them, so asking it again only made a turn with
+        # every model down wait out one more timeout (Sharp E).
+        logger.warning("conversation: no model answered — %s", exc)
+        return ""
     except Exception as exc:
         logger.warning("conversation: model_router failed — %s", exc)
 
@@ -806,7 +812,9 @@ def respond(text: str, memory_ctx: dict | None = None, act: Act | None = None,
     reply = for_speech(raw, max_sentences=max_sentences)
 
     if not reply:
-        reply = phrasing.get("chat_unavailable", "I'm having trouble reaching my models right now.")
+        # Say which kind of outage it is and what still works (Sharp E).
+        from nora import model_router
+        reply = model_router.outage_line()
         logger.warning("conversation: empty reply, using fallback")
 
     # Deliberately NOT recorded here. speaker.speak() is the single choke point

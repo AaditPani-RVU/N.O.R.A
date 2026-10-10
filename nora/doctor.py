@@ -307,7 +307,9 @@ def start(speak_callback: Callable[..., None] | None = None) -> None:
         time.sleep(FIRST_RUN_DELAY_SEC)
         while True:
             try:
-                check_and_tell(speak_callback)
+                from nora import budget
+                with budget.background():   # its model checks leave live turns room
+                    check_and_tell(speak_callback)
             except Exception as e:
                 logger.warning("doctor run failed: %s", e)
             time.sleep(INTERVAL_SEC)
@@ -354,4 +356,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from nora import budget
+    with budget.background():
+        raise SystemExit(main())

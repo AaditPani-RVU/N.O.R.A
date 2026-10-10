@@ -40,3 +40,7 @@ _dev.DEV_PATH = Path(_tmp) / "nora_dev_mode.json"
 # nora.scout keeps what it has seen of every provider, and can edit config.yaml.
 from nora import scout as _scout  # noqa: E402
 _scout.STATE_PATH = Path(_tmp) / "nora_model_scout.json"
+
+# The shared token ledger (nora.budget) is read by the live core and the evals.
+from nora import budget as _budget  # noqa: E402
+_budget.LEDGER_PATH = Path(_tmp) / "nora_budget.json"
