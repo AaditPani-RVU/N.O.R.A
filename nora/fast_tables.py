@@ -87,6 +87,22 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
     def add_event(m):
         return _event(fp, m.group("rest"))
 
+    def live(action, **fixed):
+        # God's Eye View questions (Sharp H): flights, satellite passes,
+        # earthquakes. "me", "here" and no place at all mean where the user is.
+        def build(m):
+            p = (m.groupdict().get("place") or "").strip(" ,.?!")
+            p = re.sub(r"\s+(?:right\s+now|now|today|currently|at\s+the\s+moment|on\s+the\s+(?:globe|map|dashboard))$",
+                       "", p, flags=re.I)
+            p = re.sub(r"^(?:the\s+)?", "", p, flags=re.I) if p.lower().startswith("the ") and len(p) > 6 else p
+            if re.fullmatch(r"(?i)(?:me|us|here|my\s+(?:area|location|place|house|city)|where\s+i\s+am|this\s+area)?", p):
+                p = ""
+            params = {"place": p, **fixed}
+            if layers := m.groupdict().get("layers"):
+                params["layers"] = layers
+            return I(action.replace("_", " "), action, params)
+        return build
+
     def alarm(m):
         if not fp._device_offers("phone.set_alarm"):
             return None
@@ -233,6 +249,31 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             r"(?:remember|don'?t\s+forget)\s+(?:that\s+)?(?P<fact>my\s+" + _NOT_PLACE_FACT + r".{3,200})",
             r"(?P<fact>my\s+" + _NOT_PLACE_FACT + r".{3,200}?)[.,!]*\s+(?:could|can|will)\s+you\s+remember\s+(?:that|this|it)",
         ], remember_fact),
+
+        # ── the live globe: God's Eye View (Sharp H) ─────────────────────
+        ("satellite pass", [
+            r"when\s+(?:does|will|is|can\s+i\s+see)\s+(?:the\s+)?(?:iss|international\s+space\s+station|space\s+station)"
+            r"(?:\s+(?:next\s+)?(?:pass(?:ing)?|fly(?:ing)?|go(?:ing)?|com(?:e|ing)|be\s+visible|visible))?"
+            r"(?:\s+(?:over|above|by|from|in)\s+" + PLACE + r")?(?:\s+next)?",
+            r"(?:the\s+)?next\s+(?:iss|space\s+station)\s+pass(?:\s+(?:over|above|from|for)\s+" + PLACE + r")?",
+            r"(?:can\s+i\s+see|will\s+i\s+(?:be\s+able\s+to\s+)?see)\s+(?:the\s+)?(?:iss|space\s+station)\s+(?:tonight|today|tomorrow)",
+        ], live("satellite_pass", satellite="ISS")),
+        ("flights", [
+            WHATS + r"\s+(?:flying|in\s+the\s+(?:air|sky))\s+(?:over|above|near|around)\s+" + PLACE,
+            r"(?:how\s+many\s+|any\s+)?(?:planes|flights|aircraft|airplanes)\s+(?:are\s+(?:there\s+)?)?(?:flying\s+)?"
+            r"(?:over|above|near|around)\s+" + PLACE,
+            r"what\s+planes\s+are\s+(?:flying\s+)?(?:over|above|near|around)\s+" + PLACE,
+        ], live("flights_near")),
+        ("earthquakes", [
+            r"(?:(?:were|are)\s+there\s+|have\s+there\s+been\s+|was\s+there\s+)?(?:any\s+|recent\s+)?"
+            r"(?:earthquakes?|quakes?)\s+(?:near|in|around|close\s+to)\s+" + PLACE + r"(?:\s+(?:today|recently|lately))?",
+            r"(?:has|did)\s+(?:there\s+been\s+)?an?\s+earthquake\s+(?:hit\s+|in\s+|near\s+)" + PLACE,
+        ], live("quakes_near")),
+        ("globe layers", [
+            r"(?:show|put)\s+(?:me\s+)?(?P<layers>(?:flights|planes|satellites|earthquakes|fires|ships|storms|radar)"
+            r"(?:\s*(?:,|and)\s*(?:flights|planes|satellites|earthquakes|fires|ships|storms|radar))*)"
+            r"(?:\s+(?:over|in|near|around|on)\s+" + PLACE + r")?(?:\s+on\s+the\s+globe)",
+        ], live("globe_show")),
 
         # ── the globe ─────────────────────────────────────────────────────
         ("globe", [

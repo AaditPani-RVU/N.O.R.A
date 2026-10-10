@@ -218,6 +218,18 @@ def check_commands() -> list[Finding]:
             for mod, err in failures.items()]
 
 
+def check_globe() -> list[Finding]:
+    """God's Eye View, the globe service (Sharp H): flights, satellite passes
+    and earthquakes are answered from it."""
+    from nora import gev
+    if not gev.enabled():
+        return []
+    if gev.ping():
+        return [Finding("globe", True, "the globe answers")]
+    return [Finding("globe", False, "the globe isn't answering, so flight, satellite and earthquake questions can't be",
+                    "systemctl --user restart nora-globe")]
+
+
 CHECKS: list[tuple[str, Callable[[], list[Finding]]]] = [
     ("models", check_models),
     ("google", check_google),
@@ -226,6 +238,7 @@ CHECKS: list[tuple[str, Callable[[], list[Finding]]]] = [
     ("devices", check_phone),
     ("commands", check_commands),
     ("search", check_search),
+    ("globe", check_globe),
 ]
 
 

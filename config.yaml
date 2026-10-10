@@ -542,6 +542,15 @@ silent_hours:
   min_history_bins: 20             # Total logged actions needed before a pattern is trusted
   quiet_threshold_frac: 0.03       # A time bin at/below this share of all activity counts as quiet
 
+globe:
+  # God's Eye View (Sharp Phase H): a CesiumJS globe of public live data in
+  # ~/Projects/gods-eye-view, pinned at a08a53c, run by nora-globe.service
+  # (deploy/systemd). NORA asks it over MCP at <url>/mcp (nora/gev.py) and
+  # the dashboard frames <url>/?embed=1. Off: the globe commands say so.
+  enabled: true
+  url: "http://127.0.0.1:5173"
+  timeout_sec: 12
+
 budget:
   # One token budget for free-tier models (nora/budget.py, Sharp Phase E).
   # Live NORA, jobs, the scheduler, the doctor, the scout and the nightly
