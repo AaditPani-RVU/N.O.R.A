@@ -1,6 +1,6 @@
 # God's Eye View, the live globe NORA answers flight, satellite and
-# earthquake questions from (NORA_SHARP_PLAN.md Phase H). A Vite server on
-# localhost only: NORA reaches it over MCP at /mcp, the dashboard frames it
+# earthquake questions from (NORA_SHARP_PLAN.md Phase H). Vite's production
+# server on localhost only: NORA reaches it over MCP at /mcp, the dashboard frames it
 # with ?embed=1. The checkout is pinned at a08a53c; update it on purpose,
 # never automatically. `nora doctor` says when it stops answering.
 
@@ -12,7 +12,13 @@ After=network-online.target
 WorkingDirectory=%h/Projects/gods-eye-view
 # Only the dashboard's own origins may frame the embed-mode globe.
 Environment="GEV_EMBED_FRAME_ANCESTORS=http://localhost:8766 http://127.0.0.1:8766"
-ExecStart=/usr/bin/npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+# The production build, not the dev server: the dev server compiles the
+# app's hundreds of modules the first time a page asks for them, which made
+# the dashboard's first globe several seconds slower. Rebuilt on every start
+# (about 7 s), so it always matches the checkout.
+ExecStartPre=/usr/bin/npm run build
+ExecStart=/usr/bin/npm run preview -- --host 127.0.0.1 --port 5173 --strictPort
+TimeoutStartSec=180
 Restart=on-failure
 RestartSec=15
 Nice=5

@@ -4379,6 +4379,11 @@ function onUserTurn(text, seq) {
   if (!text) return;
   pendingSince = performance.now();
   orbReactToUser();
+  // Sounds like a globe question: start loading the globe now, while NORA
+  // works out the answer (Sharp H).
+  if (window.NORA_GEV && /\b(fly(ing)?|flights?|planes?|aircraft|iss|space station|satellites?|earthquakes?|quakes?|globe)\b/i.test(text)) {
+    NORA_GEV.warm();
+  }
   addTurn('you', text);
   addActivity(text, null);
   document.getElementById('cmd-cnt').textContent = ++cmdCount;
