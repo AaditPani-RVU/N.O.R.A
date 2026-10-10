@@ -116,6 +116,10 @@ llm_router:
   # "local" candidates need Ollama running with the model pulled
   # (`ollama pull qwen3:8b`) — harmless to leave configured before that's
   # done, the router just logs a connection error and falls through.
+  # Seconds each candidate gets before the next is tried; the last one gets
+  # the turn's whole timeouts.llm_sec. Without a cap, one hanging model took
+  # the full 45 s and left nothing for the fallbacks (Sharp Phase C).
+  attempt_timeout_sec: 8
   roles:
     # Cloud-only as of 2026-08-19. The local candidate (qwen3:8b, 5.2 GB) does
     # not fit the GTX 1650's 4 GB and was timing out under real prompt sizes,
@@ -145,6 +149,12 @@ llm_router:
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
         model: "nvidia/nemotron-3-super-120b-a12b"
+        # Without this it thinks first, spending the 512-token budget before
+        # the JSON: the eval of 2026-10-10 had 5 of 45 replies come back
+        # empty and a p50 of 6.8 s. With it: ~0.7 s on the same prompts.
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
       - name: nvidia_gpt_oss_20b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"

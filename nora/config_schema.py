@@ -119,6 +119,8 @@ class LLMRouterConfig:
     role that silently never answers.
     """
     roles: Mapping[str, tuple[ModelEndpoint, ...]] = field(default_factory=dict)
+    # Seconds each candidate gets before the next is tried; 0 = no cap.
+    attempt_timeout_sec: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -226,7 +228,7 @@ def _build_router(raw: Any, errors: list[str]) -> LLMRouterConfig:
         errors.append(f"llm_router: expected a mapping, got {type(raw).__name__}")
         return LLMRouterConfig()
 
-    unknown = [k for k in raw if k != "roles"]
+    unknown = [k for k in raw if k not in ("roles", "attempt_timeout_sec")]
     for key in sorted(unknown):
         errors.append(f"llm_router.{key}: unknown setting — endpoints belong under 'roles'")
 
@@ -258,7 +260,11 @@ def _build_router(raw: Any, errors: list[str]) -> LLMRouterConfig:
                 errors.append(f"{where}: duplicate endpoint name {ep.name!r}")
             seen.add(ep.name)
         roles[str(role)] = built
-    return LLMRouterConfig(roles=roles)
+    attempt = raw.get("attempt_timeout_sec", 0) or 0
+    if isinstance(attempt, bool) or not isinstance(attempt, (int, float)) or attempt < 0:
+        errors.append(f"llm_router.attempt_timeout_sec: expected seconds >= 0, got {attempt!r}")
+        attempt = 0
+    return LLMRouterConfig(roles=roles, attempt_timeout_sec=float(attempt))
 
 
 def _validate(cfg: NoraConfig, errors: list[str]) -> None:

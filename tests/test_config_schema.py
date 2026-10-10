@@ -170,6 +170,11 @@ class RouterTest(unittest.TestCase):
         eps = build_config(_real()).llm_router.roles["chat"]
         self.assertEqual(eps[0].extra_body.get("reasoning_format"), "hidden")
 
+    def test_attempt_timeout_is_read_and_checked(self):
+        self.assertEqual(build_config(_real()).llm_router.attempt_timeout_sec, 8.0)
+        self.assertIn("attempt_timeout_sec", self._err(
+            lambda r: r["llm_router"].update({"attempt_timeout_sec": -1})))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,7 +34,7 @@ from collections import Counter
 logger = logging.getLogger("nora.tool_retrieval")
 
 # Picked by retrieval, on top of CORE.
-K = 12
+K = 10
 
 # The rules in the prompt route open questions, places, weather, the screen
 # and "stop" to these; without them every unmatched question would be stuck.
@@ -230,11 +230,12 @@ def scores(text: str) -> dict[str, float]:
 
 
 def select(text: str, *, previous: list[str] | None = None,
-           previous_text: str = "", k: int = K) -> list[str]:
+           previous_text: str = "", k: int | None = None) -> list[str]:
     """The actions to show the intent model for `text`: CORE, the `k` best
     matches, and the actions of the turn before (`previous`), plus the best
     few for what was said before (`previous_text`), for follow-ups."""
     from nora import command_engine
+    k = K if k is None else k
     available = set(command_engine.get_available_actions())
     picked: list[str] = [a for a in CORE if a in available]
     for name in scores(text):
