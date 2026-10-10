@@ -36,6 +36,7 @@ AUTH_CONTEXT = b"nora-v1"
 DEVICE_TYPES = frozenset({
     "manifest", "result", "confirm_response", "event", "utterance",
     "ping", "pong", "kill", "voice.barge_in",
+    "memories",          # {"op": "list"} / {"op": "forget", "id"}: the memory screen (Sharp F)
 })
 
 # Error codes (plan §5). DEVICE_OFFLINE is core-side only.
