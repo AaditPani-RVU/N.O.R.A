@@ -237,7 +237,15 @@ async def handle_turn(text: str, deps: TurnDeps, rms: float = 0.0,
 
     def _traced_speak(*args, **kwargs):
         trace.mark("first_say")
-        return speak(*args, **kwargs)
+        result = speak(*args, **kwargs)
+        # NORA's side of the transcript, the same on every channel (Sharp F):
+        # Telegram's and the dashboard's replies used to go unrecorded, so a
+        # follow-up there had nothing to follow.
+        if not channel.records_itself:
+            line = args[0] if args else kwargs.get("text") or kwargs.get("line") or ""
+            if isinstance(line, str) and line.strip():
+                dialogue.record_nora(line, kind=kwargs.get("mood") or "info")
+        return result
 
     channel.speak = _traced_speak
     outcome: TurnOutcome | None = None
@@ -698,6 +706,15 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
     )
 
 
+async def run_heard(heard: tuple, deps: TurnDeps) -> TurnOutcome:
+    """One turn for what `_next_utterance` returned: (text, rms) from the mic,
+    or (text, 0.0, source) for text typed on the core, which is the same turn
+    on the laptop's speaker, recorded as typed there (Sharp F)."""
+    source = heard[2] if len(heard) > 2 else ""
+    ch = _channel.local(deps.speak, deps.confirm, source=source) if source else None
+    return await handle_turn(heard[0], deps, rms=heard[1], channel=ch)
+
+
 async def _next_utterance(listener: Listener, deps: TurnDeps) -> tuple[str, float] | None:
     """Block until there is something to act on. None means "nothing usable".
 
@@ -707,11 +724,12 @@ async def _next_utterance(listener: Listener, deps: TurnDeps) -> tuple[str, floa
     """
     from nora import ui_server
 
-    text = text_input.get_pending()
-    if text:
-        logger.info(f"Text input: {text}")
+    pending = text_input.pop_pending()
+    if pending:
+        text, source = pending
+        logger.info(f"Text input ({source}): {text}")
         print(f"[NORA] Text from UI: {text}", flush=True)
-        return text, 0.0
+        return text, 0.0, source
 
     ui_server.notify_stage("listening")
     audio = await listener.listen()
@@ -776,7 +794,7 @@ async def run() -> None:
             if heard is None:
                 continue
 
-            outcome = await handle_turn(heard[0], deps, rms=heard[1])
+            outcome = await run_heard(heard, deps)
             if outcome.kind == "exit":
                 wiring.stop_subsystems()
                 return

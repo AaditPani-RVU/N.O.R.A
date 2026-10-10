@@ -171,7 +171,8 @@ class TestDashboardRoutes(_TokenEnv, unittest.TestCase):
     def test_type_command_with_the_token_is_queued(self):
         status, _, _ = self._post("/type_command", {"text": "open spotify"}, token=TOKEN)
         self.assertEqual(status, 200)
-        self.assertEqual(_drain_text_queue(), ["open spotify"])
+        # Queued with where it was typed, so the transcript can say so (Sharp F).
+        self.assertEqual(_drain_text_queue(), [("open spotify", "dashboard")])
 
     def test_proc_kill_needs_the_token(self):
         with mock.patch("nora.visuals.kill_process") as kill:

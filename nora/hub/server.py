@@ -409,16 +409,48 @@ class Hub:
                                                   test=test))
             session._turns.add(task)
             task.add_done_callback(session._turns.discard)
+        elif kind == "memories":
+            task = asyncio.create_task(self._memories(session, msg))
+            session._turns.add(task)
+            task.add_done_callback(session._turns.discard)
         elif kind == "manifest":
             command_engine.unregister_device(session.device_id)
             self._apply_manifest(session, msg["body"].get("capabilities") or [])
             if not session.killed:
                 self._register(session)
 
+    # ── the memory screen (Sharp F) ──────────────────────────────────────────
+    async def _memories(self, session: Session, msg: dict) -> None:
+        """List what NORA was told to remember, or forget one of them. The
+        reply is a `memories` message with the list as it now stands."""
+        from nora import memories
+        body = msg["body"]
+        op = body.get("op", "list")
+        loop = asyncio.get_running_loop()
+        reply: dict = {}
+        try:
+            if op == "forget":
+                mid = str(body.get("id", ""))[:200]
+                done = await loop.run_in_executor(None, memories.forget, mid)
+                reply["forgotten"] = bool(done.get("ok"))
+                logger.info("%s forgot a memory (%s)", session.device_id,
+                            "done" if done.get("ok") else "not found")
+            elif op != "list":
+                session.send_nowait("error", {"code": protocol.INVALID_PARAMS,
+                                              "message": f"unknown op {op!r}"}, corr=msg["id"])
+                return
+            reply["items"] = await loop.run_in_executor(None, memories.list_memories)
+        except Exception as e:
+            logger.exception("memories %s failed: %s", op, e)
+            session.send_nowait("error", {"code": protocol.EXECUTION_FAILED,
+                                          "message": "couldn't read NORA's memory"}, corr=msg["id"])
+            return
+        session.send_nowait("memories", reply, corr=msg["id"])
+
     # ── turns from the device ────────────────────────────────────────────────
     async def _turn(self, session: Session, text: str, corr: str, *, core_tts: bool = False,
                     test: bool = False) -> None:
-        from nora import dialogue, pipeline, wiring
+        from nora import pipeline, wiring
         from nora.frustration import FrustrationTracker
 
         out = None
@@ -435,11 +467,8 @@ class Hub:
                 if audio is not None:
                     body["audio"] = audio
                 session.send_nowait("say", body, corr=corr)
-                # The laptop's speaker keeps what NORA said in the transcript;
-                # a device's lines must too. Without them the chat model saw
-                # only the user's side ("what time is it" x4, then "that's
-                # crazy") and answered every remark with the time.
-                dialogue.record_nora(line, kind=mood or "info")
+                # Into the transcript: the turn records every line said on a
+                # device channel (pipeline.handle_turn, Sharp F).
 
         async def confirm(req: _channel.ConfirmRequest) -> bool:
             return await self._ask(session, req.turn_id, req.rendered,

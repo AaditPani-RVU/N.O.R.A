@@ -55,6 +55,9 @@ class Utterance:
     text: str
     kind: str = "chat"           # chat | command | result | proactive | system
     ts: float = field(default_factory=time.time)
+    # Which device the turn was on: "local" (the core's mic), "dashboard",
+    # a paired phone's id, "telegram" (Sharp F). "" when said outside a turn.
+    device: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +65,7 @@ class Utterance:
             "text": self.text,
             "kind": self.kind,
             "ts": self.ts,
+            "device": self.device,
         }
 
 
@@ -83,12 +87,19 @@ def _index(text: str, role: str, kind: str) -> None:
         pass
 
 
+def _device() -> str:
+    """The device of the turn running in this context ("" outside a turn)."""
+    from nora import channel
+    ch = channel.current()
+    return ch.label if ch is not None else ""
+
+
 def record_user(text: str, kind: str = "chat") -> None:
     """Append something the user said."""
     if not text or not text.strip():
         return
     with _lock:
-        _turns.append(Utterance(speaker="user", text=text.strip(), kind=kind))
+        _turns.append(Utterance(speaker="user", text=text.strip(), kind=kind, device=_device()))
     _index(text, "user", kind)
 
 
@@ -123,7 +134,7 @@ def record_nora(text: str, kind: str = "chat") -> None:
     if _private.get():
         text = PRIVATE_PLACEHOLDER
     with _lock:
-        _turns.append(Utterance(speaker="nora", text=text.strip(), kind=kind))
+        _turns.append(Utterance(speaker="nora", text=text.strip(), kind=kind, device=_device()))
     _index(text, "nora", kind)
 
 

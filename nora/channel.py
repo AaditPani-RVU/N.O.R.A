@@ -61,6 +61,19 @@ class Channel:
     tainted: bool = False
     # A test turn runs normally but is not remembered (nora.dev).
     test: bool = False
+    # Where on the device the turn came from, when the device has more than
+    # one way in: "dashboard" or "keyboard" for text typed on the core.
+    source: str = ""
+    # Whether `speak` puts what was said into the transcript itself. Only the
+    # laptop speaker does (it knows how much was said before an interruption);
+    # for every other channel the turn records each line (Sharp F).
+    records_itself: bool = False
+
+    @property
+    def label(self) -> str:
+        """Who spoke, as the transcript keeps it: the device, or where on the
+        core the words came from."""
+        return self.source or self.device_id
 
     @property
     def can_confirm(self) -> bool:
@@ -74,13 +87,16 @@ class Channel:
 
 
 def local(speak: Callable[..., None],
-          confirm: Callable[[], Awaitable[bool]]) -> Channel:
-    """The core's own mic and speaker, built from the classic `TurnDeps` edges."""
+          confirm: Callable[[], Awaitable[bool]], source: str = "") -> Channel:
+    """The core's own mic and speaker, built from the classic `TurnDeps` edges.
+    `source` names text typed on the core ("dashboard", "keyboard")."""
 
     async def _confirm(_request: ConfirmRequest) -> bool:
         return await confirm()
 
-    return Channel(device_id=LOCAL_DEVICE, kind="voice", speak=speak, confirm=_confirm)
+    from nora import speaker
+    return Channel(device_id=LOCAL_DEVICE, kind="text" if source else "voice", speak=speak,
+                   confirm=_confirm, source=source, records_itself=speak is speaker.speak)
 
 
 class Collector:

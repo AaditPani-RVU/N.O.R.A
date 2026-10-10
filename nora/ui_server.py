@@ -411,7 +411,7 @@ async def _ws_connection_handler(websocket: Any, token: str) -> None:
                 text = (msg.get("text") or "").strip()
                 if text:
                     from nora import text_input
-                    text_input._queue.put(text)
+                    text_input.submit(text, "dashboard")
             elif msg_type == "ptt_start":
                 _ptt_event.set()
             elif msg_type == "ptt_end":
@@ -695,7 +695,7 @@ class _Handler(BaseHTTPRequestHandler):
             if text:
                 print(f"[NORA UI] /type_command received: {text!r}", flush=True)
                 from nora import text_input
-                text_input._queue.put(text)
+                text_input.submit(text, "dashboard")
                 print(f"[NORA UI] Queued. Queue size now: {text_input._queue.qsize()}", flush=True)
             self._json_ok(b"{}")
         else:
