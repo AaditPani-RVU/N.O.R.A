@@ -197,6 +197,36 @@ Not yet: the exit criterion's on-phone part, 20 real-mix voice turns with
 these fixes, reported with and without the acknowledgement
 (`python -m nora.evals.latency`).
 
+**Phase D, built 2026-10-10** (branch `sharp/d-hear`). **Name repair**
+(`nora/music_names.py`): the artists and tracks in the user's playlists
+(325 and 269), rebuilt daily by the prefetch thread. A heard name is scored
+against each by spelling and by a rough sound key, averaged. Spotify's own
+fuzzy search couldn't do this: "deptones" finds Nirvana there, "darkpunk"
+an artist called DarKPunK. Real mishearings scored 75–94 against the
+intended artist. Thirty popular names not in the library scored at most 71
+against anything in it. So an artist is repaired at ≥ 74 with a 10-point
+lead; below 88 NORA says what she assumed ("Taking 'deaf tools' as
+Deftones") instead of asking, since NORA has no ask-and-answer turn yet
+and a wrong song costs one "stop". The eval scores against a frozen copy
+(`evals/music_names.json`, `python -m nora.evals --freeze-names`).
+**Recogniser biasing**: the hub's `welcome` carries `speech_hints`, the 100
+most-played artists, and the phone passes them as `EXTRA_BIASING_STRINGS`
+(built and unit-tested, not yet installed on the Pixel). **Route repair**:
+"who is X" / "who runs X" go to `tell_me_about` without a model call;
+"lay some pink floyd" is read as "play"; the Ladakh trip already routed
+right after Phase C's retrieval. Eval: offline routing 209/210 (was
+204/209), 74% answered without a model call; the eval set's music names
+resolve 5 of 7 (exit criterion ≥ 90% on the intended artist: not met on
+this small sample).
+Still open: Stromae ("stomay") isn't in any playlist. The Spotify login
+predates the history scopes (followed, top, recent, saved), which are now
+asked for. It also lacks the playback scopes, so Connect playback falls
+back to the phone. `python -m nora.spotify_user login` grants both.
+"Lane is 3,500 by Charles Gambino" (for 3005) goes to chat, and stays a
+known miss. Seen on the way: Nemotron sometimes routes "shuffle my
+downloads on my phone" to the raw `phone.play_media` capability instead
+of `play_on_phone` (1 run in 3).
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent
