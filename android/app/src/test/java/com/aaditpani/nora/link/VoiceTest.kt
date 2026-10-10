@@ -35,6 +35,18 @@ class VoiceTest {
     }
 
     @Test
+    fun speechHintsAreReadStrictly() {
+        val arr = org.json.JSONArray(listOf("Deftones", " Pink Floyd ", "", 7, "Deftones", "x".repeat(61)))
+        assertEquals(listOf("Deftones", "Pink Floyd"), SpeechHints.parse(arr))
+        assertEquals(emptyList<String>(), SpeechHints.parse(null))
+        assertEquals(SpeechHints.MAX, SpeechHints.parse(org.json.JSONArray((1..150).map { "n$it" })).size)
+        SpeechHints.update(JSONObject("""{"session_id":"s","speech_hints":["Daft Punk"]}"""))
+        assertEquals(listOf("Daft Punk"), SpeechHints.names)
+        SpeechHints.update(JSONObject("""{"session_id":"s"}"""))       // an older core sends none
+        assertEquals(emptyList<String>(), SpeechHints.names)
+    }
+
+    @Test
     fun pcmFrameParses() {
         val frame = byteArrayOf(1, 0, 0, 1, 2, 9, 8)
         val (stream, pcm) = PcmFrame.parse(frame)!!

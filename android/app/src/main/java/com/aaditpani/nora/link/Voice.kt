@@ -288,3 +288,28 @@ class LatencyStats(private val keep: Int = 20) {
         }
     }
 }
+
+/**
+ * Names for the recogniser to listen for (Sharp D): the artists the user plays
+ * most, which it otherwise hears as "deaf tools". The core sends them in each
+ * `welcome`; they're kept until the next one.
+ */
+object SpeechHints {
+    const val MAX = 100
+    private const val MAX_LEN = 60
+
+    @Volatile
+    var names: List<String> = emptyList()
+        private set
+
+    fun update(welcome: JSONObject) {
+        names = parse(welcome.optJSONArray("speech_hints"))
+    }
+
+    fun parse(arr: JSONArray?): List<String> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.opt(it) as? String }
+            .map { it.trim() }.filter { it.isNotEmpty() && it.length <= MAX_LEN }
+            .distinct().take(MAX)
+    }
+}

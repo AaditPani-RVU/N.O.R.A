@@ -120,6 +120,17 @@ class PairingTest(HubTestCase):
         self.assertEqual((await dev.connect())["type"], "welcome")
         self.devices.append(dev)
 
+    async def test_welcome_carries_the_names_to_listen_for(self) -> None:
+        from unittest import mock
+        code, _ = registry.create_code()
+        dev = fake_device.FakeDevice(self.url)
+        await dev.pair(code)
+        registry.approve(dev.device_id)
+        with mock.patch("nora.music_names.biasing", return_value=["Deftones", "Pink Floyd"]):
+            welcome = await dev.connect()
+        self.assertEqual(welcome["speech_hints"], ["Deftones", "Pink Floyd"])
+        self.devices.append(dev)
+
     async def test_code_is_single_use(self) -> None:
         code, _ = registry.create_code()
         self.assertEqual((await fake_device.FakeDevice(self.url).pair(code))["type"], "paired")

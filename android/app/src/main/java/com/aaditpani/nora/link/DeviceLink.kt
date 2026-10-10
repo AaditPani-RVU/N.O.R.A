@@ -218,6 +218,7 @@ class DeviceLink(
             refusal(welcome)?.let { return it }
             if (welcome.getString("type") != "welcome") throw ProtocolException("expected welcome")
             val sessionId = welcome.getJSONObject("body").optString("session_id")
+            SpeechHints.update(welcome.getJSONObject("body"))
 
             sock.send("manifest", manifest())
             // The core's kill flag lives in the session, so it starts clear on

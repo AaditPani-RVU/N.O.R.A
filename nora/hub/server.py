@@ -46,6 +46,17 @@ def _cfg() -> dict:
     return get_config().get("hub", {}) or {}
 
 
+def _speech_hints() -> list[str]:
+    """Names for the phone's recogniser to listen for (Sharp D): the artists
+    the user plays most, which it otherwise hears as "deaf tools"."""
+    try:
+        from nora import music_names
+        return music_names.biasing()
+    except Exception as exc:                     # never worth a refused session
+        logger.debug("no speech hints: %s", exc)
+        return []
+
+
 @dataclass
 class Session:
     device: registry.Device
@@ -257,6 +268,7 @@ class Hub:
         await ws.send(protocol.encode(protocol.envelope("welcome", {
             "session_id": session.session_id, "protocol": protocol.VERSION,
             "core_version": "nora-phase2", "resume_from_seq": 0,
+            "speech_hints": _speech_hints(),
         }, corr=auth["id"])))
 
         manifest = protocol.decode(await asyncio.wait_for(ws.recv(), HANDSHAKE_TIMEOUT))

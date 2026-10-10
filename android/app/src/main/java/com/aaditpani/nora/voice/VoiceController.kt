@@ -14,6 +14,7 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import com.aaditpani.nora.link.AudioSpec
 import com.aaditpani.nora.link.LatencyStats
+import com.aaditpani.nora.link.SpeechHints
 import com.aaditpani.nora.link.SpeechQueue
 import com.aaditpani.nora.link.VoiceTiming
 import kotlinx.coroutines.CoroutineScope
@@ -194,12 +195,16 @@ class VoiceController(private val app: Context, private val host: Host) {
         // moment the mic opens, so a breath before the first word ended the
         // session ("recogniser error 7" ~0.7 s after every such tap). The end
         // of what was said is judged here instead, once speech has begun.
-        rec.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true))
-        Log.i(TAG, "listening")
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        // The user's artists, so "Deftones" is heard as Deftones (Sharp D).
+        val hints = SpeechHints.names
+        if (hints.isNotEmpty()) intent.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(hints))
+        rec.startListening(intent)
+        Log.i(TAG, "listening (${hints.size} names to listen for)")
         main.launch {
             while (recognizer === rec && !stopping) {
                 delay(100)
