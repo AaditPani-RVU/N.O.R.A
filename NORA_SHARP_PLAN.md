@@ -142,6 +142,46 @@ On all 527 harvested utterances, weighted by how often each was said: 58%
 weather and today's/tomorrow's calendar are prefetched (`nora/prefetch.py`),
 so their answers come from memory: weather 3.6 s → ~0, calendar 0.5 s → ~0.
 
+**Phase C, built 2026-10-10** (branch `sharp/c-faster`): the core side is
+done; the phone side is built but not yet installed on the Pixel. **Tool
+retrieval** (`nora/tool_retrieval.py`): the intent prompt lists the 7
+actions its rules route to plus the 10 best for the utterance (BM25 over
+names, aliases and descriptions, blended with the MiniLM cosine that
+cognitive memory already loads), each with its full signature; rules and
+examples follow the picked actions. Found on the way: the old prompt cut the
+signature block at 4,000 characters, so ~⅚ of the tools were listed by name
+with no parameters. Prompt: 18.4k → ~7k characters. The eval report scores
+retrieval (the right action was offered in 193/194 cases, 192 on words
+alone; the offline gate requires 95%). **Health-aware routing**: failures
+are told apart (rate-limited, gone, auth, busy, bad reply), and each kind
+cools a candidate for as long as that kind usually lasts; each attempt but
+the last is capped at 8 s (`llm_router.attempt_timeout_sec`). **Nemotron's
+thinking is off** for intent. **Streaming**: chat replies to a device go
+out a sentence at a time, with the first sentence checked for leaked
+reasoning. **Acknowledgement**: the phone says "One sec" if the core is
+silent 600 ms after the turn is sent, reported as `ack_ms`, apart from
+`first_audio_ms`.
+
+Nemotron on the 45 model cases (NVIDIA, no Groq budget spent):
+
+| | before C | retrieval | + thinking off |
+|---|---|---|---|
+| right | 32–33 | 36 | 36 |
+| errors (empty / bad JSON) | 7–8 | 5 | 0 |
+| p50 / p90 | 5.8–7.8 s / 12–15 s | 6.8 / 13.7 s | 3.1 / 5.6 s |
+| prompt tokens | ~6,000 | 2,260 | 1,896 |
+
+Groq `gpt-oss-120b`, the first choice, on 5 model cases spaced a minute
+apart (10.7k tokens): 4/5 (the miss is a known D case), prompt 1,903 tokens
+(was ~4,650), p50 3.5 s (was 3.7–3.9 s). Its time is hidden reasoning, not
+prompt: `reasoning_effort: low` for intent is the next thing to try,
+against the eval set before it ships.
+
+Not yet: the exit criterion's on-phone part (20 real-mix voice turns, with
+and without the acknowledgement) needs the new app on the Pixel. The prompt
+size with a live session's context (profile, transcript, repo) is measured
+there too; the eval's turns carry none.
+
 **Order.** A comes first: without it, every other phase is a guess. G starts
 right after A, because the eval set is what makes trying a new model safe,
 and it then keeps running for as long as NORA does. B and F are independent
