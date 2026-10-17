@@ -257,7 +257,7 @@ class SchedulerFiringTest(unittest.TestCase):
 
     def test_ring_schedule_runs_the_command_and_calls_with_its_answer(self) -> None:
         """"Call me every day at 7 with my briefing": the briefing is built
-        when due and read out on answering; the screen shows its first line."""
+        when due and read out on answering; the screen says what was scheduled."""
         from nora import calls
         self.addCleanup(calls.reset_for_tests)
         ring = mock.AsyncMock(return_value=self._call_result(success=True, rang=True))
@@ -269,7 +269,7 @@ class SchedulerFiringTest(unittest.TestCase):
                            mock.AsyncMock(return_value=[mock.Mock(message=briefing)])):
             parse.return_value = mock.Mock(steps=[object()], response="")
             self.assertEqual(scheduler._default_runner("ring: morning briefing"), "")
-        ring.assert_awaited_once_with("phone.call", {"reason": "Good morning.", "say": briefing})
+        ring.assert_awaited_once_with("phone.call", {"reason": "Morning briefing", "say": briefing})
 
     def test_ring_schedule_without_a_phone_says_it_the_ordinary_way(self) -> None:
         with mock.patch("nora.calls._phone", return_value=""), \

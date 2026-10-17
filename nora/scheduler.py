@@ -400,7 +400,7 @@ def _default_runner(what: str) -> str:
     if what.startswith(_RING_PREFIX):
         command = what[len(_RING_PREFIX):].strip()
         said = _default_runner(command)
-        if calls.ring(_first_sentence(said), say=said,
+        if calls.ring(_call_title(command), say=said,
                       refresh=lambda: _default_runner(command)):
             return ""
         return said      # no phone to ring: said the ordinary way
@@ -447,10 +447,12 @@ def _default_runner(what: str) -> str:
     return " ".join(spoken) if spoken else what
 
 
-def _first_sentence(text: str) -> str:
-    """The ringing screen's line for a call that says more once answered."""
-    m = re.match(r"(.+?[.!?])(?:\s|$)", text.strip())
-    return (m.group(1) if m else text.strip())[:120]
+def _call_title(command: str) -> str:
+    """The ringing screen's line, and the missed call's: what was scheduled
+    ("Morning briefing"). The answer's own first line said too little
+    ("Good evening.")."""
+    command = command.strip()
+    return (command[:1].upper() + command[1:])[:120]
 
 
 def _fire(sched: Schedule) -> None:
