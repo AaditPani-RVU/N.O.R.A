@@ -5,13 +5,18 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Person
 import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import com.aaditpani.nora.R
 import com.aaditpani.nora.link.ConfirmPrompt
 import com.aaditpani.nora.link.LinkState
+import com.aaditpani.nora.ui.CallActivity
 import com.aaditpani.nora.ui.MainActivity
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -19,9 +24,12 @@ object Notifications {
     private const val LINK_CHANNEL = "link"
     private const val MESSAGE_CHANNEL = "messages"
     private const val CONFIRM_CHANNEL = "confirm"
+    private const val CALL_CHANNEL = "calls"
     const val LINK_ID = 1
     /** NORA's latest answer to something typed. One at a time: a new answer replaces it. */
     private const val CHAT_ID = 2
+    /** NORA ringing. One at a time. */
+    private const val CALL_ID = 4
     const val KEY_REPLY = "reply"
     private val nextId = AtomicInteger(100)
 
@@ -36,6 +44,14 @@ object Notifications {
             },
             NotificationChannel(CONFIRM_CHANNEL, "NORA asking before she acts", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "NORA wants a yes before doing something. Tap to see what and answer"
+            },
+            NotificationChannel(CALL_CHANNEL, "Calls from NORA", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "NORA ringing the phone for something that needs you now"
+                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 1000, 1000)
             },
         ))
     }
@@ -179,6 +195,40 @@ object Notifications {
             .setContentIntent(pending)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(id, n)
+    }
+
+    /**
+     * NORA ringing: the system's incoming-call notification, ringing until
+     * answered, declined or timed out. With the screen off or locked the
+     * full-screen intent opens the call screen; in use, it is a heads-up.
+     */
+    fun incomingCall(context: Context, call: Calls.Call) {
+        if (!canPost(context)) return
+        val nora = Person.Builder().setName("NORA").setImportant(true)
+            .setIcon(Icon.createWithResource(context, R.drawable.ic_nora)).build()
+        val screen = PendingIntent.getActivity(context, 20, CallActivity.intent(context, answer = false),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val answer = PendingIntent.getActivity(context, 21, CallActivity.intent(context, answer = true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val decline = PendingIntent.getBroadcast(context, 22,
+            Intent(context, CallReceiver::class.java).setAction(CallReceiver.ACTION_DECLINE),
+            PendingIntent.FLAG_IMMUTABLE)
+        val n = Notification.Builder(context, CALL_CHANNEL)
+            .setSmallIcon(R.drawable.ic_nora)
+            .setStyle(Notification.CallStyle.forIncomingCall(nora, decline, answer))
+            .setContentText(call.reason)
+            .setCategory(Notification.CATEGORY_CALL)
+            .setFullScreenIntent(screen, true)
+            .setContentIntent(screen)
+            .setOngoing(true)
+            .setTimeoutAfter(Calls.RING_MS + 5_000)
+            .build()
+        n.flags = n.flags or Notification.FLAG_INSISTENT   // the ringtone loops, like a call
+        context.getSystemService(NotificationManager::class.java).notify(CALL_ID, n)
+    }
+
+    fun cancelCall(context: Context) {
+        context.getSystemService(NotificationManager::class.java).cancel(CALL_ID)
     }
 
     fun describe(state: LinkState): String = when (state) {

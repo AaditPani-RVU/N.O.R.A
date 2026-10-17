@@ -40,6 +40,8 @@ logger = logging.getLogger("nora.hub")
 HANDSHAKE_TIMEOUT = 10.0
 PING_INTERVAL = 25.0
 _TIER_RISK = {0: "low", 1: "low", 2: "medium", 3: "high"}
+# The phone ringing like a call; answering speaks its `reason` (Calls.kt).
+CALL_CAPABILITY = "phone.call"
 
 
 def _cfg() -> dict:
@@ -393,6 +395,10 @@ class Hub:
             name = msg["body"].get("name")
             if name == "voice.turn" and isinstance(msg["body"].get("data"), dict):
                 _voice.record_turn(session.device_id, msg["body"]["data"])
+            elif name == "call.ended" and isinstance(msg["body"].get("data"), dict):
+                data = msg["body"]["data"]
+                logger.info("%s call from NORA %s after %s ms", session.device_id,
+                            str(data.get("outcome"))[:20], data.get("ring_ms"))
             else:
                 logger.info("%s event %s", session.device_id, name)
         elif kind == "voice.barge_in":
@@ -630,6 +636,14 @@ class Hub:
             # the invocation row records that it ran and how much came back.
             self._finish(inv_id, "ok", _redacted(result) if untrusted else result, None)
             message = result.get("message") if isinstance(result, dict) else None
+            if (capability == CALL_CAPABILITY and isinstance(result, dict)
+                    and result.get("rang") is True):
+                # Answering speaks the reason on the phone. It joins the
+                # transcript now, so what the user says back on the call has
+                # something to follow. From the core's own params, not the
+                # device's echo of them.
+                from nora import dialogue
+                dialogue.record_nora(str(params.get("reason", "")), kind="call")
             limit = 4000 if untrusted else 500
             return StepResult(action=capability, success=True, untrusted=untrusted,
                               message=str(message or json.dumps(result, ensure_ascii=False))[:limit],

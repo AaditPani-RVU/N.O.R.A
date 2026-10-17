@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Selecting a Bluetooth headset's microphone while listening -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- NORA calling: the call screen over the lock screen while it rings -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- Package visibility (Android 11+): only what the capabilities need to
          find, not QUERY_ALL_PACKAGES. -->
@@ -80,6 +82,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- A call from NORA. Only her own notification opens it. -->
+        <activity
+            android:name=".ui.CallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.aaditpani.nora.call" />
 
         <service
             android:name=".voice.VoiceService"
@@ -167,6 +177,10 @@
              explicit PendingIntent reaches it. -->
         <receiver
             android:name=".phone.ReplyReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".phone.CallReceiver"
             android:exported="false" />
 
         <receiver

@@ -239,6 +239,11 @@ class LinkController(private val app: Context) {
         _hiddenNoteApps.value = next
     }
 
+    /** An event for the core's log and, later, its triggers. Dropped when not paired. */
+    fun event(name: String, data: JSONObject) {
+        link?.emitEvent(name, data)
+    }
+
     fun emitStatus() {
         link?.emitEvent("device.status", DeviceStatus.read(app))
     }

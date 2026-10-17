@@ -32,7 +32,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from nora import audit_log, channel, command_engine, delivery, jobs, store
+from nora import audit_log, channel, command_engine, delivery, dialogue, jobs, store
 from nora.hub import fake_device, protocol, registry
 from nora.hub.server import Hub
 from nora.schemas import ActionStep, IntentResponse, StepResult
@@ -304,6 +304,41 @@ class InvokeTest(_TurnStubs, HubTestCase):
 
         await dev.set_kill(False)
         await self.until(lambda: "test.echo" in command_engine.get_available_actions())
+
+
+class CallTest(HubTestCase):
+    """`phone.call`: the reason NORA rang about joins the transcript, so the
+    user's answer on the call has something to follow."""
+
+    CALL = [{"name": "phone.call", "version": 1, "tier": 0, "description": "Ring the phone",
+             "params_schema": {"type": "object", "required": ["reason"],
+                               "properties": {"reason": {"type": "string", "maxLength": 300}}}}]
+
+    def setUp(self) -> None:
+        dialogue.clear()
+        self.addCleanup(dialogue.clear)
+        index = mock.patch.object(dialogue, "_index")   # no session index on disk
+        index.start()
+        self.addCleanup(index.stop)
+
+    async def call(self, rang: bool):
+        dev = await self.paired(capabilities=self.CALL)
+        dev.replies["phone.call"] = lambda p: {"success": True, "result": {
+            "rang": rang, "message": "Ringing the phone." if rang else "Already talking."}}
+        return await self.hub.call(dev.device_id, "phone.call",
+                                   {"reason": "Your train leaves in twenty minutes."})
+
+    async def test_a_call_that_rang_is_in_the_transcript(self) -> None:
+        result = await self.call(rang=True)
+        self.assertTrue(result.success)
+        [said] = dialogue.history()
+        self.assertEqual((said.speaker, said.kind, said.text),
+                         ("nora", "call", "Your train leaves in twenty minutes."))
+
+    async def test_a_call_that_did_not_ring_is_not(self) -> None:
+        result = await self.call(rang=False)
+        self.assertTrue(result.success)
+        self.assertEqual(dialogue.history(), [])
 
 
 class ConfirmationTest(_TurnStubs, HubTestCase):

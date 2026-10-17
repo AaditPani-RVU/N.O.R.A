@@ -122,6 +122,38 @@ class VoiceController(private val app: Context, private val host: Host) {
         listen()
     }
 
+    /**
+     * Answering NORA's call (`phone.call`): say why she called, then listen.
+     * The call screen starts it, so like [start] it is the user's doing.
+     * Listening waits on [unlock]: a locked phone hears the reason, but NORA
+     * takes spoken orders only once the user has unlocked it.
+     */
+    fun startCall(reason: String, unlock: suspend () -> Boolean) = main.launch {
+        if (active) return@launch
+        VoiceService.start(app)
+        am.requestAudioFocus(focus)
+        _ui.value = VoiceUi(VoicePhase.SPEAKING)
+        // Quiet after the reason ends the call, rather than "Didn't catch that."
+        followingUp = true
+        val now = System.currentTimeMillis()
+        val t = Turn(CALL_TURN, now, now, TTS_PHONE).also { it.recorded = true }   // nothing to time
+        t.queue.onIdle = { main.launch { reasonSaid(t, unlock) } }
+        turn = t
+        t.queue.line(reason, null)
+        t.queue.turnDone()
+    }
+
+    private suspend fun reasonSaid(t: Turn, unlock: suspend () -> Boolean) {
+        if (turn !== t) return
+        turn = null
+        if (!active) return
+        if (!unlock()) {
+            end(null)
+            return
+        }
+        if (active && turn == null) listen()
+    }
+
     /** The mic button: start, interrupt NORA, or stop listening. */
     fun toggle() = main.launch {
         when (_ui.value.phase) {
@@ -135,6 +167,7 @@ class VoiceController(private val app: Context, private val host: Host) {
     fun interrupt() = main.launch {
         val t = turn ?: return@launch
         if (_ui.value.phase != VoicePhase.SPEAKING && _ui.value.phase != VoicePhase.THINKING) return@launch
+        if (t.id == CALL_TURN) return@launch   // listening waits for the unlock
         Log.i(TAG, "interrupted ${t.id}")
         stopBargeIn()
         t.queue.stop()
@@ -372,7 +405,9 @@ class VoiceController(private val app: Context, private val host: Host) {
     }).also { output = it }
 
     private fun startBargeIn() {
-        if (!host.bargeInOn || bargeIn != null) return
+        // Not over the call's reason: talking over it would open the mic
+        // before the phone is unlocked.
+        if (!host.bargeInOn || bargeIn != null || turn?.id == CALL_TURN) return
         val margin = if (route.onSpeaker()) SPEAKER_MARGIN_DB else HEADSET_MARGIN_DB
         bargeIn = BargeIn(margin) { interrupt() }.also { it.start() }
     }
@@ -407,6 +442,8 @@ class VoiceController(private val app: Context, private val host: Host) {
         private const val TAG = "NoraVoice"
         const val TTS_CORE = "core"
         const val TTS_PHONE = "phone"
+        /** The id of a call's opening line, which no core turn ever has. */
+        private const val CALL_TURN = "call"
         /** Recogniser RMS (roughly -2..10 dB) above which the user is talking. */
         private const val LOUD_RMS_DB = 4f
         /** How long a pause ends what was said. Recognisers may ignore it. */

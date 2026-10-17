@@ -2,6 +2,7 @@ package com.aaditpani.nora.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.biometrics.BiometricManager
@@ -829,12 +830,14 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
     var batteryExempt by remember { mutableStateOf(false) }
     var listenerGranted by remember { mutableStateOf(false) }
     var locationGranted by remember { mutableStateOf(false) }
+    var callsFullScreen by remember { mutableStateOf(false) }
     var seenApps by remember { mutableStateOf(emptyMap<String, String>()) }
     LaunchedEffect(now / 5000) {
         notifGranted = ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         batteryExempt = ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
         listenerGranted = NoraNotificationListener.hasAccess(ctx)
         locationGranted = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        callsFullScreen = ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
         seenApps = NoraNotificationListener.seenApps()
     }
     LaunchedEffect(Unit) { if (!notifGranted) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
@@ -930,6 +933,11 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
                 Access("LOCATION, WHEN ASKED", locationGranted) {
                     locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.ACCESS_COARSE_LOCATION))
+                }
+                Hairline()
+                Access("CALLS OVER THE LOCK SCREEN", callsFullScreen) {
+                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                        Uri.parse("package:${ctx.packageName}")))
                 }
                 Spacer(Modifier.height(8.dp))
                 Detail("Opening apps, links, Maps and the clock only works while this app is on screen; " +
