@@ -3,6 +3,7 @@ package com.aaditpani.nora.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
+import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.biometrics.BiometricManager
@@ -104,9 +105,11 @@ import com.aaditpani.nora.link.LinkState
 import com.aaditpani.nora.link.Memory
 import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
+import com.aaditpani.nora.link.Screening
 import com.aaditpani.nora.link.Sender
 import com.aaditpani.nora.phone.LinkController
 import com.aaditpani.nora.phone.LinkService
+import com.aaditpani.nora.phone.NoraCallScreeningService
 import com.aaditpani.nora.phone.NoraNotificationListener
 import com.aaditpani.nora.phone.Notifications
 import com.aaditpani.nora.phone.controller
@@ -843,6 +846,10 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
     var callsFullScreen by remember { mutableStateOf(false) }
     var callPeople by remember { mutableStateOf(false) }
     val callPeopleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+    var screening by remember { mutableStateOf(false) }
+    val screeningLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+    var silenceUnknown by remember { mutableStateOf(Screening.modeOf(c.prefs.screenMode) == Screening.Mode.SILENCE) }
+    var blockedCount by remember { mutableStateOf(c.prefs.blockedNumbers.size) }
     var seenApps by remember { mutableStateOf(emptyMap<String, String>()) }
     LaunchedEffect(now / 5000) {
         notifGranted = ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -853,6 +860,8 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
         callPeople = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED &&
             ctx.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
         seenApps = NoraNotificationListener.seenApps()
+        screening = NoraCallScreeningService.holdsRole(ctx)
+        blockedCount = c.prefs.blockedNumbers.size
     }
     LaunchedEffect(Unit) { if (!notifGranted) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
 
@@ -958,6 +967,34 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
                 // dial it. Each call still asks first, on this screen.
                 Access("CALL PEOPLE YOU NAME", callPeople) {
                     callPeopleLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE))
+                }
+                Hairline()
+                // Android's call-screening role: asked about calls from numbers
+                // not in the contacts. One app holds it; the phone app's own
+                // spam filter is separate and keeps working.
+                Access("SCREEN UNKNOWN CALLERS", screening) {
+                    screeningLauncher.launch(ctx.getSystemService(RoleManager::class.java)
+                        .createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+                }
+                if (screening) {
+                    Row(Modifier.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Tracked("SILENCE UNKNOWN NUMBERS", color = Hud.Txt, size = 10.sp, spacing = 1.5.sp)
+                            Detail(if (silenceUnknown) "They don't ring. NORA tells you who called."
+                                else "Off: they ring as usual. Contacts always ring.")
+                        }
+                        HudToggle(silenceUnknown, {
+                            silenceUnknown = it
+                            c.prefs.screenMode = Screening.wire(if (it) Screening.Mode.SILENCE else Screening.Mode.RING)
+                        })
+                    }
+                    if (blockedCount > 0) {
+                        Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Detail("$blockedCount blocked number${if (blockedCount == 1) "" else "s"}", Modifier.weight(1f))
+                            HudButton("UNBLOCK ALL", { c.prefs.blockedNumbers = emptySet(); blockedCount = 0 },
+                                color = Hud.Amber)
+                        }
+                    }
                 }
                 Spacer(Modifier.height(10.dp))
                 HudButton("PUT CALL NORA ON THE HOME SCREEN", { CallNora.pin(ctx) }, Modifier.fillMaxWidth())

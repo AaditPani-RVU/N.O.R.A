@@ -179,6 +179,14 @@ class LinkPrefs(context: Context) {
     var ack: Boolean
         get() = prefs.getBoolean("voice_ack", true)
         set(v) = prefs.edit().putBoolean("voice_ack", v).apply()
+    /** Unknown callers: "ring" (the default) or "silence". See [com.aaditpani.nora.link.Screening]. */
+    var screenMode: String
+        get() = prefs.getString("screen_mode", "ring") ?: "ring"
+        set(v) = prefs.edit().putString("screen_mode", v).apply()
+    /** Numbers whose calls are rejected, as [com.aaditpani.nora.link.Screening.key]s. */
+    var blockedNumbers: Set<String>
+        get() = prefs.getStringSet("blocked_numbers", emptySet())!!.toSet()
+        set(v) = prefs.edit().putStringSet("blocked_numbers", v).apply()
     var voiceStats: String?
         get() = prefs.getString("voice_stats", null)
         set(v) = prefs.edit().putString("voice_stats", v).apply()

@@ -183,6 +183,17 @@
             android:name=".phone.ReplyReceiver"
             android:exported="false" />
 
+        <!-- Asked about calls from numbers not in the contacts, once NORA
+             holds the call-screening role. Only the system can bind it. -->
+        <service
+            android:name=".phone.NoraCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".phone.CallReceiver"
             android:exported="false" />

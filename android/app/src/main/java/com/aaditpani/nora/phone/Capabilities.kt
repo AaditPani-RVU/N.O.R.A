@@ -24,7 +24,7 @@ fun allCapabilities(context: Context, prefs: LinkPrefs): List<Capability> {
         OpenApp(app), OpenUrl(app), PlayMedia(app), MediaControl(app), Volume(app),
         ReadNotifications(app) { prefs.hiddenNoteApps }, GetLocation(app), Navigate(app),
         SetAlarm(app), SetTimer(app), Dial(app),
-        CallUser(app), CallContact(app),
+        CallUser(app), CallContact(app), BlockNumber(app, prefs),
     )
 }
 
