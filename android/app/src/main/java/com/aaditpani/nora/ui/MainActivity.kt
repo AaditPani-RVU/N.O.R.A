@@ -110,6 +110,7 @@ import com.aaditpani.nora.phone.LinkService
 import com.aaditpani.nora.phone.NoraNotificationListener
 import com.aaditpani.nora.phone.Notifications
 import com.aaditpani.nora.phone.controller
+import com.aaditpani.nora.voice.CallNora
 import com.aaditpani.nora.voice.Talk
 import com.aaditpani.nora.voice.VoicePhase
 import com.aaditpani.nora.voice.VoiceUi
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
         if (c.paired.value) LinkService.start(this)
         requestTab(intent)
         if (savedInstanceState == null && Talk.wants(intent)) talk()
+        if (savedInstanceState == null) callNora(intent)
         setContent {
             MaterialTheme(colorScheme = hudScheme) {
                 val paired by c.paired.collectAsState()
@@ -155,6 +157,14 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         requestTab(intent)
         if (Talk.wants(intent)) talk()
+        callNora(intent)
+    }
+
+    /** The "Call NORA" shortcut: on to the call screen. */
+    private fun callNora(intent: Intent?) {
+        if (intent?.action != CallNora.ACTION || !controller.paired.value) return
+        startActivity(CallActivity.outgoing(this))
+        CallNora.used(this)
     }
 
     /**
@@ -831,6 +841,8 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
     var listenerGranted by remember { mutableStateOf(false) }
     var locationGranted by remember { mutableStateOf(false) }
     var callsFullScreen by remember { mutableStateOf(false) }
+    var callPeople by remember { mutableStateOf(false) }
+    val callPeopleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     var seenApps by remember { mutableStateOf(emptyMap<String, String>()) }
     LaunchedEffect(now / 5000) {
         notifGranted = ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -838,6 +850,8 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
         listenerGranted = NoraNotificationListener.hasAccess(ctx)
         locationGranted = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         callsFullScreen = ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+        callPeople = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED &&
+            ctx.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
         seenApps = NoraNotificationListener.seenApps()
     }
     LaunchedEffect(Unit) { if (!notifGranted) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
@@ -939,6 +953,14 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
                     ctx.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
                         Uri.parse("package:${ctx.packageName}")))
                 }
+                Hairline()
+                // "Call Mom": contacts to find the number, the call permission to
+                // dial it. Each call still asks first, on this screen.
+                Access("CALL PEOPLE YOU NAME", callPeople) {
+                    callPeopleLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE))
+                }
+                Spacer(Modifier.height(10.dp))
+                HudButton("PUT CALL NORA ON THE HOME SCREEN", { CallNora.pin(ctx) }, Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 Detail("Opening apps, links, Maps and the clock only works while this app is on screen; " +
                     "otherwise NORA leaves a notification to tap. Android's rule, not NORA's.")

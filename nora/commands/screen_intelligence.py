@@ -420,6 +420,10 @@ def _watch_loop(condition: str, interval_sec: float, timeout_sec: float, stop_ev
             data = _vision_json(img_b64, check_prompt)
             if data.get("met"):
                 speaker.speak(f"Detected on screen: {condition}.")
+                # The point of a watch is not having to sit there: ring the
+                # phone too, wherever the user went.
+                from nora import calls
+                calls.ring(f"What you asked me to watch for is on the screen: {condition}.")
                 return
         except Exception as e:
             logger.warning("watch_for check failed: %s", e)

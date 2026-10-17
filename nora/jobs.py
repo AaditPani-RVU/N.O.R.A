@@ -285,6 +285,10 @@ def _deliver(job: Job) -> None:
         text = f"I couldn't finish {job.title}. {job.error}".strip()
     else:
         text = _phrase_answer(job)
+    if _worth_a_call(job) and _ring(job, text):
+        _update(job.id, delivered=1)
+        job.delivered = True
+        return
     if job.device != channel.LOCAL_DEVICE:
         if delivery.deliver(text, device=job.device, kind=job.kind):
             _update(job.id, delivered=1)
@@ -304,6 +308,34 @@ def _deliver(job: Job) -> None:
         job.delivered = True
     except Exception as e:
         logger.warning("Delivery failed for job %s: %s", job.id, e)
+
+
+# A background answer that took longer than `calls.long_job_minutes` rings the
+# phone: the user has long since stopped waiting for it. Only when fresh — an
+# answer held for a phone that was offline is delivered, not rung, on reconnect.
+_CALL_FRESH_SEC = 600.0
+# Asked at the laptop: rings only once nobody has spoken to it for this long.
+_LOCAL_AWAY_SEC = 300.0
+
+
+def _worth_a_call(job: Job) -> bool:
+    from nora.config import get_config
+    minutes = float((get_config().get("calls", {}) or {}).get("long_job_minutes", 3))
+    if minutes <= 0 or job.kind in ("cron", "reminder"):
+        return False
+    if job.duration() < minutes * 60 or time.time() - (job.finished_at or 0) > _CALL_FRESH_SEC:
+        return False
+    if job.device == channel.LOCAL_DEVICE:
+        from nora import proactive
+        return time.time() - proactive._last_command_ts >= _LOCAL_AWAY_SEC
+    return True
+
+
+def _ring(job: Job, text: str) -> bool:
+    from nora import calls
+    reason = (f"I couldn't finish {job.title}." if job.status == STATUS_FAILED
+              else f"I've finished {job.title}.")
+    return calls.ring(reason, say=text, asked=False)
 
 
 def _phrase_answer(job: Job) -> str:

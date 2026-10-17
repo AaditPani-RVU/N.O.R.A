@@ -254,3 +254,52 @@ object NoteDigest {
         return if (flat.length <= max) flat else flat.take(max - 1).trimEnd() + "…"
     }
 }
+
+/** One number of one contact, as the phone's contacts list has it. */
+data class ContactNumber(
+    val contactId: Long,
+    val name: String,
+    val number: String,
+    val mobile: Boolean = false,
+    val primary: Boolean = false,
+)
+
+/**
+ * Who "call Mom" means. Calling reaches someone else, so this never guesses
+ * between people: an exact name (ignoring case) beats a partial one, and if
+ * that still leaves two people it asks which. One person with several numbers
+ * is not a question: their default number, else a mobile, else the first.
+ */
+object ContactPick {
+    sealed class Result {
+        data class One(val name: String, val number: String) : Result()
+        data class Several(val names: List<String>) : Result()
+        object None : Result()
+    }
+
+    fun pick(spoken: String, numbers: List<ContactNumber>): Result {
+        val want = norm(spoken)
+        if (want.isEmpty() || numbers.isEmpty()) return Result.None
+        val exact = numbers.filter { norm(it.name) == want }
+        val pool = exact.ifEmpty {
+            numbers.filter { n -> norm(n.name).split(" ").let { words -> want.split(" ").all { it in words } } }
+        }
+        val people = pool.groupBy { it.contactId }
+        return when (people.size) {
+            0 -> Result.None
+            1 -> {
+                val own = people.values.single()
+                val best = own.firstOrNull { it.primary } ?: own.firstOrNull { it.mobile } ?: own.first()
+                Result.One(best.name, best.number)
+            }
+            else -> Result.Several(people.values.map { it.first().name }.distinct().sorted().take(4))
+        }
+    }
+
+    /** A number a person can be called on: digits, with + * # and spacing. */
+    fun isNumber(s: String): Boolean =
+        s.any { it.isDigit() } && s.all { it.isDigit() || it in "+*#-() " }
+
+    private fun norm(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), " ")
+        .replace(Regex("\\s+"), " ").trim()
+}

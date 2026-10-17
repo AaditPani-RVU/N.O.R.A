@@ -42,6 +42,14 @@ _TICK_SEC = 20.0
 _REMINDER_PREFIX = "remind: "
 # A reminder that rings the phone like a call ("call me in ten minutes about X").
 _CALL_PREFIX = "call: "
+# A command whose answer is a call: "call me every day at 7 with my briefing"
+# runs "morning briefing" when due and rings with what it says.
+_RING_PREFIX = "ring: "
+
+# `Schedule.weekday` values for "every weekday" and "every weekend".
+WEEKDAYS = -1
+WEEKENDS = -2
+_DAY_SETS = {WEEKDAYS: range(0, 5), WEEKENDS: range(5, 7)}
 
 _DAYS = {
     "monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1,
@@ -62,7 +70,7 @@ class Schedule:
     #   daily_at is not None -> (hour, minute), optionally narrowed by weekday
     interval_sec: float = 0.0
     daily_at: list[int] | None = None   # [hour, minute]
-    weekday: int | None = None          # 0=Monday
+    weekday: int | None = None          # 0=Monday; WEEKDAYS / WEEKENDS for those sets
     enabled: bool = True
     created_at: float = field(default_factory=time.time)
     last_run: float = 0.0
@@ -94,8 +102,13 @@ _runner: Callable[[str], str] | None = None
 # ── Spec parsing ─────────────────────────────────────────────────────────────
 
 def _next_daily(hour: int, minute: int, weekday: int | None, now: datetime) -> datetime:
-    """The next datetime matching hour:minute, optionally on a given weekday."""
+    """The next datetime matching hour:minute, optionally on a given weekday
+    (or any day of `WEEKDAYS` / `WEEKENDS`)."""
     candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if weekday in _DAY_SETS:
+        while candidate <= now or candidate.weekday() not in _DAY_SETS[weekday]:
+            candidate += timedelta(days=1)
+        return candidate
     if weekday is None:
         if candidate <= now:
             candidate += timedelta(days=1)
@@ -113,6 +126,7 @@ def _parse_clock(text: str) -> tuple[int, int] | None:
     Bare hours are read the way people mean them out loud: "at 7" in the
     evening means 19:00, not 07:00 tomorrow morning. Anything 1-6 is assumed
     to be PM for the same reason; 7-11 resolves to whichever comes first.
+    Said with "morning" ("every morning at 6", a wake-up call) they're AM.
     """
     m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?", text)
     if not m:
@@ -127,7 +141,7 @@ def _parse_clock(text: str) -> tuple[int, int] | None:
         hour += 12
     elif meridiem == "am" and hour == 12:
         hour = 0
-    elif not meridiem and 1 <= hour <= 6:
+    elif not meridiem and 1 <= hour <= 6 and "morning" not in text:
         # "at 5" almost never means 05:00.
         hour += 12
     return hour, minute
@@ -201,6 +215,10 @@ def parse_spec(spec: str) -> Schedule | None:
     # A named weekday, with or without "every".
     weekday = next((idx for name, idx in _DAYS.items()
                     if re.search(rf"\b{name}\b", text)), None)
+    if re.search(r"\bweekdays?\b|\bwork\s*days?\b", text):
+        weekday = WEEKDAYS
+    elif re.search(r"\bweekends?\b", text):
+        weekday = WEEKENDS
 
     clock = _parse_clock(text)
     recurring = bool(re.search(r"\bevery\b|\beach\b|\bdaily\b", text))
@@ -377,11 +395,19 @@ def _default_runner(what: str) -> str:
     """
     import asyncio
 
-    from nora import command_engine, intent_parser
+    from nora import calls, command_engine, intent_parser
+
+    if what.startswith(_RING_PREFIX):
+        command = what[len(_RING_PREFIX):].strip()
+        said = _default_runner(command)
+        if calls.ring(_first_sentence(said), say=said,
+                      refresh=lambda: _default_runner(command)):
+            return ""
+        return said      # no phone to ring: said the ordinary way
 
     if what.startswith(_CALL_PREFIX):
         message = what[len(_CALL_PREFIX):].strip()
-        if _ring(message):
+        if calls.ring(f"Reminder: {message}"):
             # Nothing more to deliver: answered, she says it; missed, the
             # phone leaves it as a missed call.
             return ""
@@ -421,24 +447,10 @@ def _default_runner(what: str) -> str:
     return " ".join(spoken) if spoken else what
 
 
-def _ring(message: str) -> bool:
-    """Ring the phone with a reminder. True when it rang."""
-    import asyncio
-
-    from nora.hub import server
-
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(server.call_capability(
-            "phone.call", {"reason": f"Reminder: {message}"}))
-    except Exception as e:
-        logger.warning("Ringing the phone failed: %s", e)
-        return False
-    finally:
-        loop.close()
-    rang = result.success and result.data.get("rang") is True
-    logger.info("Reminder call %s: %s", "rang" if rang else "not rung", result.message[:80])
-    return rang
+def _first_sentence(text: str) -> str:
+    """The ringing screen's line for a call that says more once answered."""
+    m = re.match(r"(.+?[.!?])(?:\s|$)", text.strip())
+    return (m.group(1) if m else text.strip())[:120]
 
 
 def _fire(sched: Schedule) -> None:
@@ -449,7 +461,7 @@ def _fire(sched: Schedule) -> None:
     jobs.submit(
         what[:60],
         lambda: runner(what),
-        kind="reminder" if what.startswith((_REMINDER_PREFIX, _CALL_PREFIX)) else "cron",
+        kind="reminder" if what.startswith((_REMINDER_PREFIX, _CALL_PREFIX, _RING_PREFIX)) else "cron",
         device=sched.device,
     )
     with _lock:

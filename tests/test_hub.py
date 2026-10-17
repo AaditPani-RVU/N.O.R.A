@@ -340,6 +340,25 @@ class CallTest(HubTestCase):
         self.assertTrue(result.success)
         self.assertEqual(dialogue.history(), [])
 
+    async def test_the_longer_say_is_what_joins_the_transcript(self) -> None:
+        dev = await self.paired(capabilities=[{**self.CALL[0], "params_schema": {
+            "type": "object", "required": ["reason"],
+            "properties": {"reason": {"type": "string", "maxLength": 300},
+                           "say": {"type": "string", "maxLength": 3000}}}}])
+        dev.replies["phone.call"] = lambda p: {"success": True, "result": {"rang": True}}
+        await self.hub.call(dev.device_id, "phone.call",
+                            {"reason": "Good morning.", "say": "Good morning. Sunny, 24 degrees."})
+        [said] = dialogue.history()
+        self.assertEqual(said.text, "Good morning. Sunny, 24 degrees.")
+
+    async def test_how_a_call_ended_reaches_nora_calls(self) -> None:
+        dev = await self.paired(capabilities=self.CALL)
+        with mock.patch("nora.calls.ended") as ended:
+            await dev._send("event", {"name": "call.ended", "occurred_at": 0,
+                                      "data": {"outcome": "missed", "ring_ms": 30000}})
+            await self.until(lambda: ended.called)
+        ended.assert_called_once_with(dev.device_id, "missed")
+
 
 class ConfirmationTest(_TurnStubs, HubTestCase):
     async def test_tier2_capability_confirms_on_the_device(self) -> None:

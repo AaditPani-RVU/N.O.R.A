@@ -127,7 +127,14 @@ RULES: list[tuple[tuple[str, ...], str]] = [
      """TIME
 - "remind me in N minutes to X" → remind_me(message="X", delay_minutes=N). A clock time or a
   repeat ("at 6pm", "every morning") → schedule_task(when, what).
-- "call me in N minutes about X" → remind_me(message="X", delay_minutes=N, ring=true): rings the phone."""),
+- "call me in N minutes about X" → remind_me(message="X", delay_minutes=N, ring=true): rings the phone.
+- "call me every day at 7 with my briefing" → schedule_task(when="every day at 7am", what="morning briefing",
+  ring=true): rings, and says the result on answering."""),
+    (("phone.call_contact", "phone.call"),
+     """CALLS
+- "call Mom" / "call 98450 12345" → phone.call_contact(name="Mom") or (number=...): a real call to someone
+  else. NEVER phone.call for that.
+- "call me" is the user: phone.call(reason) now; later → remind_me(..., ring=true) / schedule_task(..., ring=true)."""),
     (("open_app",),
      """- "open [app]" → open_app(name="[app]"). NEVER ask which version or instance."""),
     (("take_screenshot",),

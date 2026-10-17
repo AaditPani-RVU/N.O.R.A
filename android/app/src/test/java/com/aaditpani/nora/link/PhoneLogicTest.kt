@@ -178,3 +178,37 @@ class PhoneLogicTest {
         assertFalse(plain.manifestEntry().getBoolean("untrusted_output"))
     }
 }
+
+class ContactPickTest {
+    private val book = listOf(
+        ContactNumber(1, "Mom", "+91 98000 00001", mobile = true),
+        ContactNumber(1, "Mom", "080 2000 0001"),
+        ContactNumber(2, "Mohan Kumar", "+91 98000 00002", mobile = true),
+        ContactNumber(3, "Rahul Sharma", "+91 98000 00003", primary = true),
+        ContactNumber(3, "Rahul Sharma", "+91 98000 00004", mobile = true),
+        ContactNumber(4, "Rahul Verma", "+91 98000 00005", mobile = true),
+    )
+
+    @Test fun exactNameWinsOverAPrefix() {
+        assertEquals(ContactPick.Result.One("Mom", "+91 98000 00001"), ContactPick.pick("mom", book))
+    }
+
+    @Test fun twoPeopleIsAQuestionNotAGuess() {
+        assertEquals(ContactPick.Result.Several(listOf("Rahul Sharma", "Rahul Verma")), ContactPick.pick("Rahul", book))
+    }
+
+    @Test fun theDefaultNumberBeatsTheMobile() {
+        assertEquals(ContactPick.Result.One("Rahul Sharma", "+91 98000 00003"), ContactPick.pick("rahul sharma", book))
+    }
+
+    @Test fun nobody() {
+        assertEquals(ContactPick.Result.None, ContactPick.pick("Priya", book))
+        assertEquals(ContactPick.Result.None, ContactPick.pick("  ", book))
+    }
+
+    @Test fun numbers() {
+        assertTrue(ContactPick.isNumber("+91 98000-00001"))
+        assertFalse(ContactPick.isNumber("mom"))
+        assertFalse(ContactPick.isNumber("()"))
+    }
+}

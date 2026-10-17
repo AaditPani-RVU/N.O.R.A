@@ -31,25 +31,48 @@ def _spoken_time(ts: float) -> str:
 
 @register(
     "schedule_task",
-    sig="schedule_task(when: str, what: str)",
+    sig="schedule_task(when: str, what: str, ring: bool = false)",
     description=(
         "Schedule something to happen later, once or repeatedly. `when` takes "
         "natural time — 'at 6pm', 'in 20 minutes', 'every day at 7am', "
         "'every Monday at 9', 'every 30 minutes'. `what` is the instruction to "
-        "carry out, which can be any spoken command. Survives restarts."
+        "carry out, which can be any spoken command. ring=true rings the phone "
+        "like a call when it's due and says the result on answering. Survives restarts."
     ),
     category="tasks",
 )
-def schedule_task(when: str, what: str) -> str:
-    sched = scheduler.add(when, what)
+def schedule_task(when: str, what: str, ring: bool = False) -> str:
+    ring = ring is True or str(ring).lower() == "true"
+    what = what.strip()
+    sched = scheduler.add(when, f"{scheduler._RING_PREFIX}{what}" if ring else what)
     if sched is None:
         return (
             "I couldn't work out a time from that. Try something like "
             "'at 6pm', 'in 20 minutes', or 'every day at 7'."
         )
+    if ring:
+        cadence = f" {sched.spec}" if sched.recurring else ""
+        return f"I'll call you{cadence} with {_spoken_what(what)}. First call {_spoken_time(sched.next_run)}."
     lead = "I'll do that" if sched.recurring else "Set"
     cadence = f" {sched.spec}" if sched.recurring else ""
     return f"{lead}{cadence}. Next run {_spoken_time(sched.next_run)}."
+
+
+def _spoken_what(what: str) -> str:
+    """"morning briefing" → "your morning briefing"; anything else as said."""
+    w = what.strip().rstrip(".")
+    if w.lower().startswith(("my ", "your ")):
+        return "your " + w.split(" ", 1)[1]
+    return f"your {w}" if "briefing" in w.lower() else w
+
+
+def _label(what: str) -> str:
+    """A schedule as said back: a call is "a call with X", not its prefix."""
+    for prefix, lead in ((scheduler._RING_PREFIX, "a call with "), (scheduler._CALL_PREFIX, "a call about "),
+                         (scheduler._REMINDER_PREFIX, "")):
+        if what.startswith(prefix):
+            return lead + what[len(prefix):].strip()
+    return what
 
 
 @register(
@@ -64,10 +87,10 @@ def list_schedules() -> str:
         return "Nothing scheduled."
     if len(items) == 1:
         s = items[0]
-        return f"One thing: {s.what}, {_spoken_time(s.next_run)}."
+        return f"One thing: {_label(s.what)}, {_spoken_time(s.next_run)}."
     lines = [f"{len(items)} things scheduled."]
     for s in items[:5]:
-        lines.append(f"{s.what}, {_spoken_time(s.next_run)}.")
+        lines.append(f"{_label(s.what)}, {_spoken_time(s.next_run)}.")
     return " ".join(lines)
 
 
@@ -81,4 +104,4 @@ def cancel_schedule(what: str) -> str:
     sched = scheduler.remove(what)
     if sched is None:
         return "I couldn't find a scheduled task matching that."
-    return f"Cancelled: {sched.what}."
+    return f"Cancelled: {_label(sched.what)}."

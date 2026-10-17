@@ -180,6 +180,12 @@ object ConfirmSteps {
 
     /** "phone.set_alarm" {hour: 6} → "Set alarm on the phone — hour: 6". */
     fun describe(action: String, params: JSONObject): String {
+        if (action == "phone.call_contact") {
+            // It reaches someone else: say so in plain words, not as an action name.
+            val who = params.optString("name").ifBlank { params.optString("number") }.take(80)
+            val number = params.optString("number").takeIf { it.isNotBlank() && params.optString("name").isNotBlank() }
+            return "Phone call to $who" + (number?.let { " ($it)" } ?: "") + " from your SIM"
+        }
         val onPhone = action.startsWith("phone.")
         val verb = action.removePrefix("phone.").replace('_', ' ').replace('.', ' ')
             .replaceFirstChar { it.uppercase() } + if (onPhone) " on the phone" else ""

@@ -916,6 +916,18 @@ hub:
   # not. Reminders set from a phone only ever go to that phone.
   reminders_to_devices: true
 
+calls:
+  # NORA ringing the phone like a call (phone.call, nora/calls.py) on her own:
+  # wake-up calls ("call me every day at 7 with my briefing"), calendar events
+  # about to start, long background answers, screen watches that hit.
+  enabled: true
+  retry_minutes: 5          # missed once -> one more try; missed twice -> laptop notification
+  calendar_minutes: 10      # ring this long before a timed calendar event; 0 = off
+  long_job_minutes: 3       # a background answer that took longer than this rings; 0 = off
+  # Calls nobody asked for (calendar, long answers) don't ring in these hours;
+  # they arrive as notifications. Calls you asked for ring whatever the hour.
+  quiet_hours: "23:00-07:00"
+
 places:
   # "I'm going home": saved places live in the core store (nora/places.py).
   # Free, keyless OpenStreetMap services; OSRM has no traffic data.

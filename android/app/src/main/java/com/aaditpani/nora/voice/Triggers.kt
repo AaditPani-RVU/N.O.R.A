@@ -3,6 +3,9 @@ package com.aaditpani.nora.voice
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.os.Bundle
 import android.service.quicksettings.TileService
 import android.service.voice.VoiceInteractionService
@@ -10,6 +13,7 @@ import android.service.voice.VoiceInteractionSession
 import android.service.voice.VoiceInteractionSessionService
 import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
+import com.aaditpani.nora.R
 import com.aaditpani.nora.ui.MainActivity
 
 /** Ways to start talking to NORA. Each one opens the app, which starts the session. */
@@ -23,6 +27,40 @@ object Talk {
     /** Intents that mean "start listening": ours, the assist gesture's, a headset button's. */
     fun wants(intent: Intent?): Boolean = intent?.action in setOf(ACTION, Intent.ACTION_ASSIST,
         Intent.ACTION_VOICE_COMMAND, "android.intent.action.VOICE_ASSIST")
+}
+
+/**
+ * "Call NORA": the call screen, already talking. A launcher shortcut (long-press
+ * the icon, or pinned to the home screen) opens the app with [ACTION], which
+ * hands on to the call screen; that screen isn't exported, so nothing else can
+ * open it.
+ */
+object CallNora {
+    const val ACTION = "com.aaditpani.nora.CALL_NORA"
+    private const val SHORTCUT_ID = "call_nora"
+
+    fun shortcut(context: Context): ShortcutInfo = ShortcutInfo.Builder(context, SHORTCUT_ID)
+        .setShortLabel("Call NORA")
+        .setLongLabel("Call NORA")
+        .setIcon(Icon.createWithResource(context, R.drawable.ic_nora))
+        .setIntent(Intent(context, MainActivity::class.java).setAction(ACTION))
+        .build()
+
+    /** Offered on a long-press of the app icon. */
+    fun publish(context: Context) {
+        runCatching { context.getSystemService(ShortcutManager::class.java).dynamicShortcuts = listOf(shortcut(context)) }
+    }
+
+    /** Lets the launcher rank it among the shortcuts it suggests. */
+    fun used(context: Context) {
+        runCatching { context.getSystemService(ShortcutManager::class.java).reportShortcutUsed(SHORTCUT_ID) }
+    }
+
+    /** Ask the launcher to put it on the home screen. False if it can't. */
+    fun pin(context: Context): Boolean {
+        val sm = context.getSystemService(ShortcutManager::class.java)
+        return sm.isRequestPinShortcutSupported && sm.requestPinShortcut(shortcut(context), null)
+    }
 }
 
 /** Quick-settings tile: "Talk to NORA". */

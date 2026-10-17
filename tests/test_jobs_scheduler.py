@@ -228,7 +228,8 @@ class SchedulerFiringTest(unittest.TestCase):
         """"Call me in 2 minutes about the laundry": the phone rings, and the
         reminder isn't also delivered as a notification."""
         ring = mock.AsyncMock(return_value=self._call_result(success=True, rang=True))
-        with mock.patch("nora.hub.server.call_capability", ring):
+        with mock.patch("nora.hub.server.call_capability", ring), \
+                mock.patch("nora.calls._phone", return_value="pixel"):
             self.assertEqual(scheduler._default_runner("call: the laundry"), "")
         ring.assert_awaited_once_with("phone.call", {"reason": "Reminder: the laundry"})
 
@@ -253,6 +254,56 @@ class SchedulerFiringTest(unittest.TestCase):
                          "I'll call you about that in 2 minutes.")
         [sched] = scheduler.listing()
         self.assertEqual(sched.what, "call: the laundry")
+
+    def test_ring_schedule_runs_the_command_and_calls_with_its_answer(self) -> None:
+        """"Call me every day at 7 with my briefing": the briefing is built
+        when due and read out on answering; the screen shows its first line."""
+        from nora import calls
+        self.addCleanup(calls.reset_for_tests)
+        ring = mock.AsyncMock(return_value=self._call_result(success=True, rang=True))
+        briefing = "Good morning. It's Monday, October 19. Sunny, 24 degrees."
+        with mock.patch("nora.hub.server.call_capability", ring), \
+                mock.patch("nora.calls._phone", return_value="pixel"), \
+                mock.patch("nora.intent_parser.parse_intent") as parse, \
+                mock.patch("nora.command_engine.execute",
+                           mock.AsyncMock(return_value=[mock.Mock(message=briefing)])):
+            parse.return_value = mock.Mock(steps=[object()], response="")
+            self.assertEqual(scheduler._default_runner("ring: morning briefing"), "")
+        ring.assert_awaited_once_with("phone.call", {"reason": "Good morning.", "say": briefing})
+
+    def test_ring_schedule_without_a_phone_says_it_the_ordinary_way(self) -> None:
+        with mock.patch("nora.calls._phone", return_value=""), \
+                mock.patch("nora.intent_parser.parse_intent") as parse, \
+                mock.patch("nora.command_engine.execute",
+                           mock.AsyncMock(return_value=[mock.Mock(message="Good morning.")])):
+            parse.return_value = mock.Mock(steps=[object()], response="")
+            self.assertEqual(scheduler._default_runner("ring: morning briefing"), "Good morning.")
+
+    def test_schedule_task_with_ring(self) -> None:
+        from nora.commands import schedule_commands
+        said = schedule_commands.schedule_task("every day at 7am", "morning briefing", ring=True)
+        self.assertTrue(said.startswith("I'll call you every day at 7am with your morning briefing."), said)
+        [sched] = scheduler.listing()
+        self.assertEqual(sched.what, "ring: morning briefing")
+        self.assertIn("a call with morning briefing", schedule_commands.list_schedules())
+
+    def test_every_weekday_skips_the_weekend(self) -> None:
+        saturday = datetime(2026, 10, 17, 12, 0)
+        with mock.patch("nora.scheduler.datetime") as dt:
+            dt.now.return_value = saturday
+            sched = scheduler.parse_spec("every weekday at 7am")
+        self.assertEqual(sched.weekday, scheduler.WEEKDAYS)
+        self.assertEqual(datetime.fromtimestamp(sched.next_run), datetime(2026, 10, 19, 7, 0))
+        friday_7 = datetime(2026, 10, 23, 7, 0)
+        self.assertEqual(scheduler._next_daily(7, 0, scheduler.WEEKDAYS, friday_7),
+                         datetime(2026, 10, 26, 7, 0))
+        self.assertEqual(scheduler._next_daily(9, 0, scheduler.WEEKENDS, friday_7),
+                         datetime(2026, 10, 24, 9, 0))
+
+    def test_a_morning_hour_stays_in_the_morning(self) -> None:
+        self.assertEqual(scheduler._parse_clock("tomorrow at 6:30 in the morning"), (6, 30))
+        self.assertEqual(scheduler._parse_clock("every morning at 6"), (6, 0))
+        self.assertEqual(scheduler._parse_clock("at 6"), (18, 0))
 
     def test_cancel_by_description(self) -> None:
         scheduler.add("every day at 7am", "the morning brief")

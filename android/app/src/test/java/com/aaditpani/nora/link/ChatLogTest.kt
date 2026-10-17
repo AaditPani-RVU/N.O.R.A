@@ -103,5 +103,9 @@ class ChatLogTest {
         assertEquals("Open url on the phone — url: https://example.com",
             ConfirmSteps.describe("phone.open_url", JSONObject().put("url", "https://example.com")))
         assertEquals("Lock screen", ConfirmSteps.describe("lock_screen", JSONObject()))
+        assertEquals("Phone call to Mom from your SIM",
+            ConfirmSteps.describe("phone.call_contact", JSONObject().put("name", "Mom")))
+        assertEquals("Phone call to +91 98000 00001 from your SIM",
+            ConfirmSteps.describe("phone.call_contact", JSONObject().put("number", "+91 98000 00001")))
     }
 }

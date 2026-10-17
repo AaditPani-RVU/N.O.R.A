@@ -20,6 +20,7 @@ import com.aaditpani.nora.link.MemoryList
 import com.aaditpani.nora.link.PairResult
 import com.aaditpani.nora.link.PairingInvite
 import com.aaditpani.nora.link.Protocol
+import com.aaditpani.nora.voice.CallNora
 import com.aaditpani.nora.voice.VoiceController
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +44,7 @@ class NoraApp : Application() {
         Notifications.createChannels(this)
         registerActivityLifecycleCallbacks(Foreground)
         controller = LinkController(this)
+        CallNora.publish(this)
     }
 }
 

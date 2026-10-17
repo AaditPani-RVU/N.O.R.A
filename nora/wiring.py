@@ -124,6 +124,9 @@ def start_subsystems(speak: Callable[..., None]) -> None:
     _gated = focus.gated(speak)
     jobs.start(speak_callback=_gated)
     scheduler.start()
+    # Rings the phone for calendar events about to start (nora.calls).
+    from nora import calls
+    calls.start()
 
     text_input.start()
 
@@ -165,7 +168,7 @@ def start_subsystems(speak: Callable[..., None]) -> None:
 def stop_subsystems() -> None:
     """Shut the background threads down. Safe to call twice."""
     from nora import (
-        ambient, anomaly_watchdog, consolidation, jobs, proactive, scheduler,
+        ambient, anomaly_watchdog, calls, consolidation, jobs, proactive, scheduler,
         terminal_monitor, vision,
     )
     from nora.gateway import telegram
@@ -175,7 +178,7 @@ def stop_subsystems() -> None:
         ("proactive", proactive.stop), ("consolidation", consolidation.stop),
         ("terminal_monitor", terminal_monitor.stop),
         ("anomaly_watchdog", anomaly_watchdog.stop),
-        ("scheduler", scheduler.stop), ("jobs", jobs.stop),
+        ("scheduler", scheduler.stop), ("calls", calls.stop), ("jobs", jobs.stop),
         ("telegram", telegram.stop), ("hub", _stop_hub),
     ):
         try:

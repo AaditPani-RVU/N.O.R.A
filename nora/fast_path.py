@@ -36,6 +36,14 @@ def _intent(
     )
 
 
+def _morning(when: str) -> str:
+    """A wake-up call's bare "at 6:30" is the morning; scheduler reads bare
+    1-6 as PM otherwise."""
+    if re.search(r"\b(?:am|a\.m\.|pm|p\.m\.|morning|evening|night|afternoon)\b", when, re.I):
+        return when
+    return f"{when} in the morning"
+
+
 def _chat(response: str) -> IntentResponse:
     return IntentResponse(intent="chat", steps=[], response=response)
 
@@ -687,6 +695,20 @@ def _build_rules() -> None:
         r"\s+(?!you\b|u\b|ya\b|yourself\b|your\b)(?P<topic>.+)",
         lambda m: _intent("news briefing", "show_briefing",
                           {"topic": m.group("topic").strip()}),
+    )
+    # The day's own briefing (date, weather, agenda, three headlines), and a
+    # wake-up call that reads it: "call me every day at 7 with my briefing".
+    _rule(
+        r"(?:(?:give|read)\s+me\s+|what(?:'?s|\s+is)\s+|let'?s\s+(?:have|hear)\s+)?"
+        r"(?:my\s+|the\s+|today'?s\s+)?(?:morning|daily)\s+brief(?:ing)?"
+        r"|(?:give|read)\s+me\s+my\s+brief(?:ing)?|brief\s+me(?:\s+on\s+(?:my|the)\s+day)?",
+        lambda m: _intent("morning briefing", "morning_briefing"),
+    )
+    _rule(
+        r"(?:call|ring|wake)\s+me(?:\s+up)?\s+(?P<when>(?:every|each|daily|tomorrow|at)\b.+?)\s+"
+        r"(?:with|for|and\s+(?:give|read|tell)\s+me)\s+(?:my\s+|the\s+)?(?:morning\s+|daily\s+)?brief(?:ing)?",
+        lambda m: _intent("wake-up call", "schedule_task",
+                          {"when": _morning(m.group("when").strip()), "what": "morning briefing", "ring": True}),
     )
     # ─── Conversational ───────────────────────────────────────────────────
     _rule(

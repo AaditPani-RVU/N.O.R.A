@@ -70,6 +70,7 @@ desktop.ini
 .DS_Store
 ydotool/
 nora_session_state.json
+nora_calls_state.json
 nora_tasks.json
 nora_audit_log.jsonl
 nora_consolidation_state.json

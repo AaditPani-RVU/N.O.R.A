@@ -110,3 +110,50 @@ def show_briefing(topic: str = "") -> str:
                 len(cards), label, data["took_ms"], data["sourced"], data["feeds"])
 
     return _summarise(label, cards)
+
+
+# ── The morning briefing ───────────────────────────────────────────────────────
+# What a wake-up call reads out ("call me every day at 7 with my briefing"),
+# and what "give me my morning briefing" says. Spoken only, no takeover: it is
+# usually heard on the phone, away from the screen. Each part is the command
+# that already answers it, so it says nothing those don't.
+
+def _greeting(now: datetime.datetime) -> str:
+    part = "morning" if now.hour < 12 else "afternoon" if now.hour < 17 else "evening"
+    return f"Good {part}. It's {now.strftime('%A, %B')} {now.day}."
+
+
+def _headlines(n: int = 3) -> str:
+    cards = briefing.collect("").get("cards") or []
+    titles = [c["title"].rstrip(". ") for c in cards[:n] if c.get("title")]
+    if not titles:
+        return ""
+    joined = titles[0] if len(titles) == 1 else "; ".join(titles[:-1]) + "; and " + titles[-1]
+    return f"In the news: {joined}."
+
+
+@register(
+    "morning_briefing",
+    sig="morning_briefing()",
+    description=(
+        "The user's daily briefing, spoken: the date, the weather, today's "
+        "agenda (tasks, calendar, reminders) and three headlines. For \"my "
+        "briefing\", \"brief me\", \"morning briefing\"; NOT for the news alone "
+        "(show_briefing)."
+    ),
+    category="knowledge",
+)
+def morning_briefing() -> str:
+    from nora.commands.task_commands import agenda
+    from nora.commands.weather import get_weather
+
+    parts = [_greeting(datetime.datetime.now())]
+    for label, part in (("weather", get_weather), ("agenda", agenda), ("news", _headlines)):
+        try:
+            said = (part() or "").strip()
+        except Exception as e:
+            logger.warning("morning briefing: %s skipped (%s)", label, e)
+            continue
+        if said:
+            parts.append(said)
+    return " ".join(parts)

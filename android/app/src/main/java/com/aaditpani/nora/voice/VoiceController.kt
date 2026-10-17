@@ -110,8 +110,12 @@ class VoiceController(private val app: Context, private val host: Host) {
 
     // ── the session ──────────────────────────────────────────────────────────
 
-    /** Start listening. From a visible screen only (see the class note). */
-    fun start() = main.launch {
+    /**
+     * Start listening. From a visible screen only (see the class note).
+     * [call] is the user calling NORA from the call screen: the same session,
+     * which they can also end by saying "hang up".
+     */
+    fun start(call: Boolean = false) = main.launch {
         if (active) return@launch
         if (!host.connected) {
             _ui.value = VoiceUi(note = "Not connected to the core.")
@@ -122,6 +126,7 @@ class VoiceController(private val app: Context, private val host: Host) {
         am.requestAudioFocus(focus)
         _ui.value = VoiceUi(VoicePhase.LISTENING)
         followingUp = false
+        inCall = call
         listen()
     }
 

@@ -48,6 +48,9 @@ import kotlin.coroutines.resume
  * conversation. It shows over the lock screen and turns the screen on, like
  * any incoming call. Answering speaks why she called; she then listens only
  * once the phone is unlocked (see [com.aaditpani.nora.voice.VoiceController.startCall]).
+ *
+ * It is also the user calling NORA ("Call NORA", the launcher shortcut):
+ * straight into the conversation, once the phone is unlocked.
  */
 class CallActivity : ComponentActivity() {
     /** Answered on this screen: from here on it shows the conversation. */
@@ -56,8 +59,14 @@ class CallActivity : ComponentActivity() {
     // Lint assumes a FragmentActivity; this is a plain ComponentActivity with no fragments.
     @SuppressLint("InvalidFragmentVersionForActivityResult")
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) answer() else Calls.decline(this)
+        when {
+            outgoing -> if (granted) callNora() else finish()
+            granted -> answer()
+            else -> Calls.decline(this)
+        }
     }
+    /** The user calling NORA, rather than answering her. */
+    private var outgoing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +75,9 @@ class CallActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         val voice = controller.voice
+        // Before the watchers below: with nothing ringing, the first would close this at once.
+        outgoing = intent?.getBooleanExtra(EXTRA_OUTGOING, false) == true
+        if (outgoing) answered.value = true
         // Done when the ringing stops unanswered, or the conversation ends.
         lifecycleScope.launch {
             Calls.ringing.collect { if (it == null && !answered.value) finish() }
@@ -98,7 +110,19 @@ class CallActivity : ComponentActivity() {
     }
 
     private fun handle(intent: Intent?) {
-        if (intent?.getBooleanExtra(EXTRA_ANSWER, false) == true) pickUp()
+        if (outgoing) {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) callNora()
+            else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (intent?.getBooleanExtra(EXTRA_ANSWER, false) == true) {
+            pickUp()
+        }
+    }
+
+    /** Calling her: listen at once, as the mic button would. A locked phone unlocks first. */
+    private fun callNora() {
+        val voice = controller.voice
+        if (voice.active) return
+        lifecycleScope.launch { if (unlock()) voice.start(call = true) else finish() }
     }
 
     private fun pickUp() {
@@ -111,7 +135,7 @@ class CallActivity : ComponentActivity() {
         // Before the ringing stops: its watcher may run inline and close this screen.
         answered.value = true
         val call = Calls.answer(this) ?: run { finish(); return }
-        controller.voice.startCall(call.reason, ::unlock)
+        controller.voice.startCall(call.say, ::unlock)
     }
 
     /** True once the phone is unlocked; asks for it when it isn't. */
@@ -129,9 +153,15 @@ class CallActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_ANSWER = "answer"
+        private const val EXTRA_OUTGOING = "outgoing"
 
         fun intent(context: Context, answer: Boolean): Intent = Intent(context, CallActivity::class.java)
             .putExtra(EXTRA_ANSWER, answer)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+        /** The user calling NORA. */
+        fun outgoing(context: Context): Intent = Intent(context, CallActivity::class.java)
+            .putExtra(EXTRA_OUTGOING, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }
