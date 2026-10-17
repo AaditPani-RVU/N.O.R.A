@@ -39,18 +39,25 @@ Settings live under `calls:` in `config.yaml`.
 
 ## 2. Still to check on the Pixel
 
-These are covered by unit tests but haven't happened for real yet.
+Checked on 2026-10-17 evening, except where marked open.
 
-1. **Wake-up call, end to end.** Schedule one for two minutes out, answer it,
-   and check that the whole briefing is read and that NORA keeps listening.
-2. **Missed-call path.** Let one ring out twice: the retry after 5 minutes,
-   the laptop notification, and the briefing arriving as text on the phone.
-3. **Calendar heads-up.** Make an event 12 minutes out and wait.
-4. **Calling a contact.** Needs you: a real call to someone you choose.
-   "Call Mama" should now reach the approval prompt.
-5. **Call NORA shortcut.** From the home screen while locked, and while unlocked.
-6. **The briefing itself.** How long it runs when spoken, and whether three
-   headlines is too many on a call.
+1. **Wake-up call, end to end.** Done. Rang at 22:02, answered; the
+   briefing was read (~40 s) and NORA listened after it.
+2. **Missed-call path.** Done. Missed at 22:06, retried at 22:11, missed
+   again: the whole briefing arrived on the phone as a "Missed call from
+   NORA" notification, and the laptop got one too (Clavis shows it for 7 s,
+   so it's easy to miss; it stays in the sidebar). The ringing screen used
+   to show the briefing's first sentence ("Good evening."); it now says what
+   was scheduled ("Morning briefing"), 4995d55.
+3. **Calendar heads-up.** Half done. The watcher found the 21:30 event at
+   21:20, but the phone had been off the tailnet since 16:49 (Tailscale had
+   stopped), so it fell back to a notification. Open: the ring itself. The
+   laptop now says when the phone stays offline 10 minutes (ff2a192).
+4. **Calling a contact.** Done. "Call Mama" reached `phone.call_contact` and
+   its approval prompt (16:43).
+5. **Call NORA shortcut.** Open. Needs you: locked and unlocked.
+6. **The briefing itself.** ~40 s when spoken on a call. Open: whether three
+   headlines is too many.
 
 ## 3. Next: what can be built
 

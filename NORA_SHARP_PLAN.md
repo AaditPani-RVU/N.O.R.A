@@ -193,9 +193,19 @@ HTML page and dated Google News headlines, and `nora doctor` checks it.
 "One sec" moved from 600 ms to 1.5 s after it was seen delaying chat
 answers that arrive at ~1.2 s.
 
-Not yet: the exit criterion's on-phone part, 20 real-mix voice turns with
-these fixes, reported with and without the acknowledgement
-(`python -m nora.evals.latency`).
+**On-phone run, 2026-10-17: accepted as done by the user's call, not by
+the numbers.** 20 real-mix turns were played to the Pixel; the user was on
+a call in the same room, so half were heard as their conversation. The 10
+heard right: first audio median 6.8 s (1.6–11.1 s), core ready to speak
+3.8 s, "One sec" ~2.6 s on model turns. The 1.5 s target was not met.
+Where the time went: the phone was on NORA's own voice (`tts: core`),
+which added a median 2.4 s between the core's first words and the phone's
+first audio; open questions take two model calls (intent ~1.0–1.9 s, then
+research ~0.5–1 s); "what's the date tomorrow" missed the fast path and
+went to the model (9.6 s); speech-to-text took 0.7–1.8 s. Fast-path turns
+landed at 1.6–2.9 s with Kokoro, so the phone's own TTS should bring them
+under target. Open: switch phone turns back to Android TTS, add the
+"date tomorrow" rule, and re-measure in a quiet room.
 
 **Phase D, built 2026-10-10** (branch `sharp/d-hear`). **Name repair**
 (`nora/music_names.py`): the artists and tracks in the user's playlists
@@ -363,5 +373,7 @@ only add more of both.
   The rest of Phase 10 (chaos tests, key rotation, fuzzing, battery)
   stays in the distributed plan.
 - Phase 6 is marked verified once the Phase C exit criterion passes.
+  (Marked done 2026-10-17 at the user's decision; see Phase C for the
+  measured numbers.)
 - Distributed Phases 7, 8 and 9 resume after A, G, B and C. D, E and F
   can interleave with them.
