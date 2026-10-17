@@ -61,7 +61,20 @@ Checked on 2026-10-17 evening, except where marked open.
 
 ## 3. Next: what can be built
 
-### 3.1 Call screening (recommended next)
+### 3.1 Call screening — built 2026-10-17 (5feda4e, c50a5ca)
+
+**Status.** On `main` and on the Pixel. NORA holds the call-screening role;
+Google Phone keeps its own spam filter (it screens as the default dialer,
+a separate step, and telecom lists both). Default mode is *ring*: unknown
+callers ring as before and are only logged. *Silence unknown numbers* (System
+tab) stops the ring and leaves a notification. "Who called", "block the last
+number that called" and "call that number back" are fast-path rules, and the
+briefing counts unknown callers from the last 12 hours. Built differently
+from the sketch below: *announce* is just *ring* (Google Phone already shows
+the number, and there's no free caller-ID lookup), and blocking is by voice
+only, with "unblock all" on the phone. Open: one real call from a number not
+in the contacts, to see it logged end to end.
+
 
 Android lets one app hold the *call screening* role (`CallScreeningService`).
 The phone asks that app about each incoming call **from a number not in your
@@ -117,6 +130,6 @@ if answering from headphones or the car turns out to matter in daily use.
 ## 5. Order
 
 1. §2: check everything already built, on the phone.
-2. §3.1: call screening.
+2. §3.1: call screening (built; one real call to check).
 3. §3.2: missed calls in context.
 4. §3.3: only if needed, after a decision.
