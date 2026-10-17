@@ -313,3 +313,22 @@ object SpeechHints {
             .distinct().take(MAX)
     }
 }
+
+/**
+ * "Hang up", "you can cut the call", "bye": the user ending a call from NORA
+ * by voice. Caught on the phone, because the core has no call to end: sent
+ * on, it was taken as "stop everything" and the phone kept listening.
+ */
+object HangUp {
+    private val phrase = Regex("""\b(hang up|cut (the |this )?call|end (the |this )?call|disconnect)\b""")
+    private val farewell = Regex(
+        """(ok(ay)?|thanks|thank you|cool|alright|got it|yeah|yes|no)?[ ,.!]*""" +
+            """(bye|goodbye|bye bye|that'?s all|that'?s it)([ ,.!]*(now|then|nora|thanks|thank you))*[ .!]*""")
+    private val negated = Regex("""\b(don'?t|do not|never|not)\b""")
+
+    fun wanted(text: String): Boolean {
+        val t = text.lowercase().trim()
+        if (negated.containsMatchIn(t)) return false
+        return phrase.containsMatchIn(t) || farewell.matches(t)
+    }
+}

@@ -13,6 +13,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import com.aaditpani.nora.link.AudioSpec
+import com.aaditpani.nora.link.HangUp
 import com.aaditpani.nora.link.LatencyStats
 import com.aaditpani.nora.link.SpeechHints
 import com.aaditpani.nora.link.SpeechQueue
@@ -102,6 +103,8 @@ class VoiceController(private val app: Context, private val host: Host) {
     }
     @Volatile private var turn: Turn? = null
     private var followingUp = false
+    /** This session is a call from NORA, which the user can end by saying so. */
+    private var inCall = false
 
     val active: Boolean get() = _ui.value.phase != VoicePhase.OFF
 
@@ -135,6 +138,7 @@ class VoiceController(private val app: Context, private val host: Host) {
         _ui.value = VoiceUi(VoicePhase.SPEAKING)
         // Quiet after the reason ends the call, rather than "Didn't catch that."
         followingUp = true
+        inCall = true
         val now = System.currentTimeMillis()
         val t = Turn(CALL_TURN, now, now, TTS_PHONE).also { it.recorded = true }   // nothing to time
         t.queue.onIdle = { main.launch { reasonSaid(t, unlock) } }
@@ -274,6 +278,11 @@ class VoiceController(private val app: Context, private val host: Host) {
             end(if (followingUp) null else "Didn't catch that.")
             return
         }
+        if (inCall && HangUp.wanted(text)) {
+            Log.i(TAG, "hung up by voice: \"${text.take(60)}\"")
+            end(null)
+            return
+        }
         val tts = host.tts
         val id = host.sendVoice(text, tts)
         Log.i(TAG, "heard \"${text.take(60)}\" -> turn $id")
@@ -342,6 +351,7 @@ class VoiceController(private val app: Context, private val host: Host) {
             record(t)
         }
         turn = null
+        inCall = false
         route.release()
         am.abandonAudioFocusRequest(focus)
         VoiceService.stop(app)

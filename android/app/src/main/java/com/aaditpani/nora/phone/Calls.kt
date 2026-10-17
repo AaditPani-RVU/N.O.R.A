@@ -114,8 +114,8 @@ class CallReceiver : BroadcastReceiver() {
 class CallUser(private val context: Context) : Capability {
     override val name = "phone.call"
     override val description =
-        "Ring the user's phone like a call; on answering NORA says `reason` aloud and they can talk. " +
-            "For what needs them now (wake-up, urgent), not routine messages"
+        "Ring the user's phone like a call. `reason` is the full sentence NORA says when they answer " +
+            "(\"It's time to take the laundry out.\"). For what needs them now, not routine messages"
     override val tier = 0
     override val paramsSchema: JSONObject = JSONObject("""
         {"type":"object","required":["reason"],

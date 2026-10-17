@@ -264,4 +264,16 @@ class VoiceTest {
         assertEquals(-120.0, BargeIn.dbfs(ShortArray(320), 320), 0.001)
         assertEquals(0.0, BargeIn.dbfs(ShortArray(320) { Short.MIN_VALUE }, 320), 0.01)
     }
+
+    @Test
+    fun hangingUpIsHeardOnACall() {
+        for (t in listOf("You can hang up now", "No you can cut the call thank you Nora", "end the call",
+                "Bye", "okay bye", "Thanks, bye Nora", "that's all", "goodbye!")) {
+            assertTrue(t, HangUp.wanted(t))
+        }
+        for (t in listOf("Yeah fine I'll do it now", "don't hang up", "remind me to call mum before she hangs",
+                "what's the call about", "say bye to Sam for me", "not yet")) {
+            assertFalse(t, HangUp.wanted(t))
+        }
+    }
 }
