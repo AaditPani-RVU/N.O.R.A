@@ -137,6 +137,12 @@ def _on_phone(action: str, intent: IntentResponse) -> IntentResponse:
     return intent if _device_offers(action) else _chat(_NO_PHONE)
 
 
+def _with_last_caller(fn) -> IntentResponse:
+    from nora import screened_calls
+    number = screened_calls.last_number()
+    return fn(number) if number else _chat("No unknown number has called that I know of.")
+
+
 def _media_query(raw: str) -> dict:
     """"my workout playlist" → {query: "workout", kind: "playlist"}."""
     q = re.sub(r"\s+", " ", raw.strip())
@@ -187,6 +193,27 @@ def _phone_rules() -> None:
     my phone" must not reach the laptop's "play X", and "open Spotify and play
     …" must not become open_app("spotify and play …")."""
     phone = r"(?:on|from|using)\s+(?:my|the)\s+(?:phone|mobile|pixel)"
+
+    # Unknown callers the phone screened (NORA_CALLS_PLAN §3.1). "That number"
+    # is the last one that called: blocking it and calling it back go to the
+    # phone's own actions, so a call back is approved there as usual.
+    last_caller = (r"(?:that|this)\s+(?:number|caller)|the\s+last\s+(?:number|caller)"
+                   r"(?:\s+(?:that|who)\s+(?:called|rang)(?:\s+me)?)?|the\s+number\s+(?:that|which)\s+(?:just\s+)?(?:called|rang)(?:\s+me)?")
+    _rule(
+        r"who\s+(?:called|rang|has\s+called|was\s+calling)(?:\s+me)?(?:\s+(?:while\s+i\s+was\s+"
+        r"(?:out|away|busy|asleep|sleeping)|today|earlier|tonight|last\s+night|just\s+now))?[?.]*",
+        lambda m: _intent("who called", "who_called"),
+    )
+    _rule(
+        r"block\s+(?:" + last_caller + r")[.!]*",
+        lambda m: _with_last_caller(lambda n: _on_phone("phone.block_number", _intent(
+            "block a number", "phone.block_number", {"number": n}))),
+    )
+    _rule(
+        r"(?:call|ring)\s+(?:" + last_caller + r")\s+back[.!]*|(?:call|ring)\s+back\s+(?:" + last_caller + r")[.!]*",
+        lambda m: _with_last_caller(lambda n: _on_phone("phone.call_contact", _intent(
+            "call back", "phone.call_contact", {"number": n}))),
+    )
 
     # "shuffle my downloads": Spotify keeps the songs downloaded on the phone
     # in a playlist it makes itself, "Offline Backup".

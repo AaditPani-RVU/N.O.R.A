@@ -450,6 +450,12 @@ class Hub:
                             str(data.get("outcome"))[:20], data.get("ring_ms"))
                 from nora import calls
                 calls.ended(session.device_id, str(data.get("outcome", "")))
+            elif name == "call.screened" and isinstance(msg["body"].get("data"), dict):
+                from nora import screened_calls
+                try:
+                    screened_calls.record(session.device_id, msg["body"]["data"])
+                except Exception:
+                    logger.exception("Recording a screened call failed")
             else:
                 logger.info("%s event %s", session.device_id, name)
         elif kind == "voice.barge_in":

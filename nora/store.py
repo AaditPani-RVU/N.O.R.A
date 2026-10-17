@@ -143,6 +143,18 @@ _MIGRATIONS: list[str] = [
     ALTER TABLE tasks ADD COLUMN due_on TEXT;        -- ISO date, local; NULL = no date
     CREATE INDEX tasks_due ON tasks(status, due_on);
     """,
+    # 5 — calls from numbers not in the phone's contacts, as the phone screened
+    # them: "who called while I was out" (NORA_CALLS_PLAN §3.1)
+    """
+    CREATE TABLE screened_calls (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id   TEXT NOT NULL,
+        number      TEXT NOT NULL,          -- as the phone showed it; '' = withheld
+        action      TEXT NOT NULL,          -- rang | silenced | rejected
+        at          REAL NOT NULL
+    );
+    CREATE INDEX screened_calls_at ON screened_calls(at);
+    """,
 ]
 
 _local = threading.local()
