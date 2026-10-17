@@ -239,7 +239,9 @@ class PromptBudgetTest(unittest.TestCase):
 
     def test_every_example_and_rule_names_a_real_action(self) -> None:
         from nora import command_engine
-        known = set(command_engine.get_available_actions())
+        from nora.evals.harness import phone_manifest
+        # Phone actions are real too: a rule may be about them alone ("call Mom").
+        known = set(command_engine.get_available_actions()) | {c["name"] for c in phone_manifest()}
         for action, _ in intent_parser.EXAMPLES:
             if action:
                 self.assertIn(action, known)

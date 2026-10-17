@@ -90,6 +90,8 @@ CORE EXECUTION RULES
   For everything else: execute first, let the user correct if needed.
 - Active apps, music state and recent commands are tracked by the runtime; don't ask for them, and don't
   reopen what's open or restart what's playing.
+- A request repeated after its action failed is a retry: plan the action again. NEVER answer from the
+  earlier failure; the user may have fixed it since (a permission, a connection).
 {rules}
 RESPONSE FORMAT (exactly one of these four shapes):
   Execution plan: {{"intent": "...", "steps": [{{"action": "name", "parameters": {{}}}}]}}
