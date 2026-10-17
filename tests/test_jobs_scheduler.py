@@ -219,6 +219,41 @@ class SchedulerFiringTest(unittest.TestCase):
         self.assertIn("buy milk", result)
         self.assertIn("Reminder", result)
 
+    def _call_result(self, *, success: bool, rang: bool):
+        from nora.schemas import StepResult
+        return StepResult(action="phone.call", success=success, message="",
+                          data={"rang": rang} if success else {})
+
+    def test_call_reminder_rings_the_phone_and_says_nothing_more(self) -> None:
+        """"Call me in 2 minutes about the laundry": the phone rings, and the
+        reminder isn't also delivered as a notification."""
+        ring = mock.AsyncMock(return_value=self._call_result(success=True, rang=True))
+        with mock.patch("nora.hub.server.call_capability", ring):
+            self.assertEqual(scheduler._default_runner("call: the laundry"), "")
+        ring.assert_awaited_once_with("phone.call", {"reason": "Reminder: the laundry"})
+
+        scheduler.set_runner(lambda what: "")
+        sched = scheduler.add("in 1 hour", "call: the laundry")
+        sched.next_run = time.time() - 1
+        self.assertEqual(scheduler.tick(), 1)
+        self.assertTrue(jobs.drain(timeout=5))
+        self.assertEqual(self.speak.said, [], "a call that rang was delivered again")
+
+    def test_call_reminder_without_a_phone_is_an_ordinary_reminder(self) -> None:
+        ring = mock.AsyncMock(return_value=self._call_result(success=False, rang=False))
+        with mock.patch("nora.hub.server.call_capability", ring), \
+                mock.patch("nora.commands.notifications._toast"):
+            result = scheduler._default_runner("call: the laundry")
+        self.assertIn("Reminder", result)
+        self.assertIn("the laundry", result)
+
+    def test_remind_me_with_ring_schedules_a_call(self) -> None:
+        from nora.commands import notifications
+        self.assertEqual(notifications.remind_me("the laundry", delay_minutes=2, ring=True),
+                         "I'll call you about that in 2 minutes.")
+        [sched] = scheduler.listing()
+        self.assertEqual(sched.what, "call: the laundry")
+
     def test_cancel_by_description(self) -> None:
         scheduler.add("every day at 7am", "the morning brief")
         self.assertEqual(len(scheduler.listing()), 1)

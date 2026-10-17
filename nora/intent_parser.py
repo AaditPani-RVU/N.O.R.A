@@ -126,7 +126,8 @@ RULES: list[tuple[tuple[str, ...], str]] = [
     (("remind_me", "schedule_task"),
      """TIME
 - "remind me in N minutes to X" → remind_me(message="X", delay_minutes=N). A clock time or a
-  repeat ("at 6pm", "every morning") → schedule_task(when, what)."""),
+  repeat ("at 6pm", "every morning") → schedule_task(when, what).
+- "call me in N minutes about X" → remind_me(message="X", delay_minutes=N, ring=true): rings the phone."""),
     (("open_app",),
      """- "open [app]" → open_app(name="[app]"). NEVER ask which version or instance."""),
     (("take_screenshot",),

@@ -82,9 +82,11 @@ def duration_minutes(text: str | float | int | None) -> float | None:
     return n / 60 if unit.startswith("s") else n * 60 if unit.startswith("h") else n
 
 
-@register("remind_me", sig="remind_me(message: str, delay_minutes: float = 5.0)",
-           description="Timed voice + toast reminder, in N minutes from now", category="notification")
-def remind_me(message: str, delay_minutes: float | str = 5.0, duration: str = "") -> str:
+@register("remind_me", sig="remind_me(message: str, delay_minutes: float = 5.0, ring: bool = false)",
+           description="Timed reminder in N minutes; ring=true rings the phone like a call when it's due",
+           category="notification")
+def remind_me(message: str, delay_minutes: float | str = 5.0, duration: str = "",
+              ring: bool = False) -> str:
     """Set a timed voice and desktop reminder.
 
     Backed by `nora.scheduler` rather than a sleeping thread. The old version
@@ -95,6 +97,9 @@ def remind_me(message: str, delay_minutes: float | str = 5.0, duration: str = ""
 
     Absolute and recurring times ("at 6pm", "every morning") go to
     `schedule_task`; this stays the simple relative case.
+
+    `ring` is "call me in ten minutes about X": when it's due the phone rings
+    like a call (`phone.call`), and says the reminder when answered.
     """
     # The model has sent {"duration": "1 minute"} instead of delay_minutes;
     # dropping it silently set the reminder for the 5-minute default.
@@ -104,10 +109,12 @@ def remind_me(message: str, delay_minutes: float | str = 5.0, duration: str = ""
     seconds = max(10, round(minutes * 60))
     # The spoken form is also the spec "what's scheduled" reads back.
     when = _say_delay(seconds)
-    sched = scheduler.add(f"in {when}", f"remind: {message}")
+    ring = ring is True or str(ring).lower() == "true"
+    prefix = scheduler._CALL_PREFIX if ring else scheduler._REMINDER_PREFIX
+    sched = scheduler.add(f"in {when}", f"{prefix}{message}")
     if sched is None:  # unparseable delay — fall back to speaking now
         return f"I couldn't set that reminder. {message}"
-    return f"I'll remind you about that in {when}."
+    return f"I'll call you about that in {when}." if ring else f"I'll remind you about that in {when}."
 
 
 def _say_delay(seconds: int) -> str:

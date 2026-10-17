@@ -40,6 +40,8 @@ _TICK_SEC = 20.0
 
 # Marks a schedule whose payload is a sentence to speak, not a command to run.
 _REMINDER_PREFIX = "remind: "
+# A reminder that rings the phone like a call ("call me in ten minutes about X").
+_CALL_PREFIX = "call: "
 
 _DAYS = {
     "monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1,
@@ -377,6 +379,15 @@ def _default_runner(what: str) -> str:
 
     from nora import command_engine, intent_parser
 
+    if what.startswith(_CALL_PREFIX):
+        message = what[len(_CALL_PREFIX):].strip()
+        if _ring(message):
+            # Nothing more to deliver: answered, she says it; missed, the
+            # phone leaves it as a missed call.
+            return ""
+        # No phone to ring right now: an ordinary reminder instead.
+        what = _REMINDER_PREFIX + message
+
     # `remind_me` stores its payload with this prefix. A reminder is not a
     # command to execute — running "buy milk" through the intent parser would
     # have it hunt for a matching action and fail. It is a sentence to say.
@@ -410,6 +421,26 @@ def _default_runner(what: str) -> str:
     return " ".join(spoken) if spoken else what
 
 
+def _ring(message: str) -> bool:
+    """Ring the phone with a reminder. True when it rang."""
+    import asyncio
+
+    from nora.hub import server
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(server.call_capability(
+            "phone.call", {"reason": f"Reminder: {message}"}))
+    except Exception as e:
+        logger.warning("Ringing the phone failed: %s", e)
+        return False
+    finally:
+        loop.close()
+    rang = result.success and result.data.get("rang") is True
+    logger.info("Reminder call %s: %s", "rang" if rang else "not rung", result.message[:80])
+    return rang
+
+
 def _fire(sched: Schedule) -> None:
     from nora import jobs
 
@@ -418,7 +449,7 @@ def _fire(sched: Schedule) -> None:
     jobs.submit(
         what[:60],
         lambda: runner(what),
-        kind="reminder" if what.startswith(_REMINDER_PREFIX) else "cron",
+        kind="reminder" if what.startswith((_REMINDER_PREFIX, _CALL_PREFIX)) else "cron",
         device=sched.device,
     )
     with _lock:

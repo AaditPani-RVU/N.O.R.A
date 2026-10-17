@@ -279,6 +279,8 @@ def _deliver(job: Job) -> None:
     """
     if not job.deliver or job.stale:
         return
+    if job.status != STATUS_FAILED and not (job.result or "").strip():
+        return   # done, nothing to say (a reminder that rang the phone instead)
     if job.status == STATUS_FAILED:
         text = f"I couldn't finish {job.title}. {job.error}".strip()
     else:

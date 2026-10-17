@@ -154,9 +154,11 @@ def _reminders_on(day: date) -> list[str]:
     end = start + 86400
     out = []
     for s in scheduler.listing():
-        if start <= s.next_run < end and s.what.startswith(scheduler._REMINDER_PREFIX):
+        prefix = next((p for p in (scheduler._REMINDER_PREFIX, scheduler._CALL_PREFIX)
+                       if s.what.startswith(p)), None)
+        if start <= s.next_run < end and prefix:
             clock = datetime.fromtimestamp(s.next_run).strftime("%-I:%M %p").replace(":00 ", " ")
-            out.append(f"{clock.lower()}: {s.what[len(scheduler._REMINDER_PREFIX):].strip()}")
+            out.append(f"{clock.lower()}: {s.what[len(prefix):].strip()}")
     return out
 
 

@@ -164,8 +164,8 @@ def _today_payload() -> dict:
         from nora import scheduler
         for s in scheduler.listing()[:6]:
             reminders.append({
-                "what": s.what.removeprefix("remind: "),
-                "reminder": s.what.startswith("remind: "),
+                "what": s.what.removeprefix("remind: ").removeprefix("call: "),
+                "reminder": s.what.startswith(("remind: ", "call: ")),
                 "next_run": s.next_run,
                 "recurring": s.recurring,
             })
