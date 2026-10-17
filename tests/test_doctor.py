@@ -106,6 +106,17 @@ def test_a_device_not_seen_for_days_is_reported(monkeypatch, age, ok):
         assert "revoke d_1" in f.fix
 
 
+
+def test_a_device_connected_for_days_is_fine(monkeypatch):
+    import time
+    from nora.hub import registry, server
+    dev = mock.Mock(id="d_1", approved_at=1.0, revoked_at=None, last_seen=time.time() - 3 * 86400)
+    dev.name = "Pixel 10"
+    monkeypatch.setattr(registry, "listing", lambda: [dev])
+    monkeypatch.setattr(server, "_hub", mock.Mock(sessions=lambda: ["d_1"]))
+    (f,) = doctor.check_phone()
+    assert f.ok and "connected now" in f.detail
+
 try:
     from tests.test_hub import HubTestCase
 except ImportError:          # run from inside tests/

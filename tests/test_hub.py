@@ -34,6 +34,7 @@ from unittest import mock
 
 from nora import audit_log, channel, command_engine, delivery, dialogue, jobs, store
 from nora.hub import fake_device, protocol, registry
+from nora.hub import server as hub_server
 from nora.hub.server import Hub
 from nora.schemas import ActionStep, IntentResponse, StepResult
 
@@ -359,6 +360,55 @@ class CallTest(HubTestCase):
             await self.until(lambda: ended.called)
         ended.assert_called_once_with(dev.device_id, "missed")
 
+
+class OfflineAlertTest(HubTestCase):
+    """A device that drops and stays gone is told to the laptop, once."""
+
+    async def drop(self, dev) -> None:
+        await dev.close()
+        self.devices.remove(dev)
+        await self.until(lambda: dev.device_id not in self.hub.sessions())
+
+    async def test_a_device_gone_past_the_limit_is_reported(self) -> None:
+        dev = await self.paired(name="Pixel 10")
+        with mock.patch.dict(hub_server.get_config()["hub"], {"offline_alert_minutes": 0.001}), \
+                mock.patch("nora.calls.notify_laptop") as notify:
+            await self.drop(dev)
+            await self.until(lambda: notify.called)
+        title, body = notify.call_args.args
+        self.assertIn("can't reach the Pixel 10", title)
+        self.assertIn("Tailscale", body)
+
+    async def test_a_quick_reconnect_says_nothing(self) -> None:
+        dev = await self.paired(name="Pixel 10")
+        with mock.patch.dict(hub_server.get_config()["hub"], {"offline_alert_minutes": 0.05}), \
+                mock.patch("nora.calls.notify_laptop") as notify:
+            await self.drop(dev)
+            await dev.connect()
+            self.devices.append(dev)
+            await self.until(lambda: dev.device_id in self.hub.sessions())
+            await asyncio.sleep(3.5)          # past when the 3 s check would have fired
+        notify.assert_not_called()
+
+    async def test_coming_back_after_a_report_is_told_too(self) -> None:
+        dev = await self.paired(name="Pixel 10")
+        with mock.patch.dict(hub_server.get_config()["hub"], {"offline_alert_minutes": 0.001}), \
+                mock.patch("nora.calls.notify_laptop") as notify:
+            await self.drop(dev)
+            await self.until(lambda: notify.call_count == 1)
+            await dev.connect()
+            self.devices.append(dev)
+            await self.until(lambda: notify.call_count == 2)
+        self.assertIn("is back", notify.call_args.args[0])
+
+    async def test_a_revoked_device_is_not_reported(self) -> None:
+        dev = await self.paired(name="Pixel 10")
+        with mock.patch.dict(hub_server.get_config()["hub"], {"offline_alert_minutes": 0.001}), \
+                mock.patch("nora.calls.notify_laptop") as notify:
+            registry.revoke(dev.device_id)
+            await self.until(lambda: dev.device_id not in self.hub.sessions())
+            await asyncio.sleep(0.5)
+        notify.assert_not_called()
 
 class ConfirmationTest(_TurnStubs, HubTestCase):
     async def test_tier2_capability_confirms_on_the_device(self) -> None:

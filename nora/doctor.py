@@ -192,17 +192,21 @@ def check_hub() -> list[Finding]:
 
 def check_phone() -> list[Finding]:
     """Each approved device has been seen recently."""
-    from nora.hub import registry
+    from nora.hub import registry, server
+    # last_seen moves on connect and disconnect, so a phone connected for days
+    # looks as old as its connection; one on the live hub right now is fine.
+    connected = set(server._hub.sessions()) if server._hub is not None else set()
     findings = []
     for d in registry.listing():
         if not d.approved_at or d.revoked_at:
             continue
-        age = time.time() - (d.last_seen or d.approved_at)
+        age = 0.0 if d.id in connected else time.time() - (d.last_seen or d.approved_at)
         ok = age < PHONE_STALE_SEC
         fix = ("" if ok else
                f"open the NORA app on the {d.name} and check it shows connected, or if it is "
                f"no longer used, python -m nora.hub revoke {d.id}")
-        findings.append(Finding(f"device:{d.id}", ok, f"{d.name} last connected {_ago(age)}", fix))
+        seen = "connected now" if d.id in connected else f"last connected {_ago(age)}"
+        findings.append(Finding(f"device:{d.id}", ok, f"{d.name} {seen}", fix))
     return findings
 
 

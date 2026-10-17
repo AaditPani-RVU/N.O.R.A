@@ -897,6 +897,9 @@ hub:
   # tailscale serve address, never a LAN IP.
   public_url: "wss://aaditsvictus-1.tailcbe88a.ts.net:8443/v1/device"
   port: 8770
+  # A device that drops and hasn't reconnected after this many minutes gets a
+  # laptop notification (and another when it's back). 0 = off.
+  offline_alert_minutes: 10
   # How long a device gets to run one capability before it counts as TIMEOUT.
   invoke_deadline_ms: 8000
   # Per-capability overrides. play_media waits for Spotify to really switch

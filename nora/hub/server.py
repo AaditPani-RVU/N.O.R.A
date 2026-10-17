@@ -139,6 +139,10 @@ class Hub:
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self.port: int | None = None
+        # Devices gone longer than `offline_alert_minutes`: a pending check
+        # per device that dropped, and the ones the laptop was told about.
+        self._offline_checks: dict[str, asyncio.TimerHandle] = {}
+        self._reported_offline: set[str] = set()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def start(self, host: str = "127.0.0.1", port: int = 8770) -> int:
@@ -329,6 +333,7 @@ class Hub:
         registry.touch(session.device_id)
         logger.info("Device %s (%s) connected with %d capabilities",
                     session.device_id, session.device.name, len(session.capabilities))
+        self._back_online(session.device_id, session.device.name)
 
         from nora import jobs
         await asyncio.get_running_loop().run_in_executor(None, jobs.flush, session.device_id)
@@ -361,6 +366,50 @@ class Hub:
             delivery.unregister(session.device_id, sink)
             registry.touch(session.device_id)
             logger.info("Device %s disconnected", session.device_id)
+            if current and not session.killed:
+                self._watch_offline(session.device_id, session.device.name)
+
+    # ── a device that doesn't come back ──────────────────────────────────────
+    # A dropped socket usually reconnects within seconds. One that doesn't is
+    # most often the phone's tailnet going down (2026-10-17: Tailscale stopped
+    # on the Pixel and nothing could ring it for five hours), and nothing on
+    # the phone says so. The laptop does, once per outage.
+
+    def _watch_offline(self, device_id: str, name: str) -> None:
+        minutes = float(_cfg().get("offline_alert_minutes", 10) or 0)
+        if minutes <= 0:
+            return
+        old = self._offline_checks.pop(device_id, None)
+        if old is not None:
+            old.cancel()
+        self._offline_checks[device_id] = asyncio.get_running_loop().call_later(
+            minutes * 60, self._still_offline, device_id, name, minutes)
+
+    def _still_offline(self, device_id: str, name: str, minutes: float) -> None:
+        self._offline_checks.pop(device_id, None)
+        with self._lock:
+            if device_id in self._sessions:
+                return
+        device = registry.get(device_id)
+        if device is None or not device.usable:      # revoked meanwhile: meant to be gone
+            return
+        self._reported_offline.add(device_id)
+        logger.warning("Device %s (%s) has been offline for %g min", device_id, name, minutes)
+        self._tell_laptop(f"NORA can't reach the {name}",
+                          f"Offline for {minutes:g} minutes, so she can't ring it or send to it. "
+                          f"Check that Tailscale is on, on the {name}.")
+
+    def _back_online(self, device_id: str, name: str) -> None:
+        check = self._offline_checks.pop(device_id, None)
+        if check is not None:
+            check.cancel()
+        if device_id in self._reported_offline:
+            self._reported_offline.discard(device_id)
+            self._tell_laptop(f"The {name} is back", "NORA can reach it again.")
+
+    def _tell_laptop(self, title: str, body: str) -> None:
+        from nora import calls
+        self.loop.run_in_executor(None, calls.notify_laptop, title, body)
 
     async def _watch_revocation(self, session: Session) -> None:
         """Revocation from the CLI lands in the store; drop the socket when it does."""
