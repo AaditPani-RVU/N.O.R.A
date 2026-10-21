@@ -210,6 +210,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_TAB = "tab"
         const val TAB_CHAT = 0
+        const val TAB_MUSIC = 1
     }
 }
 
@@ -281,7 +282,7 @@ private fun HeaderSweep(accent: Color) {
 private fun Tabs(tab: Int, onTab: (Int) -> Unit, accent: Color, waiting: Int) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf("CHAT", "SYSTEM", "MEMORY", "LOG").forEachIndexed { i, label ->
+        listOf("CHAT", "MUSIC", "SYSTEM", "MEMORY", "LOG").forEachIndexed { i, label ->
             val on = tab == i
             Box(Modifier.weight(1f)
                 .background(accent.copy(alpha = if (on) 0.10f else 0.02f), RoundedCornerShape(2.dp))
@@ -314,10 +315,14 @@ private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>
     val voice by c.voice.ui.collectAsState()
     val now = rememberNow(250)
     val orb = orbState(state, messages, confirms, now, voice.phase)
+    // On the music tab the frame takes the sleeve's colour, as the
+    // dashboard's Spotify card does.
+    var musicAccent by remember { mutableStateOf<Color?>(null) }
     val accent by animateColorAsState(if (confirms.isNotEmpty()) Hud.Amber
+        else if (tab == MainActivity.TAB_MUSIC && musicAccent != null) musicAccent!!
         else if (orb == OrbState.OFFLINE) Hud.Cyan.copy(alpha = 0.7f) else orb.color, tween(900), label = "accent")
 
-    HudBackground(accent) {
+    HudBackground(accent, oled = tab == MainActivity.TAB_MUSIC) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             // Typing in the chat: the keyboard takes half the screen, so the
             // header and tabs fold away and the chat's own strip stands in.
@@ -332,8 +337,9 @@ private fun PairedScreen(c: LinkController, requestedTab: MutableStateFlow<Int?>
             Box(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                 when (tab) {
                     0 -> ChatTab(c, orb, state is LinkState.Connected, messages, confirms, authenticate, typing, voice, talk)
-                    1 -> SystemTab(c, state, killed)
-                    2 -> MemoryTab(c, state is LinkState.Connected)
+                    MainActivity.TAB_MUSIC -> MusicTab { musicAccent = it }
+                    2 -> SystemTab(c, state, killed)
+                    3 -> MemoryTab(c, state is LinkState.Connected)
                     else -> LogTab(c)
                 }
             }

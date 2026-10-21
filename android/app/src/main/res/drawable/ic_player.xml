@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NORA Player: a bracketed frame round four level bars, on true black. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FF000000" android:pathData="M0,0h108v108h-108z" />
+    <!-- corner brackets: bright top-left, dim bottom-right -->
+    <path android:fillColor="#FF00D4FF" android:pathData="M30,30h12v2.5h-9.5v9.5h-2.5z" />
+    <path android:fillColor="#5900D4FF" android:pathData="M78,78h-12v-2.5h9.5v-9.5h2.5z" />
+    <!-- level bars -->
+    <path android:fillColor="#FF00D4FF" android:pathData="M40,58h4.5v12h-4.5z" />
+    <path android:fillColor="#FF00D4FF" android:pathData="M48,44h4.5v26h-4.5z" />
+    <path android:fillColor="#FF00D4FF" android:pathData="M56,51h4.5v19h-4.5z" />
+    <path android:fillColor="#FF00D4FF" android:pathData="M64,39h4.5v31h-4.5z" />
+</vector>

@@ -2,6 +2,7 @@ package com.aaditpani.nora.phone
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.service.notification.NotificationListenerService
@@ -25,13 +26,25 @@ import org.json.JSONObject
  * off in NORA. OTP notifications arrive from Android already redacted.
  */
 class NoraNotificationListener : NotificationListenerService() {
+    /** Screen-on, for the lock-screen player; this service is the one the system keeps alive. */
+    private var screenOn: BroadcastReceiver? = null
+
     override fun onListenerConnected() {
         connected = true
         runCatching { activeNotifications }.getOrNull()?.forEach { record(it, active = true) }
+        if (screenOn == null) screenOn = LockPlayer.register(this)
     }
 
     override fun onListenerDisconnected() {
         connected = false
+        screenOn?.let { runCatching { unregisterReceiver(it) } }
+        screenOn = null
+    }
+
+    override fun onDestroy() {
+        screenOn?.let { runCatching { unregisterReceiver(it) } }
+        screenOn = null
+        super.onDestroy()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) = record(sbn, active = true)

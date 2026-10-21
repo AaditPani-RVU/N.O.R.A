@@ -87,6 +87,28 @@
             </intent-filter>
         </activity>
 
+        <!-- The music player on its own icon: works unpaired and offline. -->
+        <activity
+            android:name=".ui.PlayerActivity"
+            android:exported="true"
+            android:icon="@drawable/ic_player"
+            android:label="NORA Player"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.aaditpani.nora.player"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Spotify sign-in hands the browser back here (phone/Spotify.kt). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nora-player" android:host="spotify-callback" />
+            </intent-filter>
+        </activity>
+
         <!-- A call from NORA. Only her own notification opens it. -->
         <activity
             android:name=".ui.CallActivity"

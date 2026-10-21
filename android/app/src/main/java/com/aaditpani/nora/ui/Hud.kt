@@ -198,10 +198,11 @@ fun Modifier.brackets(color: Color, arm: Dp = 13.dp, all: Boolean = false, width
     }
 }
 
-/** Glass: a sheen at the top edge over a deep blue fall-off. */
-fun Modifier.glass(accent: Color, border: Float = 0.15f) = this
+/** Glass: a sheen at the top edge over a deep blue fall-off. [oled] drops the fall-off for true black. */
+fun Modifier.glass(accent: Color, border: Float = 0.15f, oled: Boolean = false) = this
     .drawBehind {
-        drawRect(Brush.linearGradient(listOf(Color(0xB8021630), Color(0xE6000A18), Color(0xF2000712)),
+        if (oled) drawRect(Color.Black)
+        else drawRect(Brush.linearGradient(listOf(Color(0xB8021630), Color(0xE6000A18), Color(0xF2000712)),
             start = Offset.Zero, end = Offset(size.width * 0.4f, size.height)))
         drawRect(Brush.radialGradient(listOf(accent.copy(alpha = 0.07f), Color.Transparent),
             center = Offset(size.width / 2, -size.height * 0.25f), radius = size.width * 0.75f))
@@ -232,11 +233,12 @@ fun Panel(
     modifier: Modifier = Modifier,
     accent: Color = Hud.Cyan,
     live: Boolean = false,
+    oled: Boolean = false,
     badge: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val border by animateFloatAsState(if (live) 0.32f else 0.15f, tween(700), label = "border")
-    Box(modifier.fillMaxWidth().glass(accent, border).brackets(accent)) {
+    Box(modifier.fillMaxWidth().glass(accent, border, oled).brackets(accent)) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Diamond(9.dp, accent)
@@ -344,23 +346,24 @@ fun HudField(
     singleLine: Boolean = false,
     onSend: (() -> Unit)? = null,
     enabled: Boolean = true,
+    color: Color = Hud.Cyan,
 ) {
     val t = rememberInfiniteTransition(label = "caret")
     val blink by t.animateFloat(0f, 1f, infiniteRepeatable(tween(800, easing = LinearEasing)), label = "b")
     BasicTextField(value, onChange, modifier, enabled = enabled, singleLine = singleLine, maxLines = if (singleLine) 1 else 4,
-        textStyle = TextStyle(color = Hud.Cyan, fontFamily = Hud.Mono, fontSize = 14.sp, letterSpacing = 0.5.sp),
-        cursorBrush = SolidColor(Hud.Cyan),
+        textStyle = TextStyle(color = color, fontFamily = Hud.Mono, fontSize = 14.sp, letterSpacing = 0.5.sp),
+        cursorBrush = SolidColor(color),
         keyboardOptions = KeyboardOptions(imeAction = if (onSend != null) ImeAction.Send else ImeAction.Default),
         keyboardActions = KeyboardActions(onSend = { onSend?.invoke() }),
         decorationBox = { inner ->
             Box(Modifier
-                .background(Hud.Cyan.copy(alpha = 0.04f), RoundedCornerShape(2.dp))
-                .border(1.dp, Hud.Cyan.copy(alpha = if (value.isEmpty()) 0.15f else 0.45f), RoundedCornerShape(2.dp))
+                .background(color.copy(alpha = 0.04f), RoundedCornerShape(2.dp))
+                .border(1.dp, color.copy(alpha = if (value.isEmpty()) 0.15f else 0.45f), RoundedCornerShape(2.dp))
                 .padding(horizontal = 12.dp, vertical = 12.dp)) {
                 if (value.isEmpty()) {
                     Row {
                         Text(placeholder, color = Hud.Dim, fontFamily = Hud.Mono, fontSize = 13.sp, letterSpacing = 1.5.sp)
-                        Text("_", color = Hud.Cyan.copy(alpha = if (blink < 0.5f) 0.9f else 0f),
+                        Text("_", color = color.copy(alpha = if (blink < 0.5f) 0.9f else 0f),
                             fontFamily = Hud.Mono, fontSize = 13.sp)
                     }
                 }
@@ -420,16 +423,21 @@ fun Enter(animate: Boolean, delayMs: Int = 0, content: @Composable BoxScope.() -
  * scanlines and a vignette.
  */
 @Composable
-fun HudBackground(accent: Color, content: @Composable BoxScope.() -> Unit) {
+fun HudBackground(accent: Color, oled: Boolean = false, content: @Composable BoxScope.() -> Unit) {
     val t = rememberInfiniteTransition(label = "room")
     val drift by t.animateFloat(0f, 1f, infiniteRepeatable(tween(28000, easing = LinearEasing)), label = "grid")
     val aur by t.animateFloat(0f, 1f, infiniteRepeatable(tween(19000, easing = Hud.Ease), RepeatMode.Reverse), label = "aurora")
     Box(Modifier.fillMaxSize()
         .drawBehind {
-            drawRect(Brush.radialGradient(listOf(Color(0xFF04141F), Color(0xFF00090F), Color(0xFF000407)),
-                center = Offset(size.width / 2, -size.height * 0.12f), radius = size.height * 1.1f))
-            aurora(accent, aur)
-            grid(accent, drift)
+            // OLED: true black, so the screen's unlit pixels are off; the
+            // grid stays as the only ground light.
+            if (oled) drawRect(Color.Black)
+            else {
+                drawRect(Brush.radialGradient(listOf(Color(0xFF04141F), Color(0xFF00090F), Color(0xFF000407)),
+                    center = Offset(size.width / 2, -size.height * 0.12f), radius = size.height * 1.1f))
+                aurora(accent, aur)
+            }
+            grid(accent, drift, if (oled) 0.028f else 0.035f)
         }
         .drawWithContent {
             drawContent()
@@ -449,10 +457,10 @@ private fun DrawScope.aurora(accent: Color, p: Float) {
     bloom(w * 0.62f, h * 0.04f, w * 0.55f, Color(0x1C6E3CFF))
 }
 
-private fun DrawScope.grid(accent: Color, drift: Float) {
+private fun DrawScope.grid(accent: Color, drift: Float, alpha: Float) {
     val step = 52.dp.toPx()
     val off = drift * step
-    val c = accent.copy(alpha = 0.035f)
+    val c = accent.copy(alpha = alpha)
     var x = off - step
     while (x < size.width) { drawLine(c, Offset(x, 0f), Offset(x, size.height)); x += step }
     var y = off - step

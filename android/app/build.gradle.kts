@@ -13,6 +13,14 @@ android {
         targetSdk = 37
         versionCode = 6
         versionName = "0.6.0"
+
+        // NORA Player signs in to Spotify with PKCE, which needs only the
+        // app's Client ID — public by design. It comes from the core's .env
+        // so it isn't written into the repo; the Client Secret never ships.
+        val spotifyClientId = rootProject.projectDir.parentFile.resolve(".env").takeIf { it.isFile }
+            ?.readLines()?.firstOrNull { it.startsWith("SPOTIFY_CLIENT_ID=") }
+            ?.substringAfter('=')?.trim()?.trim('"', '\'').orEmpty()
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
     }
 
     buildTypes {
