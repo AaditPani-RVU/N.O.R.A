@@ -144,13 +144,13 @@ def _headlines(n: int = 3) -> str:
     category="knowledge",
 )
 def morning_briefing() -> str:
-    from nora import screened_calls
+    from nora import missed_calls
     from nora.commands.task_commands import agenda
     from nora.commands.weather import get_weather
 
     parts = [_greeting(datetime.datetime.now())]
     for label, part in (("weather", get_weather), ("agenda", agenda),
-                        ("calls", screened_calls.briefing_line), ("news", _headlines)):
+                        ("calls", missed_calls.briefing_line), ("news", _headlines)):
         try:
             said = (part() or "").strip()
         except Exception as e:

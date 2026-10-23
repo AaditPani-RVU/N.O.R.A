@@ -293,6 +293,11 @@ def start() -> None:
                 check_calendar()
             except Exception as e:
                 logger.debug("calendar call check failed: %s", e)
+            try:
+                from nora import missed_calls
+                missed_calls.check_meetings()
+            except Exception as e:
+                logger.debug("missed-call check failed: %s", e)
 
     _stop.clear()
     _thread = threading.Thread(target=loop, daemon=True, name="nora-calls")

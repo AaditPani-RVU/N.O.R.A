@@ -204,6 +204,22 @@ def _phone_rules() -> None:
         r"(?:out|away|busy|asleep|sleeping)|today|earlier|tonight|last\s+night|just\s+now))?[?.]*",
         lambda m: _intent("who called", "who_called"),
     )
+    # Missed calls from anyone, contacts included (§3.2).
+    _rule(
+        r"(?:did|has)\s+(?:anyone|anybody|someone|somebody)\s+(?:call(?:ed)?|ring|rung|rang)(?:\s+me)?"
+        r"(?:\s+(?:while\s+i\s+was\s+(?:out|away|busy|asleep|sleeping)|today|earlier|tonight|just\s+now))?[?.]*"
+        r"|(?:do\s+i\s+have\s+|are\s+there\s+|any\s+)(?:any\s+)?missed\s+calls?[?.]*"
+        r"|did\s+i\s+miss\s+(?:any|a)\s+calls?[?.]*|(?:show|check|read)\s+(?:me\s+)?(?:my\s+)?missed\s+calls[.!]*"
+        r"|(?:my\s+)?missed\s+calls[?.]*",
+        lambda m: _intent("who called", "who_called"),
+    )
+    # "Call her back": whoever NORA last said had called. "Call me back" is a
+    # reminder, and "call that number back" is the rule below.
+    _rule(
+        r"(?:(?:ok(?:ay)?|yes|yeah|sure)[,\s]+)?(?:please\s+)?(?:call|ring)\s+(?:(?:her|him|them)\s+)?back(?:\s+please)?[.!]*"
+        r"|return\s+(?:the|that|her|his|their)\s+call[.!]*",
+        lambda m: _on_phone("phone.call_contact", _intent("call back", "call_back")),
+    )
     _rule(
         r"block\s+(?:" + last_caller + r")[.!]*",
         lambda m: _with_last_caller(lambda n: _on_phone("phone.block_number", _intent(
