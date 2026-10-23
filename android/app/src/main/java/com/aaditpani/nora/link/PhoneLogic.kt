@@ -198,6 +198,8 @@ data class Note(
     val title: String,
     val text: String,
     val postedAt: Long,
+    /** `Notification.category`; the dialer marks its missed calls "missed_call". */
+    val category: String = "",
 )
 
 object NoteDigest {
@@ -252,6 +254,72 @@ object NoteDigest {
     fun clip(s: String, max: Int): String {
         val flat = s.replace(Regex("\\s+"), " ").trim()
         return if (flat.length <= max) flat else flat.take(max - 1).trimEnd() + "…"
+    }
+}
+
+/** Everyone the dialer says the user missed, one entry per caller. */
+data class MissedCall(
+    val caller: String,
+    val count: Int,
+    val firstAt: Long,
+    val lastAt: Long,
+    /** Still in the shade: the user hasn't dismissed it, so likely hasn't seen it. */
+    val onScreen: Boolean,
+)
+
+/**
+ * `phone.missed_calls` (NORA_CALLS_PLAN §3.2), read from the dialer's own
+ * missed-call notifications, so it needs no call-log permission. Google
+ * Phone posts one per call with the caller as the title and "Missed call" as
+ * the text; other dialers swap them, or update one notification to "2 missed
+ * calls". Calls from contacts show the contact's name; others, the number.
+ */
+object MissedCalls {
+    const val CATEGORY = "missed_call"
+    private val DIALERS = setOf("com.google.android.dialer", "com.android.dialer",
+        "com.samsung.android.dialer", "com.android.server.telecom")
+    private val PHRASE = Regex("""^(?:(\d+)\s+)?missed\s+(?:\w+\s+)?calls?\b.*""", RegexOption.IGNORE_CASE)
+
+    fun isMissedCall(n: Note): Boolean =
+        n.category == CATEGORY || (n.packageName in DIALERS && (PHRASE.matches(n.title) || PHRASE.matches(n.text)))
+
+    /** (caller, calls) from one notification. */
+    fun read(n: Note): Pair<String, Int> {
+        val titleSays = PHRASE.matchEntire(n.title.trim())
+        val textSays = PHRASE.matchEntire(n.text.trim())
+        val caller = when {
+            titleSays != null && textSays == null -> n.text
+            else -> n.title
+        }.trim().ifBlank { "An unknown caller" }
+        val count = (titleSays ?: textSays)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+        return NoteDigest.clip(caller, 60) to count.coerceIn(1, 99)
+    }
+
+    /** Newest caller first, within [sinceMs]; [onScreen] says which notes are still showing. */
+    fun select(notes: List<Pair<Note, Boolean>>, now: Long, sinceMs: Long, includeSeen: Boolean): List<MissedCall> {
+        val byCaller = LinkedHashMap<String, MissedCall>()
+        notes.filter { (n, shown) -> isMissedCall(n) && now - n.postedAt <= sinceMs && (includeSeen || shown) }
+            .sortedBy { it.first.postedAt }
+            .forEach { (n, shown) ->
+                val (caller, count) = read(n)
+                val key = caller.lowercase()
+                val had = byCaller[key]
+                byCaller[key] = if (had == null) MissedCall(caller, count, n.postedAt, n.postedAt, shown)
+                else had.copy(count = had.count + count, lastAt = n.postedAt, onScreen = had.onScreen || shown)
+            }
+        return byCaller.values.sortedByDescending { it.lastAt }
+    }
+
+    fun message(calls: List<MissedCall>, now: Long, sinceMs: Long): String {
+        if (calls.isEmpty()) {
+            val hours = sinceMs / 3_600_000
+            return if (hours >= 1) "No missed calls on the phone in the last $hours hour${if (hours == 1L) "" else "s"}."
+            else "No missed calls on the phone."
+        }
+        return calls.joinToString(" ") { c ->
+            val times = if (c.count == 1) "" else " ${c.count} times"
+            "${c.caller} called$times (${NoteDigest.ago(now - c.lastAt)})."
+        }
     }
 }
 

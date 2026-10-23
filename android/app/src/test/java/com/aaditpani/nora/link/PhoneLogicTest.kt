@@ -212,3 +212,52 @@ class ContactPickTest {
         assertFalse(ContactPick.isNumber("()"))
     }
 }
+
+class MissedCallsTest {
+    private val now = 10_000_000_000L
+    private val dialer = "com.google.android.dialer"
+    private fun call(title: String, text: String, minsAgo: Long, key: String = "$title$minsAgo",
+                     category: String = MissedCalls.CATEGORY, pkg: String = dialer) =
+        Note(key, pkg, "Phone", title, text, now - minsAgo * 60_000, category)
+
+    @Test
+    fun onePerCallerNewestFirst() {
+        val notes = listOf(
+            call("Mom", "Missed call", 40) to true,
+            call("Mom", "Missed call", 25) to true,
+            call("+91 98450 12345", "Missed call", 10) to false,
+            Note("w", "com.whatsapp", "WhatsApp", "Mom", "Missed voice call", now - 5 * 60_000) to true,
+        )
+        val calls = MissedCalls.select(notes, now, 24 * 3_600_000L, includeSeen = true)
+        assertEquals(listOf("+91 98450 12345", "Mom"), calls.map { it.caller })
+        assertEquals(2, calls[1].count)
+        assertEquals(now - 40 * 60_000, calls[1].firstAt)
+        assertEquals(now - 25 * 60_000, calls[1].lastAt)
+        assertFalse(calls[0].onScreen)
+
+        val unseen = MissedCalls.select(notes, now, 24 * 3_600_000L, includeSeen = false)
+        assertEquals(listOf("Mom"), unseen.map { it.caller })
+        assertEquals(1, MissedCalls.select(notes, now, 15 * 60_000L, includeSeen = true).size)
+    }
+
+    @Test
+    fun readsEitherLayoutAndCounts() {
+        assertEquals("Dad" to 1, MissedCalls.read(call("Missed call", "Dad", 1)))
+        assertEquals("Dad" to 3, MissedCalls.read(call("3 missed calls", "Dad", 1)))
+        assertEquals("Priya" to 1, MissedCalls.read(call("Priya", "Missed work call", 1)))
+        assertEquals("An unknown caller" to 1, MissedCalls.read(call("", "Missed call", 1)))
+        // No category, but the dialer's own words.
+        assertTrue(MissedCalls.isMissedCall(call("Dad", "Missed call", 1, category = "")))
+        assertFalse(MissedCalls.isMissedCall(call("Dad", "Call me back", 1, category = "")))
+        assertFalse(MissedCalls.isMissedCall(call("Dad", "Missed call", 1, category = "", pkg = "com.whatsapp")))
+    }
+
+    @Test
+    fun messageReadsNaturally() {
+        val calls = listOf(MissedCall("Mom", 2, now - 40 * 60_000, now - 25 * 60_000, true),
+            MissedCall("Dad", 1, now - 120 * 60_000, now - 120 * 60_000, false))
+        assertEquals("Mom called 2 times (25m ago). Dad called (2h ago).", MissedCalls.message(calls, now, 0))
+        assertEquals("No missed calls on the phone in the last 12 hours.",
+            MissedCalls.message(emptyList(), now, 12 * 3_600_000L))
+    }
+}

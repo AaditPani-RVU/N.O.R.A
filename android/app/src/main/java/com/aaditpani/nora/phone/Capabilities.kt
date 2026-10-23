@@ -22,7 +22,7 @@ fun allCapabilities(context: Context, prefs: LinkPrefs): List<Capability> {
         DeviceStatus(app), PhoneNotify(app),
         // Phase 4
         OpenApp(app), OpenUrl(app), PlayMedia(app), MediaControl(app), Volume(app),
-        ReadNotifications(app) { prefs.hiddenNoteApps }, GetLocation(app), Navigate(app),
+        ReadNotifications(app) { prefs.hiddenNoteApps }, ReadMissedCalls(app) { prefs.hiddenNoteApps }, GetLocation(app), Navigate(app),
         SetAlarm(app), SetTimer(app), Dial(app),
         CallUser(app), CallContact(app), BlockNumber(app, prefs),
     )

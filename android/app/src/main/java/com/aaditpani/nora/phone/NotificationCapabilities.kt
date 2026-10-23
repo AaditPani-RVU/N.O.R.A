@@ -10,6 +10,7 @@ import android.service.notification.StatusBarNotification
 import com.aaditpani.nora.link.Capability
 import com.aaditpani.nora.link.CapabilityResult
 import com.aaditpani.nora.link.ErrorCode
+import com.aaditpani.nora.link.MissedCalls
 import com.aaditpani.nora.link.Note
 import com.aaditpani.nora.link.NoteDigest
 import org.json.JSONArray
@@ -77,7 +78,7 @@ class NoraNotificationListener : NotificationListenerService() {
         if (title.isBlank() && text.isBlank()) return null
         return Note(sbn.key, sbn.packageName, Media.appLabel(this, sbn.packageName),
             NoteDigest.clip(title, NoteDigest.MAX_TITLE), NoteDigest.clip(text, NoteDigest.MAX_TEXT),
-            sbn.postTime)
+            sbn.postTime, n.category.orEmpty())
     }
 
     companion object {
@@ -100,6 +101,9 @@ class NoraNotificationListener : NotificationListenerService() {
         fun snapshot(includeDismissed: Boolean): List<Note> = synchronized(ring) {
             ring.values.filter { includeDismissed || it.second }.map { it.first }
         }
+
+        /** Every note in the ring, with whether it is still on screen. */
+        fun snapshotWithState(): List<Pair<Note, Boolean>> = synchronized(ring) { ring.values.toList() }
 
         /** Apps seen recently, for the privacy switches in the app. package → label. */
         fun seenApps(): Map<String, String> = synchronized(ring) {
@@ -150,5 +154,51 @@ class ReadNotifications(private val context: Context, private val blocked: () ->
             .put("items", items)
             .put("untrusted", true)
             .put("message", NoteDigest.message(notes, now, app)))
+    }
+}
+
+/**
+ * "Did anyone call?" (NORA_CALLS_PLAN §3.2): the dialer's missed-call
+ * notifications, one entry per caller, from the same in-memory ring. Tier 0,
+ * and untrusted: a caller ID name is text someone else chose.
+ */
+class ReadMissedCalls(private val context: Context, private val blocked: () -> Set<String>) : Capability {
+    override val name = "phone.missed_calls"
+    override val description = "Calls the user missed on the phone, newest caller first, with how many times each called"
+    override val tier = 0
+    override val untrustedOutput = true
+    override val paramsSchema: JSONObject = JSONObject("""
+        {"type":"object",
+         "properties":{"since_minutes":{"type":"integer","minimum":1,"maximum":1440},
+                       "include_seen":{"type":"boolean"}}}""")
+
+    override suspend fun execute(params: JSONObject): CapabilityResult {
+        if (!NoraNotificationListener.hasAccess(context)) {
+            return CapabilityResult.Failed(ErrorCode.PERMISSION_DENIED,
+                "NORA needs notification access on the phone to see missed calls. Switch it on from the NORA app.",
+                userAction = "grant_notification_access")
+        }
+        if (!NoraNotificationListener.connected) {
+            NotificationListenerService.requestRebind(NoraNotificationListener.component(context))
+            return CapabilityResult.Failed(ErrorCode.EXECUTION_FAILED,
+                "The phone's notification reader is still starting. Ask again in a moment.", retryable = true)
+        }
+        val now = System.currentTimeMillis()
+        val since = params.optInt("since_minutes", 24 * 60) * 60_000L
+        val off = blocked()
+        val calls = MissedCalls.select(
+            NoraNotificationListener.snapshotWithState().filter { it.first.packageName !in off },
+            now, since, params.optBoolean("include_seen", true))
+        val items = JSONArray()
+        calls.forEach {
+            items.put(JSONObject().put("caller", it.caller).put("count", it.count)
+                .put("minutes_ago", (now - it.lastAt) / 60_000)
+                .put("first_minutes_ago", (now - it.firstAt) / 60_000)
+                .put("on_screen", it.onScreen))
+        }
+        return CapabilityResult.Ok(JSONObject()
+            .put("items", items)
+            .put("untrusted", true)
+            .put("message", MissedCalls.message(calls, now, since)))
     }
 }
