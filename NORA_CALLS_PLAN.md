@@ -104,7 +104,36 @@ System tab, a `call.screened` event to the core, and three commands
 Risk to check first: holding the role may displace Google Phone's own spam
 filter on the Pixel. Test with the role on and off before relying on it.
 
-### 3.2 Missed calls and texts in context
+### 3.2 Missed calls in context — built 2026-10-23
+
+**Status.** On branch `calls/missed-context`; the core is tested, and the
+phone side is built and unit-tested but not yet installed on the Pixel. The
+phone's new `phone.missed_calls` (tier 0, untrusted output) reads the
+dialer's own missed-call notifications from the in-memory ring it already
+keeps (category `missed_call`, or the dialer's "Missed call" wording),
+one entry per caller with a count. The core never stores who called; it
+asks when it needs to, and adds the calendar:
+
+- "Did anyone call?", "any missed calls", "who called while I was out":
+  `who_called` now lists the phone's missed calls first ("Mom called twice
+  while you were in Design review; Dad called, yesterday at 9:05 PM"), then
+  blocked numbers screening caught. Without the phone, it lists the
+  screened unknown numbers as before.
+- After a timed calendar event ends, the calls watcher asks for calls missed
+  during it that are still unread on the phone, and sends one line to the
+  phone. Once per event, and not during quiet hours.
+- The briefing says who called overnight (still unread), falling back to
+  the screened-number count.
+- "Call back", "call her back", "return the call": `call_back` calls
+  whoever NORA last mentioned (for 3 hours), else the newest missed caller,
+  through `phone.call_contact`, so it's approved on the phone as usual.
+
+Texts were left out: the plan's example is calls, and messages already go
+through `phone.read_notifications`. Open: install, then one real missed
+call during a calendar event, to check Google Phone's notification layout
+on the Pixel against the parser.
+
+The original sketch:
 
 When the phone shows a missed call from a contact, NORA can mention it
 ("Mom called twice while you were in the meeting") and offer to call back.
@@ -131,5 +160,5 @@ if answering from headphones or the car turns out to matter in daily use.
 
 1. §2: check everything already built, on the phone.
 2. §3.1: call screening (built; one real call to check).
-3. §3.2: missed calls in context.
+3. §3.2: missed calls in context (built; install and one real call to check).
 4. §3.3: only if needed, after a decision.
