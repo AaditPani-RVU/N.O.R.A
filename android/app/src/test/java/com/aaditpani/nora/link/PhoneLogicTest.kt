@@ -246,6 +246,9 @@ class MissedCallsTest {
         assertEquals("Dad" to 3, MissedCalls.read(call("3 missed calls", "Dad", 1)))
         assertEquals("Priya" to 1, MissedCalls.read(call("Priya", "Missed work call", 1)))
         assertEquals("An unknown caller" to 1, MissedCalls.read(call("", "Missed call", 1)))
+        // Pixel's dialer names the caller in the title and says how it ended below.
+        assertEquals("Mama" to 1, MissedCalls.read(call("Missed call from Mama", "Ended by caller", 1)))
+        assertEquals("+91 98450 12345" to 2, MissedCalls.read(call("2 missed calls from +91 98450 12345", "Ended by caller", 1)))
         // No category, but the dialer's own words.
         assertTrue(MissedCalls.isMissedCall(call("Dad", "Missed call", 1, category = "")))
         assertFalse(MissedCalls.isMissedCall(call("Dad", "Call me back", 1, category = "")))

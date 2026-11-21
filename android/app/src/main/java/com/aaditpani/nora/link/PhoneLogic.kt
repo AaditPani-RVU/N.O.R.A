@@ -279,6 +279,8 @@ object MissedCalls {
     private val DIALERS = setOf("com.google.android.dialer", "com.android.dialer",
         "com.samsung.android.dialer", "com.android.server.telecom")
     private val PHRASE = Regex("""^(?:(\d+)\s+)?missed\s+(?:\w+\s+)?calls?\b.*""", RegexOption.IGNORE_CASE)
+    // Pixel's dialer (2026): title "Missed call from Mama", text "Ended by caller".
+    private val FROM = Regex("""^(?:\d+\s+)?missed\s+(?:\w+\s+)?calls?\s+from\s+(.+)$""", RegexOption.IGNORE_CASE)
 
     fun isMissedCall(n: Note): Boolean =
         n.category == CATEGORY || (n.packageName in DIALERS && (PHRASE.matches(n.title) || PHRASE.matches(n.text)))
@@ -287,7 +289,11 @@ object MissedCalls {
     fun read(n: Note): Pair<String, Int> {
         val titleSays = PHRASE.matchEntire(n.title.trim())
         val textSays = PHRASE.matchEntire(n.text.trim())
+        // "Missed call from X" names the caller itself; the other line is then
+        // how the call ended ("Ended by caller"), not who made it.
+        val from = FROM.matchEntire(n.title.trim()) ?: FROM.matchEntire(n.text.trim())
         val caller = when {
+            from != null -> from.groupValues[1]
             titleSays != null && textSays == null -> n.text
             else -> n.title
         }.trim().ifBlank { "An unknown caller" }
