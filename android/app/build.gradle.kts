@@ -54,6 +54,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Google's own scanner UI: no camera permission for this app.
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // Phase 8: geofences, watched by the phone itself.
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 
     testImplementation("junit:junit:4.13.2")
     // android.jar's org.json is a stub off-device; the real one for JVM tests.

@@ -297,8 +297,16 @@ class Hub:
             caps[entry["name"]] = entry
         session.capabilities = caps
 
+    def offers(self, device_id: str, capability: str) -> bool:
+        with self._lock:
+            session = self._sessions.get(device_id)
+        return session is not None and capability in session.capabilities
+
     def _register(self, session: Session) -> None:
+        from nora import triggers
         for name, entry in session.capabilities.items():
+            if name in triggers.INTERNAL_CAPABILITIES:
+                continue        # driven by the core itself, not offered to the model
             tier = self._effective_tier(name, entry["tier"], _channel.ORIGIN_LIVE_USER)
             desc = entry["description"]
             if tier >= protocol.TIER_CONFIRM:
@@ -335,8 +343,10 @@ class Hub:
                     session.device_id, session.device.name, len(session.capabilities))
         self._back_online(session.device_id, session.device.name)
 
-        from nora import jobs
+        from nora import jobs, triggers
         await asyncio.get_running_loop().run_in_executor(None, jobs.flush, session.device_id)
+        # A reboot or reinstall clears the phone's geofences: hand them over on every connect.
+        asyncio.create_task(triggers.sync_device(self, session.device_id))
         # Load Kokoro now (~1.5 s once), not on this device's first spoken turn.
         asyncio.get_running_loop().run_in_executor(None, _voice.core_voice_available)
 
@@ -439,24 +449,26 @@ class Hub:
             else:
                 self._register(session)
         elif kind == "event":
-            # Events feed the trigger engine in Phase 8; for now, ack and log.
             session.send_nowait("ack", {"seq": msg.get("seq", 0)}, corr=msg["id"])
             name = msg["body"].get("name")
-            if name == "voice.turn" and isinstance(msg["body"].get("data"), dict):
-                _voice.record_turn(session.device_id, msg["body"]["data"])
-            elif name == "call.ended" and isinstance(msg["body"].get("data"), dict):
-                data = msg["body"]["data"]
+            data = msg["body"].get("data")
+            occurred = msg["body"].get("occurred_at")
+            occurred_at = occurred / 1000 if isinstance(occurred, (int, float)) else None
+            if isinstance(data, dict):
+                # Every event also goes to the trigger rules (Phase 8).
+                from nora import triggers
+                triggers.emit(session.device_id, str(name), data, occurred_at)
+            if name == "voice.turn" and isinstance(data, dict):
+                _voice.record_turn(session.device_id, data)
+            elif name == "call.ended" and isinstance(data, dict):
                 logger.info("%s call from NORA %s after %s ms", session.device_id,
                             str(data.get("outcome"))[:20], data.get("ring_ms"))
                 from nora import calls
                 calls.ended(session.device_id, str(data.get("outcome", "")))
-            elif name == "call.screened" and isinstance(msg["body"].get("data"), dict):
+            elif name == "call.screened" and isinstance(data, dict):
                 from nora import screened_calls
                 try:
-                    occurred = msg["body"].get("occurred_at")
-                    screened_calls.record(
-                        session.device_id, msg["body"]["data"],
-                        occurred / 1000 if isinstance(occurred, (int, float)) else None)
+                    screened_calls.record(session.device_id, data, occurred_at)
                 except Exception:
                     logger.exception("Recording a screened call failed")
             else:

@@ -12,6 +12,8 @@
     <!-- Phase 4 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Phase 8: geofences ("Allow all the time"), so arriving and leaving is noticed locked -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- Phase 5: tier-3 confirmations ask for the fingerprint or screen lock -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
@@ -218,6 +220,10 @@
 
         <receiver
             android:name=".phone.CallReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".phone.GeofenceReceiver"
             android:exported="false" />
 
         <receiver

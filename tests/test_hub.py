@@ -370,6 +370,38 @@ class CallTest(HubTestCase):
             dev.device_id, {"number": "+91 98450 12345", "action": "rang"}, 1795270000.0)
 
 
+class GeofenceTest(HubTestCase):
+    """Phase 8: the phone watches the saved places; the core keeps the list."""
+
+    FENCES = [{"name": "phone.set_geofences", "version": 1, "tier": 0,
+               "description": "Replace the phone's geofences with these saved places",
+               "params_schema": {"type": "object", "required": ["fences"],
+                                 "properties": {"fences": {"type": "array"}}}}]
+
+    async def test_the_fences_go_to_the_phone_on_connect_but_not_to_the_model(self) -> None:
+        from nora import places, triggers
+        with mock.patch.object(triggers, "sync_all"):
+            places.save("home", lat=12.97, lon=77.59)
+        got = []
+        dev = await self.paired(capabilities=self.FENCES)
+        dev.replies["phone.set_geofences"] = lambda p: (got.append(p), {"success": True, "result": {"fenced": 1}})[1]
+        # The connect-time sync may have run before the reply was set: run it
+        # again, on the hub's loop like the real one.
+        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(
+            triggers.sync_device(self.hub, dev.device_id), self.hub.loop))
+        self.assertEqual(got[-1]["fences"], [{"id": "home", "lat": 12.97, "lon": 77.59, "radius_m": 150.0}])
+        self.assertIsNone(command_engine.get_action_meta("phone.set_geofences"))
+
+    async def test_events_reach_the_trigger_rules_with_the_phones_time(self) -> None:
+        dev = await self.paired(capabilities=self.FENCES)
+        with mock.patch("nora.triggers.emit") as emit:
+            await dev._send("event", {"name": "geofence.transition", "occurred_at": 1795270000000,
+                                      "data": {"place": "home", "transition": "exit"}})
+            await self.until(lambda: emit.called)
+        emit.assert_called_once_with(dev.device_id, "geofence.transition",
+                                     {"place": "home", "transition": "exit"}, 1795270000.0)
+
+
 class OfflineAlertTest(HubTestCase):
     """A device that drops and stays gone is told to the laptop, once."""
 

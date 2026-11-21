@@ -510,7 +510,10 @@ cognitive_memory:
 
 proactive:
   # Proactive intelligence engine — suggests actions based on learned patterns.
-  enabled: true
+  # Off since 2026-11-21: it asked "should I show location?" from action names,
+  # 19 times on Friday evenings. Replaced by `triggers`, whose rules act on
+  # real events and offer an undo instead of asking.
+  enabled: false
   idle_threshold_sec: 120          # Seconds of silence before proactive trigger
   suggestion_cooldown_sec: 1800    # Minimum gap between proactive suggestions
   min_pattern_confidence: 5        # Min times a pattern must be seen before suggesting
@@ -938,6 +941,24 @@ calls:
   # Calls nobody asked for (calendar, long answers) don't ring in these hours;
   # they arrive as notifications. Calls you asked for ring whatever the hour.
   quiet_hours: "23:00-07:00"
+
+triggers:
+  # Device events and the rules they set off (nora/triggers.py, Phase 8).
+  # Saved places become geofences on the phone; it reports crossing them,
+  # even locked. A crossing older than stale_after_sec (the phone was
+  # offline) or within flap_sec of the last one is noted, not acted on.
+  enabled: true
+  geofence_radius_m: 150
+  stale_after_sec: 600
+  flap_sec: 180
+  home:
+    place: home                 # the saved place that counts as home
+    leave_lock_laptop: true     # lock the home core's screen
+    leave_pause_media: true     # pause Spotify on it (undo resumes)
+    leave_checklist: true       # phone note: battery under low_battery_pct, anything due today
+    low_battery_pct: 30
+    arrive_brief: true          # welcome, said on the laptop and sent to the phone: missed calls, what's due
+    arrive_resume_music: true   # resume Spotify on the laptop (not in quiet hours; undo pauses)
 
 places:
   # "I'm going home": saved places live in the core store (nora/places.py).

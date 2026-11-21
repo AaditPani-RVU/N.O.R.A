@@ -155,6 +155,14 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX screened_calls_at ON screened_calls(at);
     """,
+    # 6 — inside or outside each saved place, from the phone's geofences (Phase 8)
+    """
+    CREATE TABLE place_presence (
+        place       TEXT PRIMARY KEY,       -- a places.name: "home"
+        state       TEXT NOT NULL,          -- inside | outside
+        changed_at  REAL NOT NULL           -- when the phone crossed, by its clock
+    );
+    """,
 ]
 
 _local = threading.local()

@@ -110,6 +110,7 @@ def save(name: str, *, address: str = "", lat: float | None = None,
             " ON CONFLICT(name) DO UPDATE SET address=excluded.address, lat=excluded.lat,"
             " lon=excluded.lon, updated_at=excluded.updated_at",
             (key, address.strip()[:300], lat, lon, time.time()))
+    _refence()
     return Place(key, address.strip()[:300], lat, lon)
 
 
@@ -128,8 +129,20 @@ def listing() -> list[Place]:
 
 def forget(name: str) -> bool:
     with store.transaction() as conn:
-        return conn.execute("DELETE FROM places WHERE name = ?",
+        gone = conn.execute("DELETE FROM places WHERE name = ?",
                             (canonical(name),)).rowcount == 1
+    if gone:
+        _refence()
+    return gone
+
+
+def _refence() -> None:
+    """The phone watches the saved places as geofences (Phase 8): tell it they changed."""
+    try:
+        from nora import triggers
+        triggers.sync_all()
+    except Exception as e:
+        logger.debug("geofence sync after a place change failed: %s", e)
 
 
 # ── lookups ──────────────────────────────────────────────────────────────────

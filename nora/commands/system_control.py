@@ -149,6 +149,17 @@ def take_screenshot() -> str:
 
 @register("lock_screen", sig="lock_screen()", category="system")
 def lock_screen() -> str:
-    """Lock the Windows workstation."""
-    ctypes.windll.user32.LockWorkStation()
-    return "Screen locked."
+    """Lock the screen: Clavis's lock on the Linux core, logind as a fallback."""
+    if sys.platform == "win32":
+        ctypes.windll.user32.LockWorkStation()
+        return "Screen locked."
+    import subprocess
+    qs = Path.home() / ".local" / "bin" / "qs"
+    for cmd in ([str(qs), "-c", "clavis", "ipc", "call", "lock", "open"],
+                ["loginctl", "lock-session"]):
+        try:
+            if subprocess.run(cmd, capture_output=True, timeout=5).returncode == 0:
+                return "Screen locked."
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return "I couldn't lock the screen."
