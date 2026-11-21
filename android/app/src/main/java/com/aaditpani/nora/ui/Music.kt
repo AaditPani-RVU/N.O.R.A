@@ -1,5 +1,6 @@
 package com.aaditpani.nora.ui
 
+import com.aaditpani.nora.link.ArtPalette
 import android.app.SearchManager
 import android.content.ContentResolver
 import android.content.Context
@@ -172,24 +173,18 @@ private fun artOf(ctx: Context, m: MediaMetadata): Bitmap? {
 }
 
 /**
- * The cover's most vivid colour, at full brightness: on black, a dim accent
- * reads as mud. Grey covers have nothing to give and get null.
+ * The cover's two or three colours ([ArtPalette]), each at full brightness:
+ * on black, a dim accent reads as mud. Grey covers have nothing to give and get null.
  */
-private fun accentOf(b: Bitmap): Color? {
-    val small = Bitmap.createScaledBitmap(b.copy(Bitmap.Config.ARGB_8888, false), 24, 24, true)
-    val hsv = FloatArray(3)
-    var best: FloatArray? = null
-    var bestScore = 0f
-    for (y in 0 until small.height) for (x in 0 until small.width) {
-        android.graphics.Color.colorToHSV(small.getPixel(x, y), hsv)
-        if (hsv[2] < 0.22f) continue
-        val score = hsv[1] * (0.35f + hsv[2])
-        if (score > bestScore) { bestScore = score; best = hsv.copyOf() }
-    }
-    val h = best ?: return null
-    if (h[1] < 0.22f) return null
-    return Color.hsv(h[0], h[1].coerceIn(0.5f, 0.85f), 1f)
+private fun paletteOf(b: Bitmap): ArtPalette.Colours? {
+    val small = Bitmap.createScaledBitmap(b.copy(Bitmap.Config.ARGB_8888, false), 32, 32, true)
+    val px = IntArray(small.width * small.height)
+    small.getPixels(px, 0, small.width, 0, 0, small.width, small.height)
+    return ArtPalette.of(px)
 }
+
+/** The colours the now-playing card is drawn in. [second] and [third] fall back to the one before. */
+internal data class Tints(val main: Color, val second: Color, val third: Color)
 
 /** Body text for the sleeve's colour: near-white leaning toward it, so it sits with the accent instead of NORA's blue. */
 internal fun ink(accent: Color, alpha: Float = 0.9f) = lerp(Color.White, accent, 0.3f).copy(alpha = alpha)
@@ -208,7 +203,7 @@ fun MusicTab(settings: Boolean = true, onAccent: (Color?) -> Unit) {
     var access by remember { mutableStateOf(Media.hasAccess(ctx)) }
     var controller by remember { mutableStateOf<MediaController?>(null) }
     var np by remember { mutableStateOf<NowPlaying?>(null) }
-    var accent by remember { mutableStateOf<Color?>(null) }
+    var palette by remember { mutableStateOf<ArtPalette.Colours?>(null) }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -242,12 +237,17 @@ fun MusicTab(settings: Boolean = true, onAccent: (Color?) -> Unit) {
 
     val art = np?.art
     LaunchedEffect(art) {
-        accent = art?.let { withContext(Dispatchers.Default) { runCatching { accentOf(it) }.getOrNull() } }
-        onAccent(accent)
+        palette = art?.let { withContext(Dispatchers.Default) { runCatching { paletteOf(it) }.getOrNull() } }
+        // The rest of the app takes the main colour only; the others stay on the card.
+        onAccent(palette?.primary?.let(::Color))
     }
     DisposableEffect(Unit) { onDispose { onAccent(null) } }
 
-    val tint by animateColorAsState(accent ?: Hud.Cyan, tween(900), label = "tint")
+    val main = palette?.primary?.let(::Color) ?: Hud.Cyan
+    val second = palette?.secondary?.let(::Color) ?: main
+    val tint by animateColorAsState(main, tween(900), label = "tint")
+    val tint2 by animateColorAsState(second, tween(900), label = "tint2")
+    val tint3 by animateColorAsState(palette?.tertiary?.let(::Color) ?: second, tween(900), label = "tint3")
 
     Column(Modifier.fillMaxSize().burnInShift(rememberMinute()).verticalScroll(rememberScrollState()).padding(bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -255,7 +255,7 @@ fun MusicTab(settings: Boolean = true, onAccent: (Color?) -> Unit) {
         when {
             !access -> Enter(true) { NoAccess(ctx) }
             else -> {
-                Enter(true) { NowPlayingPanel(np, controller, tint) }
+                Enter(true) { NowPlayingPanel(np, controller, Tints(tint, tint2, tint3)) }
                 Enter(true, 120) { PlayAnything(controller, np, tint) }
                 val upNext = np?.let { n -> upNext(n) }.orEmpty()
                 if (upNext.isNotEmpty()) Enter(true, 200) { UpNext(upNext, controller, tint) }
@@ -291,12 +291,13 @@ private fun upNext(n: NowPlaying): List<MediaSession.QueueItem> {
 // ── now playing ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun NowPlayingPanel(np: NowPlaying?, c: MediaController?, accent: Color) {
+private fun NowPlayingPanel(np: NowPlaying?, c: MediaController?, tints: Tints) {
+    val accent = tints.main
     val ctx = LocalContext.current
     val playing = np?.playing == true
     Panel(np?.app ?: "SPOTIFY", accent = accent, live = playing, oled = true,
         badge = { Badge(if (np == null) "NO SIGNAL" else if (playing) "LIVE" else "HOLD", accent, live = playing) }) {
-        Sleeve(np, c, accent)
+        Sleeve(np, c, tints)
         Spacer(Modifier.height(14.dp))
         TrackIdentity(np, accent)
         Spacer(Modifier.height(14.dp))
@@ -319,7 +320,8 @@ private fun NowPlayingPanel(np: NowPlaying?, c: MediaController?, accent: Color)
  * down on a track change, and the scrub bar riding its bottom edge.
  */
 @Composable
-private fun Sleeve(np: NowPlaying?, c: MediaController?, accent: Color) {
+private fun Sleeve(np: NowPlaying?, c: MediaController?, tints: Tints) {
+    val accent = tints.main
     val playing = np?.playing == true
     val t = rememberInfiniteTransition(label = "sleeve")
     val scan by t.animateFloat(-0.35f, 1.35f, infiniteRepeatable(tween(7000, easing = LinearEasing)), label = "scan")
@@ -335,11 +337,16 @@ private fun Sleeve(np: NowPlaying?, c: MediaController?, accent: Color) {
     }
 
     Box(Modifier.fillMaxWidth().padding(horizontal = 0.dp)) {
-        // Light coming off the sleeve: a faint pool of its colour behind it.
+        // Light coming off the sleeve: pools of its colours behind it, the main
+        // one from the upper left and the second from the lower right.
         Box(Modifier.matchParentSize().drawBehind {
-            drawRect(Brush.radialGradient(listOf(accent.copy(alpha = if (np?.art != null) 0.16f else 0.06f), Color.Transparent),
-                center = Offset(size.width / 2, size.height * 0.55f), radius = size.width * 0.75f),
-                topLeft = Offset(-size.width * 0.2f, -size.height * 0.1f), size = Size(size.width * 1.4f, size.height * 1.3f))
+            val a = if (np?.art != null) 0.16f else 0.06f
+            val area = Size(size.width * 1.4f, size.height * 1.3f)
+            val at = Offset(-size.width * 0.2f, -size.height * 0.1f)
+            drawRect(Brush.radialGradient(listOf(accent.copy(alpha = a), Color.Transparent),
+                center = Offset(size.width * 0.35f, size.height * 0.4f), radius = size.width * 0.7f), topLeft = at, size = area)
+            drawRect(Brush.radialGradient(listOf(tints.second.copy(alpha = a * 0.85f), Color.Transparent),
+                center = Offset(size.width * 0.7f, size.height * 0.75f), radius = size.width * 0.65f), topLeft = at, size = area)
         })
         Box(Modifier.fillMaxWidth().aspectRatio(1f).clipToBounds()
             .background(Color.Black)
@@ -367,7 +374,7 @@ private fun Sleeve(np: NowPlaying?, c: MediaController?, accent: Color) {
                 if (playing) {
                     val band = h * 0.3f
                     val top = scan * h - band / 2
-                    drawRect(Brush.verticalGradient(listOf(Color.Transparent, accent.copy(alpha = 0.16f),
+                    drawRect(Brush.verticalGradient(listOf(Color.Transparent, tints.second.copy(alpha = 0.16f),
                         Color.White.copy(alpha = 0.12f), Color.Transparent), top, top + band),
                         Offset(0f, top), Size(w, band))
                 }
@@ -375,7 +382,7 @@ private fun Sleeve(np: NowPlaying?, c: MediaController?, accent: Color) {
                     val band = h * 0.26f
                     val top = -band + wipe.value * (h + band * 2)
                     val a = if (wipe.value < 0.18f) wipe.value / 0.18f else 1f - (wipe.value - 0.18f) / 0.82f
-                    drawRect(Brush.verticalGradient(listOf(Color.Transparent, accent.copy(alpha = 0.55f * a),
+                    drawRect(Brush.verticalGradient(listOf(Color.Transparent, tints.third.copy(alpha = 0.55f * a),
                         Color.White.copy(alpha = 0.5f * a), Color.Transparent), top, top + band),
                         Offset(0f, top), Size(w, band))
                 }
@@ -385,8 +392,8 @@ private fun Sleeve(np: NowPlaying?, c: MediaController?, accent: Color) {
             }
 
             StatusChip(np, Modifier.align(Alignment.TopStart).padding(10.dp))
-            if (playing) LevelMeter(Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 14.dp))
-            if (np != null) Scrub(np, c, accent, Modifier.align(Alignment.BottomCenter))
+            if (playing) LevelMeter(tints.third, Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 14.dp))
+            if (np != null) Scrub(np, c, tints, Modifier.align(Alignment.BottomCenter))
             Box(Modifier.matchParentSize().brackets(Color(0xBFE9F6FF), arm = 15.dp))
         }
     }
@@ -428,7 +435,7 @@ private fun StatusChip(np: NowPlaying?, modifier: Modifier) {
 
 /** Four white bars beside the chip. Not wired to the audio — nothing exposes it — just a running light. */
 @Composable
-private fun LevelMeter(modifier: Modifier) {
+private fun LevelMeter(tint: Color, modifier: Modifier) {
     val t = rememberInfiniteTransition(label = "lvl")
     val p by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "p")
     Canvas(modifier.size(20.dp, 15.dp)) {
@@ -438,7 +445,7 @@ private fun LevelMeter(modifier: Modifier) {
             val ph = ((p - d / 1500f) % 1f + 1f) % 1f
             val s = 0.3f + 0.7f * ((1 - kotlin.math.cos(ph * 2 * Math.PI).toFloat()) / 2)
             val h = size.height * s
-            drawRect(Brush.verticalGradient(listOf(Color.White, Color(0x8CCFE9FF)), size.height - h, size.height),
+            drawRect(Brush.verticalGradient(listOf(lerp(Color.White, tint, 0.35f), tint.copy(alpha = 0.55f)), size.height - h, size.height),
                 Offset(i * (bw + gap), size.height - h), Size(bw, h))
         }
     }
@@ -446,7 +453,8 @@ private fun LevelMeter(modifier: Modifier) {
 
 /** Times above a 3 dp bar with a 24 dp hit area; tap or drag to seek. */
 @Composable
-private fun Scrub(np: NowPlaying, c: MediaController?, accent: Color, modifier: Modifier) {
+private fun Scrub(np: NowPlaying, c: MediaController?, tints: Tints, modifier: Modifier) {
+    val accent = tints.main
     var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(np.playing) { while (np.playing) { now = SystemClock.elapsedRealtime(); delay(250) } }
     var drag by remember { mutableStateOf<Float?>(null) }
@@ -479,11 +487,12 @@ private fun Scrub(np: NowPlaying, c: MediaController?, accent: Color, modifier: 
                 drawRect(Color(0x8C000000), Offset(0f, y), Size(size.width, barH))
                 val fw = size.width * frac.coerceIn(0f, 1f)
                 drawRect(accent.copy(alpha = 0.35f), Offset(0f, y - 2.dp.toPx()), Size(fw, barH + 4.dp.toPx()))
-                drawRect(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.55f), accent), 0f, fw.coerceAtLeast(1f)),
+                // Main colour into the second along the played part.
+                drawRect(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.7f), tints.second), 0f, fw.coerceAtLeast(1f)),
                     Offset(0f, y), Size(fw, barH))
                 if (drag != null || canSeek) {
                     val r = (if (drag != null) 6 else 4).dp.toPx()
-                    drawCircle(accent.copy(alpha = 0.45f), r * 1.9f, Offset(fw, y + barH / 2))
+                    drawCircle(tints.second.copy(alpha = 0.45f), r * 1.9f, Offset(fw, y + barH / 2))
                     drawCircle(Color(0xFFEAF6FF), r, Offset(fw, y + barH / 2))
                 }
             })
