@@ -360,6 +360,15 @@ class CallTest(HubTestCase):
             await self.until(lambda: ended.called)
         ended.assert_called_once_with(dev.device_id, "missed")
 
+    async def test_a_screened_call_keeps_the_time_the_phone_saw_it(self) -> None:
+        dev = await self.paired(capabilities=self.CALL)
+        with mock.patch("nora.screened_calls.record") as record:
+            await dev._send("event", {"name": "call.screened", "occurred_at": 1795270000000,
+                                      "data": {"number": "+91 98450 12345", "action": "rang"}})
+            await self.until(lambda: record.called)
+        record.assert_called_once_with(
+            dev.device_id, {"number": "+91 98450 12345", "action": "rang"}, 1795270000.0)
+
 
 class OfflineAlertTest(HubTestCase):
     """A device that drops and stays gone is told to the laptop, once."""

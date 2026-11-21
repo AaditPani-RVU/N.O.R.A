@@ -111,3 +111,17 @@ def test_the_hub_records_a_screened_call_event():
     hub._dispatch(session, {"type": "event", "id": "e1", "body": {"name": "call.screened",
                                                       "data": {"number": "+91 98450 12345", "action": "silenced"}}})
     assert [(c.number, c.action) for c in screened_calls.recent()] == [("+91 98450 12345", "silenced")]
+
+
+def test_calls_screened_offline_keep_the_time_the_phone_saw_them():
+    """A backlog replayed on reconnect arrives together; each keeps its own time."""
+    then = time.time() - 3 * 3600
+    screened_calls.record("d_phone", {"number": "+91 98450 12345", "action": "rang"}, occurred_at=then)
+    assert screened_calls.recent()[0].at == pytest.approx(then)
+
+
+@pytest.mark.parametrize("occurred_at", [None, "soon", time.time() + 3600, time.time() - 40 * 86400])
+def test_missing_or_implausible_phone_times_fall_back_to_arrival(occurred_at):
+    before = time.time()
+    screened_calls.record("d_phone", {"number": "+91 98450 12345", "action": "rang"}, occurred_at=occurred_at)
+    assert screened_calls.recent()[0].at >= before

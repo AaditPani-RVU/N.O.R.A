@@ -453,7 +453,10 @@ class Hub:
             elif name == "call.screened" and isinstance(msg["body"].get("data"), dict):
                 from nora import screened_calls
                 try:
-                    screened_calls.record(session.device_id, msg["body"]["data"])
+                    occurred = msg["body"].get("occurred_at")
+                    screened_calls.record(
+                        session.device_id, msg["body"]["data"],
+                        occurred / 1000 if isinstance(occurred, (int, float)) else None)
                 except Exception:
                     logger.exception("Recording a screened call failed")
             else:

@@ -36,16 +36,27 @@ class Screened:
         return self.number or "a withheld number"
 
 
-def record(device_id: str, data: dict) -> None:
+# How far ahead of the core's clock a phone's timestamp may be before it is
+# treated as wrong rather than as clock drift.
+_MAX_SKEW_SEC = 300
+
+
+def record(device_id: str, data: dict, occurred_at: float | None = None) -> None:
+    """`occurred_at` is when the phone screened the call (epoch seconds). Calls
+    screened while the phone was offline arrive together when it reconnects,
+    so the arrival time would say they all came "just now"."""
     number = str(data.get("number") or "").strip()[:32]
     action = str(data.get("action") or "")
     if action not in ACTIONS:
         logger.warning("call.screened with an unknown action %r", action[:20])
         return
     now = time.time()
+    at = now
+    if isinstance(occurred_at, (int, float)) and now - _KEEP_DAYS * 86400 < occurred_at <= now + _MAX_SKEW_SEC:
+        at = min(float(occurred_at), now)
     with store.transaction() as conn:
         conn.execute("INSERT INTO screened_calls (device_id, number, action, at) VALUES (?, ?, ?, ?)",
-                     (device_id, number, action, now))
+                     (device_id, number, action, at))
         conn.execute("DELETE FROM screened_calls WHERE at < ?", (now - _KEEP_DAYS * 86400,))
     logger.info("Screened call from %s: %s", number or "a withheld number", action)
 
