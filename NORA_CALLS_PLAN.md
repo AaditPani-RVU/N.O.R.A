@@ -49,10 +49,11 @@ Checked on 2026-10-17 evening, except where marked open.
    so it's easy to miss; it stays in the sidebar). The ringing screen used
    to show the briefing's first sentence ("Good evening."); it now says what
    was scheduled ("Morning briefing"), 4995d55.
-3. **Calendar heads-up.** Half done. The watcher found the 21:30 event at
-   21:20, but the phone had been off the tailnet since 16:49 (Tailscale had
-   stopped), so it fell back to a notification. Open: the ring itself. The
-   laptop now says when the phone stays offline 10 minutes (ff2a192).
+3. **Calendar heads-up.** Done 2026-11-21. On 10-17 the phone was off the
+   tailnet, so it fell back to a notification. Retested with a 22:58 event:
+   rang at 22:48:37, answered, and said "NORA ring test starts in 10
+   minutes, at 10:58 PM". The laptop says when the phone stays offline 10
+   minutes (ff2a192).
 4. **Calling a contact.** Done. "Call Mama" reached `phone.call_contact` and
    its approval prompt (16:43).
 5. **Call NORA shortcut.** Open. Needs you: locked and unlocked.
