@@ -130,9 +130,10 @@ llm_router:
     # so it is no longer a credible fallback. Measured on this machine:
     #   groq   openai/gpt-oss-120b                 ~1.2-2.1s   best judgement
     #   groq   openai/gpt-oss-20b                  ~0.5s
-    #   nvidia nvidia/nemotron-3-super-120b-a12b   ~1-3s (2026-09-30; was 15.9s)
-    #   nvidia openai/gpt-oss-20b                  ~1s
-    #   nvidia nvidia/nemotron-3-nano-30b-a3b      retired 2026-09-01 (410)
+    #   nvidia nvidia/nemotron-3.5-bolt-e4b        ~0.8s (2026-11-21)
+    #   nvidia nvidia/nemotron-3-ultra-550b-a55b   ~1.6s, slow tail to ~6s
+    #   retired on NVIDIA (410): nemotron-3-super-120b-a12b (2026-10-03),
+    #     openai/gpt-oss-20b, nemotron-3-nano-30b-a3b (2026-09-01)
     # Both Groq entries share one key and one host, so a Groq outage takes out
     # both — every chain ends on NVIDIA, the only provider that survives that.
     intent:
@@ -141,29 +142,31 @@ llm_router:
         base_url: "https://api.groq.com/openai/v1"
         api_key_env: "GROQ_API_KEY"
         model: "openai/gpt-oss-120b"
-      # NVIDIA, for when Groq is out of quota or down. Measured 2026-09-30
-      # against the full intent prompt with the phone connected (6 requests):
-      #   nvidia/nemotron-3-super-120b-a12b   6/6 right, 1.5-10s
-      #   openai/gpt-oss-20b (on NVIDIA)      5/6 (no steps for an alarm), 2-6s
-      #   nvidia/nemotron-3-ultra-550b-a55b   mostly chat/clarify or bad JSON
-      # Retired on NVIDIA (410): nemotron-3-nano-30b-a3b (2026-09-01) and
-      # meta/llama-3.1-8b-instruct, the two fallbacks used before this.
-      - name: nvidia_nemotron_super_120b
+      # NVIDIA, for when Groq is out of quota or down. Measured 2026-11-21
+      # with python -m nora.evals on the 45 model cases, thinking off:
+      #   nvidia/nemotron-3.5-bolt-e4b         36/45, p50 0.78 s, p90 1.1 s
+      #   nvidia/nemotron-3-ultra-550b-a55b    36/45, p50 1.6 s, p90 5.7 s
+      #   nvidia/nemotron-3.5-lightning-30b-a3b 31/45, p50 0.62 s
+      #   (groq openai/gpt-oss-120b, for scale: 36/45 in the scout's trial)
+      # With thinking on, Lightning returns no JSON and Ultra chats instead.
+      # Retired on NVIDIA (410): nemotron-3-super-120b-a12b (2026-10-03),
+      # openai/gpt-oss-20b, nemotron-3-nano-30b-a3b and llama-3.1-8b-instruct.
+      - name: nvidia_nemotron_bolt_e4b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "nvidia/nemotron-3-super-120b-a12b"
-        # Without this it thinks first, spending the 512-token budget before
-        # the JSON: the eval of 2026-10-10 had 5 of 45 replies come back
-        # empty and a p50 of 6.8 s. With it: ~0.7 s on the same prompts.
+        model: "nvidia/nemotron-3.5-bolt-e4b"
         extra_body:
           chat_template_kwargs:
             thinking: false
-      - name: nvidia_gpt_oss_20b
+      - name: nvidia_nemotron_ultra_550b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "openai/gpt-oss-20b"
+        model: "nvidia/nemotron-3-ultra-550b-a55b"
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
       # Separate daily quota from the 120b on Groq, but it failed Groq's JSON
       # validation on this prompt in Phase 4 testing, so it goes after NVIDIA.
       - name: groq_gpt_oss_20b
@@ -189,24 +192,25 @@ llm_router:
         model: "openai/gpt-oss-20b"
         extra_body:
           reasoning_format: "hidden"
-      - name: nvidia_nemotron_super_120b
+      - name: nvidia_nemotron_bolt_e4b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "nvidia/nemotron-3-super-120b-a12b"
+        model: "nvidia/nemotron-3.5-bolt-e4b"
         extra_body:
-          # Nemotron is a hybrid-reasoning model. It normally returns its
-          # scratchpad in a separate `reasoning_content` field, but when the
-          # thinking runs long it overflows into `content` too — and NORA reads
-          # it aloud ("We need to recall what we previously told the user...").
+          # Nemotron is a hybrid-reasoning model. With thinking on, a long
+          # scratchpad can overflow into `content` and NORA reads it aloud.
           # This is the NVIDIA equivalent of Groq's reasoning_format:"hidden".
           chat_template_kwargs:
             thinking: false
-      - name: nvidia_gpt_oss_20b
+      - name: nvidia_nemotron_ultra_550b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "openai/gpt-oss-20b"
+        model: "nvidia/nemotron-3-ultra-550b-a55b"
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
 
     # live_search: removed 2026-10-07. Its notes, for whoever brings it back:
     # Live web search (nora/commands/web_search.py). groq/compound-mini is an
@@ -255,33 +259,34 @@ llm_router:
         extra_body:
           reasoning_format: "hidden"
           reasoning_effort: "low"
-      - name: nvidia_nemotron_super_120b
+      - name: nvidia_nemotron_bolt_e4b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "nvidia/nemotron-3-super-120b-a12b"
+        model: "nvidia/nemotron-3.5-bolt-e4b"
         extra_body:
-          # Nemotron is a hybrid-reasoning model. It normally returns its
-          # scratchpad in a separate `reasoning_content` field, but when the
-          # thinking runs long it overflows into `content` too — and NORA reads
-          # it aloud ("We need to recall what we previously told the user...").
+          # Nemotron is a hybrid-reasoning model. With thinking on, a long
+          # scratchpad can overflow into `content` and NORA reads it aloud.
           # This is the NVIDIA equivalent of Groq's reasoning_format:"hidden".
           chat_template_kwargs:
             thinking: false
-      - name: nvidia_gpt_oss_20b
+      - name: nvidia_nemotron_ultra_550b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "openai/gpt-oss-20b"
+        model: "nvidia/nemotron-3-ultra-550b-a55b"
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
 
     reasoning:
       # Latency matters less here — this role is for deliberate thinking, not
       # for holding a conversation — so the slower, stronger model leads.
-      - name: nvidia_nemotron_super_120b
+      - name: nvidia_nemotron_ultra_550b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "nvidia/nemotron-3-super-120b-a12b"
+        model: "nvidia/nemotron-3-ultra-550b-a55b"
       - name: groq_gpt_oss_120b
         provider: groq
         base_url: "https://api.groq.com/openai/v1"
@@ -289,11 +294,14 @@ llm_router:
         model: "openai/gpt-oss-120b"
         extra_body:
           reasoning_format: "hidden"
-      - name: nvidia_gpt_oss_20b
+      - name: nvidia_nemotron_bolt_e4b
         provider: nvidia
         base_url: "https://integrate.api.nvidia.com/v1"
         api_key_env: "NVIDIA_API_KEY"
-        model: "openai/gpt-oss-20b"
+        model: "nvidia/nemotron-3.5-bolt-e4b"
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
 
 speaker:
   voice: "en-GB-SoniaNeural"   # British female — NORA's voice (used by edge-tts fallback)
