@@ -49,44 +49,75 @@ fun Capability.manifestEntry(): JSONObject = JSONObject()
     .put("available", true)
 
 /**
- * The subset of JSON Schema this app's own capabilities use: an object of
- * string / integer / boolean properties, `required`, `maxLength`, `enum`,
- * `minimum`/`maximum`, and no unknown fields. The core validates too; this is
- * the device not taking the core's word for it (plan §7.6).
+ * The subset of JSON Schema this app's own capabilities use: objects of
+ * string / integer / number / boolean properties, arrays of those or of
+ * objects (`items`, `maxItems`), `required`, `maxLength`, `enum`,
+ * `minimum`/`maximum`, and no unknown fields at any depth. The core validates
+ * too; this is the device not taking the core's word for it (plan §7.6).
  */
 object ParamCheck {
-    fun validate(schema: JSONObject, params: JSONObject): String? {
+    private const val MAX_DEPTH = 4
+
+    fun validate(schema: JSONObject, params: JSONObject): String? = checkObject("", schema, params, 0)
+
+    private fun checkObject(path: String, schema: JSONObject, obj: JSONObject, depth: Int): String? {
         val props = schema.optJSONObject("properties") ?: JSONObject()
-        for (key in params.keys()) {
-            if (!props.has(key)) return "unknown field '$key'"
+        for (key in obj.keys()) {
+            if (!props.has(key)) return "unknown field '${path + key}'"
         }
         val required = schema.optJSONArray("required") ?: JSONArray()
         for (i in 0 until required.length()) {
             val key = required.getString(i)
-            if (!params.has(key) || params.isNull(key)) return "'$key' is required"
+            if (!obj.has(key) || obj.isNull(key)) return "'${path + key}' is required"
         }
-        for (key in params.keys()) {
-            val spec = props.getJSONObject(key)
-            val value = params.get(key)
-            when (spec.optString("type")) {
-                "string" -> {
-                    if (value !is String) return "'$key' must be a string"
-                    val max = spec.optInt("maxLength", Int.MAX_VALUE)
-                    if (value.length > max) return "'$key' is longer than $max"
-                }
-                "integer" -> {
-                    if (value !is Int && value !is Long) return "'$key' must be an integer"
-                    val n = (value as Number).toLong()
-                    if (spec.has("minimum") && n < spec.getLong("minimum")) return "'$key' is too small"
-                    if (spec.has("maximum") && n > spec.getLong("maximum")) return "'$key' is too large"
-                }
-                "boolean" -> if (value !is Boolean) return "'$key' must be true or false"
-                else -> return "'$key' has a type this device does not accept"
+        for (key in obj.keys()) {
+            checkValue(path + key, props.getJSONObject(key), obj.get(key), depth)?.let { return it }
+        }
+        return null
+    }
+
+    private fun checkValue(key: String, spec: JSONObject, value: Any, depth: Int): String? {
+        when (spec.optString("type")) {
+            "string" -> {
+                if (value !is String) return "'$key' must be a string"
+                val max = spec.optInt("maxLength", Int.MAX_VALUE)
+                if (value.length > max) return "'$key' is longer than $max"
             }
-            val allowed = spec.optJSONArray("enum")
-            if (allowed != null && (0 until allowed.length()).none { allowed.get(it) == value }) {
-                return "'$key' is not one of the allowed values"
+            "integer" -> {
+                if (value !is Int && value !is Long) return "'$key' must be an integer"
+                val n = (value as Number).toLong()
+                if (spec.has("minimum") && n < spec.getLong("minimum")) return "'$key' is too small"
+                if (spec.has("maximum") && n > spec.getLong("maximum")) return "'$key' is too large"
             }
+            "number" -> {
+                if (value !is Number) return "'$key' must be a number"
+                val n = value.toDouble()
+                if (n.isNaN() || n.isInfinite()) return "'$key' must be a number"
+                if (spec.has("minimum") && n < spec.getDouble("minimum")) return "'$key' is too small"
+                if (spec.has("maximum") && n > spec.getDouble("maximum")) return "'$key' is too large"
+            }
+            "boolean" -> if (value !is Boolean) return "'$key' must be true or false"
+            "array" -> {
+                if (value !is JSONArray) return "'$key' must be a list"
+                if (depth >= MAX_DEPTH) return "'$key' is nested too deeply"
+                val max = spec.optInt("maxItems", Int.MAX_VALUE)
+                if (value.length() > max) return "'$key' has more than $max items"
+                val items = spec.optJSONObject("items") ?: return "'$key' has a type this device does not accept"
+                for (i in 0 until value.length()) {
+                    if (value.isNull(i)) return "'$key[$i]' is empty"
+                    checkValue("$key[$i]", items, value.get(i), depth + 1)?.let { return it }
+                }
+            }
+            "object" -> {
+                if (value !is JSONObject) return "'$key' must be an object"
+                if (depth >= MAX_DEPTH) return "'$key' is nested too deeply"
+                checkObject("$key.", spec, value, depth + 1)?.let { return it }
+            }
+            else -> return "'$key' has a type this device does not accept"
+        }
+        val allowed = spec.optJSONArray("enum")
+        if (allowed != null && (0 until allowed.length()).none { allowed.get(it) == value }) {
+            return "'$key' is not one of the allowed values"
         }
         return null
     }
