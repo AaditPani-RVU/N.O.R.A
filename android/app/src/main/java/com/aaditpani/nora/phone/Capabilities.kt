@@ -31,6 +31,8 @@ fun allCapabilities(context: Context, prefs: LinkPrefs): List<Capability> {
         SetWakeAlarms(app),
         // Phase 8d: each asks on the phone first
         ReplyNotification(app) { prefs.hiddenNoteApps }, SendSms(app), SendWhatsApp(app), Dnd(app),
+        // Phase 9: only while the accessibility service is switched on
+        UiWhatsAppSend(app), UiWhatsAppCall(app), UiMapsStart(app),
     )
 }
 

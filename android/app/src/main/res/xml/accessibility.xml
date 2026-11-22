@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Phase 9 (phone/UiAutomation.kt). Only these apps' windows are visible to
+     the service; it presses buttons only for NORA's named recipes. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="false"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="200"
+    android:packageNames="com.whatsapp,com.google.android.apps.maps"
+    android:description="@string/accessibility_description" />

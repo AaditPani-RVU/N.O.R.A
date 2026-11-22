@@ -33,7 +33,7 @@ import org.json.JSONObject
 private const val TAG = "NoraMessaging"
 
 /** Who [name] or [number] is, by the phone's contacts. A failure to return, or (name, number). */
-private fun resolve(context: Context, name: String, number: String): Pair<CapabilityResult.Failed?, Pair<String, String>> {
+internal fun resolveContact(context: Context, name: String, number: String): Pair<CapabilityResult.Failed?, Pair<String, String>> {
     val none = "" to ""
     if (number.isNotEmpty()) {
         if (!ContactPick.isNumber(number)) {
@@ -133,7 +133,7 @@ class SendSms(private val context: Context) : Capability {
     override suspend fun execute(params: JSONObject): CapabilityResult {
         val text = params.getString("text").trim()
         if (text.isEmpty()) return CapabilityResult.Failed(ErrorCode.INVALID_PARAMS, "The message is empty.")
-        val (problem, who) = resolve(context, params.optString("name").trim(), params.optString("number").trim())
+        val (problem, who) = resolveContact(context, params.optString("name").trim(), params.optString("number").trim())
         if (problem != null) return problem
         val (label, number) = who
         if (context.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
@@ -172,7 +172,7 @@ class SendWhatsApp(private val context: Context) : Capability {
 
     override suspend fun execute(params: JSONObject): CapabilityResult {
         val text = params.getString("text").trim()
-        val (problem, who) = resolve(context, params.optString("name").trim(), params.optString("number").trim())
+        val (problem, who) = resolveContact(context, params.optString("name").trim(), params.optString("number").trim())
         if (problem != null) return problem
         val (label, number) = who
         val country = countryCode()

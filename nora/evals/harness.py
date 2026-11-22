@@ -44,7 +44,7 @@ def phone_connected() -> Iterator[None]:
     from nora import triggers
     for raw in phone_manifest():
         entry = protocol.check_manifest_entry(raw)
-        if entry["name"] in triggers.INTERNAL_CAPABILITIES:
+        if entry["name"] in triggers.INTERNAL_CAPABILITIES or not entry["available"]:
             continue        # the hub keeps these out of the tool list too
         desc = entry["description"]
         if entry["tier"] >= protocol.TIER_CONFIRM:

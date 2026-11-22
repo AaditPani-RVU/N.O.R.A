@@ -10,7 +10,9 @@ from nora.hub.server import Hub
 from nora import channel
 
 FLOORS = {"phone.reply_notification": 2, "phone.send_whatsapp": 2,
-          "phone.send_sms": 3, "phone.dnd": 2}
+          "phone.send_sms": 3, "phone.dnd": 2,
+          # Phase 9: accessibility recipes
+          "phone.ui.whatsapp_send": 3, "phone.ui.whatsapp_call": 2, "phone.ui.maps_start": 2}
 
 
 def test_the_shipped_config_keeps_replies_behind_a_yes():

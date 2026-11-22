@@ -23,6 +23,8 @@ interface Capability {
      * and asks before acting on anything decided after reading it (plan §7.5).
      */
     val untrustedOutput: Boolean get() = false
+    /** False while what it needs is switched off (the accessibility service, Phase 9): the core leaves it out. */
+    val available: Boolean get() = true
 
     suspend fun execute(params: JSONObject): CapabilityResult
 }
@@ -46,7 +48,7 @@ fun Capability.manifestEntry(): JSONObject = JSONObject()
     .put("tier", tier)
     .put("requires_live_user", requiresLiveUser)
     .put("untrusted_output", untrustedOutput)
-    .put("available", true)
+    .put("available", available)
 
 /**
  * The subset of JSON Schema this app's own capabilities use: objects of

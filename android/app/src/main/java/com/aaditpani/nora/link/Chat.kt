@@ -197,6 +197,9 @@ object ConfirmSteps {
             }
             "phone.send_sms" -> return "Text message to $person from your SIM: \u201c$text\u201d"
             "phone.send_whatsapp" -> return "WhatsApp to $person, for you to send: \u201c$text\u201d"
+            "phone.ui.whatsapp_send" -> return "Send WhatsApp to $person, pressing Send for you: \u201c$text\u201d"
+            "phone.ui.whatsapp_call" -> return "WhatsApp voice call to $person"
+            "phone.ui.maps_start" -> return "Press Start in Google Maps (begin navigation)"
             "phone.dnd" -> return if (params.optBoolean("on")) {
                 "Turn Do Not Disturb on" + (if (params.has("minutes")) " for ${params.optInt("minutes")} minutes" else "")
             } else "Turn Do Not Disturb off"

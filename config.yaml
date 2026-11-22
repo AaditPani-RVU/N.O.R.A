@@ -927,6 +927,10 @@ hub:
     phone.send_whatsapp: 2
     phone.send_sms: 3
     phone.dnd: 2
+    # Phase 9: the accessibility recipes press buttons in other apps
+    phone.ui.whatsapp_send: 3
+    phone.ui.whatsapp_call: 2
+    phone.ui.maps_start: 2
   # Capabilities whose output other people wrote (plan §7.5). The core marks
   # these untrusted whatever the device says: summarised by a model with no
   # tools, never stored, and anything decided after reading them needs a yes.

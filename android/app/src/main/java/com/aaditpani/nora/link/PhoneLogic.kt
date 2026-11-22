@@ -436,3 +436,64 @@ object WaNumber {
         }
     }
 }
+
+/**
+ * The accessibility recipes' view of a screen (Phase 9): a plain tree, so
+ * matching is testable on the JVM. [ref] carries the platform node.
+ */
+data class UiNode(
+    val pkg: String,
+    val viewId: String? = null,
+    val desc: String? = null,
+    val text: String? = null,
+    val clickable: Boolean = false,
+    val enabled: Boolean = true,
+    val children: List<UiNode> = emptyList(),
+    val ref: Any? = null,
+)
+
+/** What a recipe step presses: any of these resource ids, descriptions or labels (case-insensitive, whole). */
+data class UiTarget(
+    val viewIds: List<String> = emptyList(),
+    val descs: List<String> = emptyList(),
+    val texts: List<String> = emptyList(),
+)
+
+object UiMatch {
+    /**
+     * The node to click for [target] in [root]: the first match (depth
+     * first), or its nearest clickable ancestor when the match itself isn't
+     * clickable (a label inside a button). Only nodes of [pkg] are looked
+     * at, so a recipe can never press anything in another app.
+     */
+    fun find(root: UiNode, pkg: String, target: UiTarget): UiNode? = walk(root, pkg, target, null, 0)
+
+    private fun walk(n: UiNode, pkg: String, t: UiTarget, clickableAbove: UiNode?, depth: Int): UiNode? {
+        if (depth > 40 || n.pkg != pkg) return null
+        val here = if (n.clickable && n.enabled) n else clickableAbove
+        if (matches(n, t)) return here
+        for (c in n.children) walk(c, pkg, t, here, depth + 1)?.let { return it }
+        return null
+    }
+
+    private fun matches(n: UiNode, t: UiTarget): Boolean =
+        (n.viewId != null && t.viewIds.any { it == n.viewId }) ||
+            (n.desc != null && t.descs.any { it.equals(n.desc.trim(), ignoreCase = true) }) ||
+            (n.text != null && t.texts.any { it.equals(n.text.trim(), ignoreCase = true) })
+}
+
+/** The only things the accessibility service will ever press (Phase 9). */
+object UiRecipes {
+    const val WHATSAPP = "com.whatsapp"
+    const val MAPS = "com.google.android.apps.maps"
+    /** The service config lists the same packages; the system hides every other app from it. */
+    val ALLOWED = setOf(WHATSAPP, MAPS)
+
+    val WHATSAPP_SEND = UiTarget(viewIds = listOf("com.whatsapp:id/send"), descs = listOf("Send"))
+    val WHATSAPP_VOICE_CALL = UiTarget(
+        viewIds = listOf("com.whatsapp:id/menuitem_voice_call", "com.whatsapp:id/voice_call_btn"),
+        descs = listOf("Voice call", "Audio call"))
+    /** "Start voice call?" — WhatsApp asks for some contacts. */
+    val WHATSAPP_CALL_CONFIRM = UiTarget(viewIds = listOf("android:id/button1"), texts = listOf("Call"))
+    val MAPS_START = UiTarget(descs = listOf("Start", "Start navigation"), texts = listOf("Start"))
+}

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_description">Lets NORA press a few named buttons for you, and nothing else: Send in WhatsApp, a WhatsApp voice call, and Start in Google Maps. It only sees those two apps, and asks on this phone before every one.</string>
+</resources>

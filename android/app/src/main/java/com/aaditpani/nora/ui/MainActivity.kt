@@ -853,6 +853,7 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
     var callPeople by remember { mutableStateOf(false) }
     var textPeople by remember { mutableStateOf(false) }
     var dndAccess by remember { mutableStateOf(false) }
+    var uiButtons by remember { mutableStateOf(false) }
     val callPeopleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     var screening by remember { mutableStateOf(false) }
     val screeningLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
@@ -870,6 +871,7 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
         textPeople = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED &&
             ctx.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
         dndAccess = ctx.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted
+        uiButtons = com.aaditpani.nora.phone.NoraAccessibilityService.instance != null
         seenApps = NoraNotificationListener.seenApps()
         screening = NoraCallScreeningService.holdsRole(ctx)
         blockedCount = c.prefs.blockedNumbers.size
@@ -987,6 +989,11 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
                 Hairline()
                 Access("DO NOT DISTURB", dndAccess) {
                     ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                }
+                Hairline()
+                // Optional (Phase 9): press Send in WhatsApp, call on WhatsApp, Start in Maps.
+                Access("PRESS BUTTONS IN WHATSAPP + MAPS", uiButtons) {
+                    ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 }
                 Hairline()
                 // Android's call-screening role: asked about calls from numbers

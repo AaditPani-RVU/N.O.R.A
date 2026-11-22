@@ -249,6 +249,21 @@
             android:name=".phone.DndOff"
             android:exported="false" />
 
+        <!-- Phase 9, off until the user switches it on in Settings → Accessibility:
+             named recipes only, in WhatsApp and Maps (phone/UiAutomation.kt). -->
+        <service
+            android:name=".phone.NoraAccessibilityService"
+            android:exported="true"
+            android:label="NORA buttons"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility" />
+        </service>
+
         <!-- Phase 7: hands over to the camera app for one photo, invisibly -->
         <activity
             android:name=".phone.PhotoActivity"
