@@ -191,13 +191,33 @@ class Trip:
     spoken: str            # "about 25 minutes by car"
 
 
+# The rules tick every minute, and an event is looked at for hours before
+# it's time to leave: without this, the free OSRM server would be asked the
+# same route a few hundred times.
+_ROUTE_TTL = 20 * 60
+_routes: dict[tuple, tuple[float, object]] = {}
+
+
+def _route(origin: Spot, dest: Spot, mode: str):
+    from nora import places
+    key = (round(origin.lat, 5), round(origin.lon, 5), round(dest.lat, 5), round(dest.lon, 5), mode)
+    hit = _routes.get(key)
+    if hit and time.time() - hit[0] < _ROUTE_TTL:
+        return hit[1]
+    r = places.route((origin.lat, origin.lon), (dest.lat, dest.lon), mode)
+    if len(_routes) > 200:
+        _routes.clear()
+    _routes[key] = (time.time(), r)
+    return r
+
+
 def travel(origin: Spot, dest: Spot) -> Trip | None:
     """Door to door, or None when there is no route. Already there → zero."""
     from nora import places
     if places.straight_line_km((origin.lat, origin.lon), (dest.lat, dest.lon)) < 0.3:
         return Trip(0.0, "you're already there")
     cfg = _cfg()
-    r = places.route((origin.lat, origin.lon), (dest.lat, dest.lon), str(cfg["mode"]))
+    r = _route(origin, dest, str(cfg["mode"]))
     if r is None:
         return None
     factor = float(cfg["traffic_factor"]) if r.mode == "driving" else 1.0

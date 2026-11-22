@@ -19,6 +19,7 @@ COLLEGE = (12.9236, 77.4987)
 def fresh():
     store.reset_for_tests()
     triggers.reset_for_tests()
+    cr._routes.clear()
     with mock.patch.object(cr, "_cfg", return_value=CFG), \
             mock.patch.object(triggers, "sync_all"), \
             mock.patch.object(cr, "sync_all") as sync:
@@ -256,3 +257,11 @@ def test_tell_falls_back_to_the_laptop_notification_when_nobody_hears_it():
         cr._tell("Leave by 8:24", kind="leave", say_at_home=True)
     speak.assert_not_called()
     laptop.assert_called_once()
+
+
+def test_a_route_is_asked_for_once_not_every_minute():
+    lecture = ev("Lecture", datetime(2026, 11, 24, 9, 0), "college")
+    with route(20 * 60) as r, mock.patch.object(cr, "_tell"):
+        for minute in range(0, 19):
+            cr.check_leave_by(datetime(2026, 11, 24, 8, minute), [lecture])
+    assert r.call_count == 1
