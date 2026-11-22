@@ -65,7 +65,15 @@ async def look_with_phone(question: str = "") -> StepResult:
     if not res.success:
         return StepResult(action="look_with_phone", success=False, error_code=res.error_code,
                           withheld=res.withheld, message=res.message)
-    photo = photos.get(str(res.data.get("blob_id", "")))
+    blob_id = str(res.data.get("blob_id", ""))
+    photo = photos.get(blob_id)
+    # The phone sends the photo ahead of its result on the same socket, so it
+    # is normally here already; a moment's grace costs nothing if it isn't.
+    for _ in range(30):
+        if photo is not None or not blob_id:
+            break
+        await asyncio.sleep(0.1)
+        photo = photos.get(blob_id)
     if photo is None:
         return StepResult(action="look_with_phone", success=False,
                           message="The phone took the photo but it didn't arrive. Try again?")
