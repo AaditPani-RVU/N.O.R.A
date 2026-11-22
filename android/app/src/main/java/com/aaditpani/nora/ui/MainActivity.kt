@@ -1060,6 +1060,14 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                val keyScope = rememberCoroutineScope()
+                var keyNote by remember { mutableStateOf("") }
+                HudButton("NEW KEY", {
+                    keyNote = "Rotating…"
+                    keyScope.launch { keyNote = if (c.rotateKey()) "New key in use." else "Not rotated; is the link up?" }
+                }, Modifier.fillMaxWidth())
+                if (keyNote.isNotEmpty()) Detail(keyNote)
+                Spacer(Modifier.height(8.dp))
                 HudButton("UNPAIR THIS PHONE", { confirmUnpair = true }, Modifier.fillMaxWidth(), color = Hud.Red)
             }
         }

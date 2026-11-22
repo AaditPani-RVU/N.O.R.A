@@ -38,6 +38,7 @@ DEVICE_TYPES = frozenset({
     "ping", "pong", "kill", "voice.barge_in",
     "memories",          # {"op": "list"} / {"op": "forget", "id"}: the memory screen (Sharp F)
     "blob.chunk",        # a photo for the invocation that follows it (Phase 7)
+    "key.rotate",        # {public_key, proof}: swap this device's key (Phase 10)
 })
 
 # Bulk payloads (a photo) arrive as `blob.chunk` frames on the authenticated
@@ -141,6 +142,17 @@ def auth_payload(nonce: bytes, device_id: str) -> bytes:
     return nonce + device_id.encode("utf-8") + AUTH_CONTEXT
 
 
+# Key rotation (Phase 10): on a session the old key already authenticated,
+# the device sends its new public key and a signature over this payload made
+# with the *new* key, proving it holds it. Bound to the session, so a proof
+# can't be replayed onto another connection.
+ROTATE_CONTEXT = b"nora-v1-rotate"
+
+
+def rotate_payload(session_id: str, device_id: str) -> bytes:
+    return session_id.encode("utf-8") + b"\x00" + device_id.encode("utf-8") + ROTATE_CONTEXT
+
+
 def load_public_key(der_b64: str) -> ec.EllipticCurvePublicKey:
     """A device public key: SubjectPublicKeyInfo DER, base64 — what Android
     Keystore's `getPublic().getEncoded()` produces. P-256 only."""
@@ -212,9 +224,13 @@ def check_manifest_entry(entry: Any) -> dict:
     description = entry.get("description", "")
     if not isinstance(description, str):
         raise ProtocolError(f"{name}: description is not a string")
+    version = entry.get("version", 1)
+    if not isinstance(version, int) or isinstance(version, bool) or not 1 <= version <= 1000:
+        # Found by the Phase 10 fuzzer: a dict here raised TypeError, not a refusal.
+        raise ProtocolError(f"{name}: version must be a small whole number")
     return {
         "name": name,
-        "version": int(entry.get("version", 1)),
+        "version": version,
         "description": description[:200],
         "params_schema": schema,
         "tier": tier,

@@ -83,6 +83,11 @@ object Protocol {
     fun authPayload(nonce: ByteArray, deviceId: String): ByteArray =
         nonce + deviceId.toByteArray(Charsets.UTF_8) + AUTH_CONTEXT
 
+    /** What the new key signs to rotate (Phase 10); `nora/hub/protocol.py:rotate_payload`. */
+    fun rotatePayload(sessionId: String, deviceId: String): ByteArray =
+        sessionId.toByteArray(Charsets.UTF_8) + byteArrayOf(0) + deviceId.toByteArray(Charsets.UTF_8) +
+            "nora-v1-rotate".toByteArray(Charsets.UTF_8)
+
     fun hexToBytes(hex: String): ByteArray {
         require(hex.length % 2 == 0) { "odd hex length" }
         return ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }

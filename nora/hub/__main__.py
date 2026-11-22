@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     pair = sub.add_parser("pair", help="create a pairing code")
     pair.add_argument("--no-qr", action="store_true", help="print the code only")
     sub.add_parser("devices", help="list paired devices")
+    sub.add_parser("battery", help="the phone's idle battery drain, last 7 days (Phase 10)")
     sub.add_parser("approve").add_argument("device_id")
     sub.add_parser("revoke").add_argument("device_id")
     args = ap.parse_args(argv)
@@ -56,6 +57,10 @@ def main(argv: list[str] | None = None) -> int:
         for d in rows:
             seen = datetime.fromtimestamp(d.last_seen).strftime("%Y-%m-%d %H:%M") if d.last_seen else "never"
             print(f"{d.id}  {d.status:<8}  {d.platform:<8}  {d.name}  (last seen {seen})")
+        return 0
+    if args.cmd == "battery":
+        from nora import battery_stats
+        print(battery_stats.spoken(battery_stats.drain()))
         return 0
     if args.cmd == "approve":
         ok = registry.approve(args.device_id)

@@ -40,6 +40,24 @@ class HubIntegrationTest {
             .run { initSign(pair.private); update(payload); sign() }
     }
 
+    /** Two in-memory keys that rotate like KeystoreSigner's. */
+    private class JvmRotatingSigner : RotatableSigner {
+        var cur = JvmSigner()
+        var next: JvmSigner? = null
+        val first = cur
+        override val createdAtMs = 0L
+        override fun publicKeyDer() = cur.publicKeyDer()
+        override fun sign(payload: ByteArray) = cur.sign(payload)
+        override fun prepareNext(): Signer = next ?: JvmSigner().also { next = it }
+        override fun commitNext() { next?.let { cur = it }; next = null }
+        override fun discardNext() { next = null }
+        override fun adoptNext(): Boolean {
+            val n = next ?: return false
+            next = cur; cur = n
+            return true
+        }
+    }
+
     private class Harness(repo: File) : AutoCloseable {
         private val proc = ProcessBuilder(File(repo, ".venv/bin/python").path,
             File(repo, "android/tools/hub_harness.py").path)
@@ -196,6 +214,34 @@ class HubIntegrationTest {
      * the phone, and an approval is held to the exact step shown; jobs and
      * reminders arrive as messages.
      */
+    @Test
+    fun keyRotationSwapsTheKey() = runBlocking {
+        val url = harness.hello.getString("url")
+        val signer = JvmRotatingSigner()
+        val paired = DeviceLink.pair(url, harness.hello.getString("code"), "jvm-rotate", signer.publicKeyDer())
+        val deviceId = (paired as PairResult.Paired).deviceId
+        assertTrue(harness.cmd("approve $deviceId").getBoolean("ok"))
+        val link = DeviceLink(LinkConfig(url, deviceId, "test", "17"), signer, { listOf(ping) },
+            { false }, MemOutbox(), {}, null, scope)
+        link.start()
+        until("connected") { link.state.value is LinkState.Connected }
+        assertTrue(link.rotateKey())
+        assertTrue(signer.cur !== signer.first)
+        link.stop()
+
+        // The new key gets in; the old one doesn't.
+        val again = DeviceLink(LinkConfig(url, deviceId, "test", "17"), signer, { listOf(ping) },
+            { false }, MemOutbox(), {}, null, scope)
+        again.start()
+        until("reconnected with the new key") { again.state.value is LinkState.Connected }
+        again.stop()
+        val stale = DeviceLink(LinkConfig(url, deviceId, "test", "17"), signer.first, { listOf(ping) },
+            { false }, MemOutbox(), {}, null, scope)
+        stale.start()
+        until("old key refused") { stale.state.value is LinkState.NotAuthorised }
+        stale.stop()
+    }
+
     @Test
     fun chatConfirmAndDeliver() = runBlocking {
         val url = harness.hello.getString("url")

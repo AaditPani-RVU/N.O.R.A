@@ -187,6 +187,18 @@ _MIGRATIONS: list[str] = [
         updated_at  REAL NOT NULL
     );
     """,
+    # 8 — the phone's battery, sampled on level and screen changes, for the
+    # idle-drain measurement (Phase 10)
+    """
+    CREATE TABLE battery_samples (
+        device_id   TEXT NOT NULL,
+        at          REAL NOT NULL,          -- by the phone's clock
+        level       INTEGER NOT NULL,       -- percent
+        charging    INTEGER NOT NULL,
+        screen_on   INTEGER NOT NULL
+    );
+    CREATE INDEX battery_samples_at ON battery_samples(device_id, at);
+    """,
 ]
 
 _local = threading.local()

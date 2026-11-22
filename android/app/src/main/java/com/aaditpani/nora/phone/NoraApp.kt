@@ -58,7 +58,7 @@ val Context.controller: LinkController get() = (applicationContext as NoraApp).c
 class LinkController(private val app: Context) {
     val prefs = LinkPrefs(app)
     val db = PhoneDb(app)
-    val signer = KeystoreSigner()
+    val signer = KeystoreSigner(app)
     val capabilities: List<Capability> = allCapabilities(app, prefs)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -170,6 +170,7 @@ class LinkController(private val app: Context) {
         mirror = scope.launch {
             l.state.collect {
                 _state.value = it
+                if (it is LinkState.Connected) rotateIfOld()
                 if (it !is LinkState.Connected) {
                     chat.dropInFlight()
                     voice.linkDropped()
@@ -177,6 +178,24 @@ class LinkController(private val app: Context) {
             }
         }
         l.start()
+    }
+
+    /** Keys are replaced every [KEY_MAX_AGE_MS] (Phase 10). A key of unknown age starts counting now. */
+    private fun rotateIfOld() {
+        val made = signer.createdAtMs
+        if (made == 0L) {
+            app.getSharedPreferences("nora_key", Context.MODE_PRIVATE).edit()
+                .putLong("created_at", System.currentTimeMillis()).apply()
+            return
+        }
+        if (System.currentTimeMillis() - made > KEY_MAX_AGE_MS) scope.launch { rotateKey() }
+    }
+
+    /** A new key now; the core forgets the old one. True when it took. */
+    suspend fun rotateKey(): Boolean {
+        val ok = link?.rotateKey() ?: false
+        android.util.Log.i("NoraLink", if (ok) "key rotated" else "key rotation didn't complete")
+        return ok
     }
 
     @Synchronized
@@ -296,3 +315,6 @@ class LinkController(private val app: Context) {
 
     fun statusSnapshot(): JSONObject = DeviceStatus.read(app)
 }
+
+/** How long a device key is used before the phone replaces it (Phase 10). */
+const val KEY_MAX_AGE_MS = 90L * 24 * 60 * 60 * 1000

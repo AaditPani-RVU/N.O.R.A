@@ -34,6 +34,24 @@ interface Signer {
     fun sign(payload: ByteArray): ByteArray
 }
 
+/**
+ * A signer that can replace its key (Phase 10). The next key is made first
+ * and kept beside the current one until the core has taken it, so a crash
+ * half-way can't lock the phone out: if the current key is refused and a
+ * next one exists, the link tries that one ([adoptNext]).
+ */
+interface RotatableSigner : Signer {
+    /** Make (or reuse) the next key; it signs nothing until committed. */
+    fun prepareNext(): Signer
+    /** The core took the next key: use it from now on, and delete the old one. */
+    fun commitNext()
+    fun discardNext()
+    /** There is a next key the core may already have: switch to it. False if none. */
+    fun adoptNext(): Boolean
+    /** When the key in use was made, epoch ms (0 = unknown). */
+    val createdAtMs: Long
+}
+
 /** Events the core hasn't acked yet. They survive a reconnect and a restart. */
 interface Outbox {
     fun add(id: String, frame: String)
@@ -112,6 +130,10 @@ class DeviceLink(
     private var job: Job? = null
 
     @Volatile private var current: Socket? = null
+
+    /** `key.rotate` requests waiting for `key.rotated`, by request id. */
+    private val keyReplies = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
+    @Volatile private var sessionId: String = ""
 
     /** `memories` requests waiting for the core's reply, by request id. */
     private val memoryReplies = ConcurrentHashMap<String, CompletableDeferred<JSONObject?>>()
@@ -200,6 +222,36 @@ class DeviceLink(
         return true
     }
 
+    /**
+     * Replace this phone's key (Phase 10): the new key signs a proof bound to
+     * this session, the core swaps it in, and only then is the old one
+     * deleted. True when the core took it.
+     */
+    suspend fun rotateKey(): Boolean {
+        val rot = signer as? RotatableSigner ?: return false
+        val sock = current ?: return false
+        val next = rot.prepareNext()
+        val proof = next.sign(Protocol.rotatePayload(sessionId, config.deviceId))
+        val enc = Base64.getEncoder()
+        val reply = CompletableDeferred<JSONObject>()
+        val id = sock.sendWithId("key.rotate", JSONObject()
+            .put("public_key", enc.encodeToString(next.publicKeyDer()))
+            .put("proof", enc.encodeToString(proof)))
+        keyReplies[id] = reply
+        val body = try {
+            withTimeoutOrNull(10_000) { reply.await() }
+        } finally {
+            keyReplies.remove(id)
+        }
+        return when (body?.optBoolean("ok")) {
+            true -> { rot.commitNext(); true }
+            false -> { rot.discardNext(); false }
+            // No answer: keep the next key; if the core did take it, the next
+            // connect falls over to it (adoptNext).
+            null -> false
+        }
+    }
+
     /** Queue an event; it is sent now if connected, else on the next connection. */
     fun emitEvent(name: String, data: JSONObject) {
         val env = Protocol.envelope("event", JSONObject()
@@ -257,9 +309,15 @@ class DeviceLink(
             sock.send("auth", JSONObject().put("signature", Base64.getEncoder().encodeToString(signature)),
                 corr = challenge.getString("id"))
             val welcome = sock.next(HANDSHAKE_MS)
-            refusal(welcome)?.let { return it }
+            refusal(welcome)?.let { refused ->
+                // A rotation the core took but this phone didn't hear back about:
+                // the next key is the one it knows now. Try it once.
+                if ((signer as? RotatableSigner)?.adoptNext() == true) kick()
+                return refused
+            }
             if (welcome.getString("type") != "welcome") throw ProtocolException("expected welcome")
             val sessionId = welcome.getJSONObject("body").optString("session_id")
+            this.sessionId = sessionId
             SpeechHints.update(welcome.getJSONObject("body"))
 
             sock.send("manifest", manifest())
@@ -305,6 +363,7 @@ class DeviceLink(
             "ping" -> sock.send("pong", corr = msg.getString("id"))
             "ack" -> Protocol.corr(msg)?.let(outbox::remove)
             "memories" -> Protocol.corr(msg)?.let { memoryReplies[it]?.complete(body) }
+            "key.rotated" -> Protocol.corr(msg)?.let { keyReplies[it]?.complete(body) }
             "error" -> Protocol.corr(msg)?.let { memoryReplies[it]?.complete(null) }
             else -> Unit
         }
@@ -437,6 +496,13 @@ class DeviceLink(
 
         fun send(type: String, body: JSONObject = JSONObject(), corr: String? = null) {
             ws.send(Protocol.envelope(type, body, corr, seq.incrementAndGet()).toString())
+        }
+
+        /** [send], returning the frame's id for the answer's `corr`. */
+        fun sendWithId(type: String, body: JSONObject): String {
+            val env = Protocol.envelope(type, body, null, seq.incrementAndGet())
+            ws.send(env.toString())
+            return env.getString("id")
         }
 
         /** An outbox frame keeps its id — the core acks by it — and gets a fresh seq. */

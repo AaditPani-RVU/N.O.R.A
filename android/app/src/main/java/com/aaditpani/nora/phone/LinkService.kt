@@ -35,6 +35,11 @@ class LinkService : Service() {
         override fun onReceive(context: Context, intent: Intent) = controller.emitStatus()
     }
 
+    /** Battery level changes and the screen going on or off, for the drain measurement (Phase 10). */
+    private val battery = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = BatterySampler.onBroadcast(context, intent)
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -57,6 +62,11 @@ class LinkService : Service() {
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
         }, RECEIVER_NOT_EXPORTED)
+        registerReceiver(battery, IntentFilter().apply {
+            addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }, RECEIVER_NOT_EXPORTED)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -70,6 +80,7 @@ class LinkService : Service() {
     override fun onDestroy() {
         networkCallback?.let { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
         unregisterReceiver(power)
+        unregisterReceiver(battery)
         scope.cancel()
         super.onDestroy()
     }

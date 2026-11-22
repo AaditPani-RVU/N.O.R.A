@@ -495,6 +495,8 @@ class Hub:
             task.add_done_callback(session._turns.discard)
         elif kind == "blob.chunk":
             self._blob_chunk(session, msg["body"])
+        elif kind == "key.rotate":
+            self._rotate_key(session, msg)
         elif kind == "memories":
             task = asyncio.create_task(self._memories(session, msg))
             session._turns.add(task)
@@ -504,6 +506,41 @@ class Hub:
             self._apply_manifest(session, msg["body"].get("capabilities") or [])
             if not session.killed:
                 self._register(session)
+
+    # ── key rotation (Phase 10) ──────────────────────────────────────────────
+    @staticmethod
+    def _rotate_key(session: Session, msg: dict) -> None:
+        """Swap the device's key: proof of the new one, on a session the old
+        one opened. The answer is `key.rotated` with ok true or false."""
+        body = msg["body"]
+        ok, why = False, ""
+        try:
+            new = protocol.load_public_key(str(body.get("public_key", "")))
+            der = protocol.public_key_der(new)
+            if der == session.device.public_key:
+                why = "that's the key already in use"
+            elif not protocol.verify(der, str(body.get("proof", "")),
+                                     protocol.rotate_payload(session.session_id, session.device_id)):
+                why = "the proof didn't verify"
+            elif not registry.set_public_key(session.device_id, der):
+                why = "the device isn't in good standing"
+            else:
+                ok = True
+                session.device = registry.get(session.device_id) or session.device
+        except protocol.ProtocolError as e:
+            why = str(e)
+        if ok:
+            logger.warning("Device %s rotated its key", session.device_id)
+            from nora import audit_log
+            try:
+                audit_log.record("hub.key_rotated", {}, f"{session.device.name} rotated its key",
+                                 True, device=session.device_id, origin="device",
+                                 executed_on="core")
+            except Exception as e:
+                logger.debug("audit of the key rotation failed: %s", e)
+        else:
+            logger.warning("Device %s key rotation refused: %s", session.device_id, why)
+        session.send_nowait("key.rotated", {"ok": ok, "message": why}, corr=msg["id"])
 
     # ── photos from the device (Phase 7) ─────────────────────────────────────
     @staticmethod
@@ -677,8 +714,13 @@ class Hub:
         """
         origin = channel.origin if channel else _channel.ORIGIN_JOB
         turn_id = channel.turn_id if channel else ""
+        recorded = False
 
         def fail(code: str, message: str) -> StepResult:
+            # Every attempt leaves a row (Phase 10): a refusal before anything
+            # was sent is recorded as `refused`, with why.
+            if not recorded:
+                self._refused(device_id, capability, params, origin, turn_id, code)
             # A refusal is policy, not the capability misbehaving: withheld,
             # so the trust ledger does not count it against the tool. The
             # phone refusing to act from the background is the OS's policy,
@@ -716,6 +758,7 @@ class Hub:
         deadline_ms = int((_cfg().get("invoke_deadlines_ms") or {}).get(
             capability, _cfg().get("invoke_deadline_ms", 8000)))
         self._record(inv_id, device_id, capability, params, origin, turn_id, tier)
+        recorded = True
 
         confirmation = None
         if (tier >= protocol.TIER_CONFIRM and channel is not None
@@ -795,6 +838,21 @@ class Hub:
                 " turn_id, tier, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
                 (inv_id, device_id, capability, json.dumps(params), origin, turn_id,
                  tier, "sent", time.time()))
+
+    @staticmethod
+    def _refused(device_id, capability, params, origin, turn_id, code) -> None:
+        try:
+            shown = json.dumps(params if isinstance(params, dict) else {}, default=str)[:2000]
+            now = time.time()
+            with store.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO invocations (id, device_id, capability, params, origin, turn_id,"
+                    " tier, status, error_code, created_at, finished_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (protocol.new_id(), device_id, capability, shown, origin, turn_id, -1,
+                     "refused", code, now, now))
+        except Exception as e:                       # the refusal itself must still be returned
+            logger.warning("recording a refused invocation failed: %s", e)
 
     @staticmethod
     def _confirmed(inv_id: str, device_id: str) -> None:

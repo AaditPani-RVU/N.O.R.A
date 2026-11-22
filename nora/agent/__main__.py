@@ -1,4 +1,4 @@
-"""python -m nora.agent pair <url> <code> | run | chat | say <text> | status"""
+"""python -m nora.agent pair <url> <code> | run | chat | say <text> | status | rotate"""
 from __future__ import annotations
 
 import argparse
@@ -87,6 +87,25 @@ async def _say(text: str) -> int:
     return 0
 
 
+async def _rotate() -> int:
+    """A fresh key for this laptop; the core forgets the old one."""
+    agent = client.from_identity()
+    welcome = await agent.connect()
+    if welcome.get("type") != "welcome":
+        print(welcome)
+        return 1
+    try:
+        reply = await agent.rotate_key()
+    finally:
+        await agent.close()
+    if reply.get("ok") is not True:
+        print(f"Not rotated: {reply.get('message')}")
+        return 1
+    client.save_identity(agent)
+    print("New key in use; the old one no longer works.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m nora.agent", description="NORA on the travel laptop")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -101,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("say", help="one message, then exit")
     s.add_argument("text")
     sub.add_parser("status", help="what this laptop is paired as")
+    sub.add_parser("rotate", help="replace this laptop's key with a new one")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(asctime)s %(name)s %(message)s")
@@ -110,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
         data = client.load_identity()
         print(f"{data.get('name')} = {data['device_id']} at {data['url']}; sharing {data.get('shared_dir')}")
         return 0
+    if args.cmd == "rotate":
+        return asyncio.run(_rotate())
     if args.cmd == "say":
         return asyncio.run(_say(args.text))
     try:

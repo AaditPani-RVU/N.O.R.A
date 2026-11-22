@@ -680,3 +680,54 @@ class PairingQrTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeyRotationTest(HubTestCase):
+    """Phase 10: a device swaps its key on a session its old key opened."""
+
+    async def test_rotated_key_works_and_the_old_one_no_longer_does(self) -> None:
+        dev = await self.paired()
+        old = dev.key
+        reply = await dev.rotate_key()
+        self.assertTrue(reply["ok"], reply)
+        self.assertIsNot(dev.key, old)
+        await dev.close()
+
+        again = fake_device.FakeDevice(self.url, key=dev.key, device_id=dev.device_id)
+        self.assertEqual((await again.connect())["type"], "welcome")
+        self.devices.append(again)
+
+        stale = fake_device.FakeDevice(self.url, key=old, device_id=dev.device_id)
+        self.assertEqual((await stale.connect())["type"], "error")
+
+    async def test_a_proof_for_another_session_is_refused(self) -> None:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        import base64
+        dev = await self.paired()
+        new = ec.generate_private_key(ec.SECP256R1())
+        fut = asyncio.get_running_loop().create_future()
+        msg_id = await dev._send("key.rotate", {
+            "public_key": base64.b64encode(protocol.public_key_der(new.public_key())).decode(),
+            "proof": protocol.sign(new, protocol.rotate_payload("some-other-session", dev.device_id))})
+        dev._turns[msg_id] = fut
+        reply = await asyncio.wait_for(fut, 5)
+        self.assertFalse(reply["ok"])
+        self.assertEqual(registry.get(dev.device_id).public_key,
+                         protocol.public_key_der(dev.key.public_key()))
+
+
+class EveryAttemptIsRecordedTest(HubTestCase):
+    """Phase 10: no invocation without a row, refusals included."""
+
+    async def test_refusals_leave_a_row_with_why(self) -> None:
+        dev = await self.paired()
+        await self.hub.call("d_gone", "test.echo", {"text": "x"})
+        await self.hub.call(dev.device_id, "test.echo", {"text": "x", "extra": 1},
+                            channel=channel.Channel("local", "voice", print))
+        await self.hub.call(dev.device_id, "nope.missing", {})
+        rows = store.query("SELECT device_id, capability, status, error_code FROM invocations"
+                           " WHERE status = 'refused' ORDER BY created_at")
+        self.assertEqual([(r["device_id"], r["capability"], r["error_code"]) for r in rows], [
+            ("d_gone", "test.echo", protocol.DEVICE_OFFLINE),
+            (dev.device_id, "test.echo", protocol.INVALID_PARAMS),
+            (dev.device_id, "nope.missing", protocol.CAPABILITY_UNAVAILABLE)])

@@ -179,6 +179,23 @@ class FakeDevice:
     async def barge_in(self, utterance_id: str) -> None:
         await self._send("voice.barge_in", {}, corr=utterance_id)
 
+    async def rotate_key(self, timeout: float = 10.0) -> dict:
+        """Swap to a fresh key (Phase 10). The old one keeps working until the
+        core says it took the new one; then only the new one does."""
+        new = ec.generate_private_key(ec.SECP256R1())
+        fut = asyncio.get_running_loop().create_future()
+        msg_id = await self._send("key.rotate", {
+            "public_key": base64.b64encode(protocol.public_key_der(new.public_key())).decode(),
+            "proof": protocol.sign(new, protocol.rotate_payload(self.session_id, self.device_id))})
+        self._turns[msg_id] = fut
+        try:
+            reply = await asyncio.wait_for(fut, timeout)
+        finally:
+            self._turns.pop(msg_id, None)
+        if reply.get("ok") is True:
+            self.key = new
+        return reply
+
     async def set_kill(self, active: bool) -> None:
         self.killed = active
         await self._send("kill", {"active": active})
@@ -200,6 +217,10 @@ class FakeDevice:
                     self.on_say(body)
                 elif kind == "audio.end":
                     self.audio_end[body.get("stream", 0)] = body
+                elif kind == "key.rotated":
+                    fut = self._turns.get(msg.get("corr") or "")
+                    if fut is not None and not fut.done():
+                        fut.set_result(body)
                 elif kind == "turn.done":
                     fut = self._turns.get(msg.get("corr") or "")
                     if fut is not None and not fut.done():

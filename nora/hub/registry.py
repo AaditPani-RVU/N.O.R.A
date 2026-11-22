@@ -144,6 +144,14 @@ def revoke(device_id: str) -> bool:
             (time.time(), device_id)).rowcount == 1
 
 
+def set_public_key(device_id: str, public_key_der: bytes) -> bool:
+    """Key rotation: the device's key from now on. Only for a device still in good standing."""
+    with store.transaction() as conn:
+        return conn.execute(
+            "UPDATE devices SET public_key = ? WHERE id = ? AND revoked_at IS NULL"
+            " AND approved_at IS NOT NULL", (public_key_der, device_id)).rowcount == 1
+
+
 def touch(device_id: str) -> None:
     with store.transaction() as conn:
         conn.execute("UPDATE devices SET last_seen = ? WHERE id = ?", (time.time(), device_id))

@@ -95,6 +95,10 @@ def emit(device: str, name: str, data: dict, occurred_at: float | None = None) -
 
 def handle(ev: Event) -> None:
     """Run every rule for one event. Synchronous; the worker's body, and the tests' entry."""
+    if ev.name == "battery.sample":
+        from nora import battery_stats
+        battery_stats.record(ev.device, ev.data, ev.at)
+        return
     if ev.name == "geofence.transition":
         crossing = record_crossing(ev)
         if crossing is None:
