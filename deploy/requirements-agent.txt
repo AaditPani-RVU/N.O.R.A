@@ -1,0 +1,4 @@
+# The travel laptop agent only (python -m nora.agent); not the core.
+websockets
+cryptography
+jsonschema

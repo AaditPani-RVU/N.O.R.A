@@ -1,0 +1,18 @@
+# NORA's device agent on the travel laptop (Phase 8e, nora/agent).
+# Install on that laptop, from a checkout of this repo, after pairing:
+#   cp deploy/systemd/nora-agent.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now nora-agent
+# Adjust WorkingDirectory and the Python path to where the checkout and its venv are.
+[Unit]
+Description=NORA device agent (travel laptop)
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+WorkingDirectory=%h/Projects/JARVIS
+ExecStart=%h/Projects/JARVIS/.venv/bin/python -m nora.agent run
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

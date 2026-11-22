@@ -73,6 +73,9 @@ class FakeDevice:
         # for tests that need a capability to answer like the phone's would.
         self.replies = replies or {}
         self.killed = False
+        # What the handshake says this is; the travel-laptop agent (nora.agent) sets its own.
+        self.platform = "test"
+        self.app_version = "fake-1"
 
         self.ws = None
         self.session_id: str | None = None
@@ -127,8 +130,8 @@ class FakeDevice:
         import websockets
 
         self.ws = await websockets.connect(self.url, max_size=protocol.MAX_FRAME)
-        await self._send("hello", {"device_id": self.device_id, "app_version": "fake-1",
-                                   "protocols": [protocol.VERSION], "platform": "test"})
+        await self._send("hello", {"device_id": self.device_id, "app_version": self.app_version,
+                                   "protocols": [protocol.VERSION], "platform": self.platform})
         challenge = await self._recv()
         if challenge["type"] != "challenge":
             await self.ws.close()
@@ -194,6 +197,7 @@ class FakeDevice:
                 if kind == "say":
                     self.said.append(body.get("text", ""))
                     self.says.append({**body, "corr": msg.get("corr")})
+                    self.on_say(body)
                 elif kind == "audio.end":
                     self.audio_end[body.get("stream", 0)] = body
                 elif kind == "turn.done":
@@ -202,6 +206,7 @@ class FakeDevice:
                         fut.set_result(body)
                 elif kind == "notify":
                     self.notified.append(body)
+                    self.on_notify(body)
                 elif kind == "confirm_request":
                     await self._on_confirm(msg)
                 elif kind == "invoke":
@@ -214,11 +219,21 @@ class FakeDevice:
             if not type(e).__name__.startswith("ConnectionClosed"):
                 logger.exception("fake device read loop: %s", e)
 
+    # Hooks for a real client built on this one (nora.agent); no-ops here.
+    def on_say(self, body: dict) -> None:
+        pass
+
+    def on_notify(self, body: dict) -> None:
+        pass
+
     async def _on_confirm(self, msg: dict) -> None:
         body = msg["body"]
         self.confirm_requests.append(body)
         # A real device renders the prompt from the steps, not from `rendered`.
-        approved = bool(self.approve(body)) and not self.killed
+        approve = self.approve(body)
+        if asyncio.iscoroutine(approve):
+            approve = await approve
+        approved = bool(approve) and not self.killed
         if approved:
             self._approved[body.get("invocation_id", "")] = body.get("steps") or []
         await self._send("confirm_response", {"invocation_id": body.get("invocation_id"),
