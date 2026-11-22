@@ -851,6 +851,8 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
     var locationGranted by remember { mutableStateOf(false) }
     var callsFullScreen by remember { mutableStateOf(false) }
     var callPeople by remember { mutableStateOf(false) }
+    var textPeople by remember { mutableStateOf(false) }
+    var dndAccess by remember { mutableStateOf(false) }
     val callPeopleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     var screening by remember { mutableStateOf(false) }
     val screeningLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
@@ -865,6 +867,9 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
         callsFullScreen = ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
         callPeople = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED &&
             ctx.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+        textPeople = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED &&
+            ctx.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
+        dndAccess = ctx.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted
         seenApps = NoraNotificationListener.seenApps()
         screening = NoraCallScreeningService.holdsRole(ctx)
         blockedCount = c.prefs.blockedNumbers.size
@@ -973,6 +978,15 @@ private fun SystemTab(c: LinkController, state: LinkState, killed: Boolean) {
                 // dial it. Each call still asks first, on this screen.
                 Access("CALL PEOPLE YOU NAME", callPeople) {
                     callPeopleLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE))
+                }
+                Hairline()
+                // "Text Mom I'm on my way": each text asks for the fingerprint first.
+                Access("TEXT PEOPLE YOU NAME", textPeople) {
+                    callPeopleLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.SEND_SMS))
+                }
+                Hairline()
+                Access("DO NOT DISTURB", dndAccess) {
+                    ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
                 }
                 Hairline()
                 // Android's call-screening role: asked about calls from numbers

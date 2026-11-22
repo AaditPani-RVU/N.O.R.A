@@ -27,6 +27,8 @@ fun allCapabilities(context: Context, prefs: LinkPrefs): List<Capability> {
         CallUser(app), CallContact(app), BlockNumber(app, prefs),
         // Phase 8c
         SetWakeAlarms(app),
+        // Phase 8d: each asks on the phone first
+        ReplyNotification(app) { prefs.hiddenNoteApps }, SendSms(app), SendWhatsApp(app), Dnd(app),
     )
 }
 

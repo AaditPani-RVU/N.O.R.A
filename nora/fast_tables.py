@@ -120,6 +120,20 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             return None
         return I("set timer", "phone.set_timer", {"seconds": int(round(minutes * 60))})
 
+    def dnd(on: bool):
+        def build(m):
+            if not fp._device_offers("phone.dnd"):
+                return None
+            params: dict = {"on": on}
+            if on and m.groupdict().get("n"):
+                from nora.commands.notifications import duration_minutes
+                minutes = duration_minutes(f"{m.group('n')} {m.group('unit')}")
+                if not minutes:
+                    return None
+                params["minutes"] = max(1, min(720, int(round(minutes))))
+            return I("do not disturb", "phone.dnd", params)
+        return build
+
     def ask_claude(m):
         q = (m.groupdict().get("q") or m.groupdict().get("pre") or "").strip(" ,.")
         if len(q) < 4:
@@ -287,6 +301,17 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             + r"(?:\s+(?:tomorrow|today|in\s+the\s+morning))?",
             r"wake\s+me\s+(?:up\s+)?at\s+" + TIME + r"(?:\s+(?:tomorrow|in\s+the\s+morning))?",
         ], alarm),
+        # ── Do Not Disturb on the phone (Phase 8d; asks on the phone first) ──
+        ("dnd_on", [
+            r"(?:turn|switch|put)\s+(?:on\s+)?(?:my\s+phone\s+(?:on\s+|in\s+)?)?(?:do\s+not\s+disturb|dnd)(?:\s+on)?"
+            r"(?:\s+(?:on\s+)?(?:my\s+|the\s+)?phone)?(?:\s+for\s+" + N + r"\s+" + UNIT + r")?",
+            r"(?:do\s+not\s+disturb|dnd)\s+on(?:\s+for\s+" + N + r"\s+" + UNIT + r")?",
+        ], dnd(True)),
+        ("dnd_off", [
+            r"(?:turn|switch)\s+off\s+(?:do\s+not\s+disturb|dnd)(?:\s+on\s+(?:my\s+|the\s+)?phone)?",
+            r"(?:turn|switch)\s+(?:do\s+not\s+disturb|dnd)\s+off(?:\s+on\s+(?:my\s+|the\s+)?phone)?",
+            r"(?:do\s+not\s+disturb|dnd)\s+off",
+        ], dnd(False)),
         ("timer", [
             r"(?:set|start)\s+(?:an?\s+)?timer\s+(?:for\s+)?" + N + r"\s+" + UNIT,
             N + r"\s+" + UNIT + r"\s+timer",

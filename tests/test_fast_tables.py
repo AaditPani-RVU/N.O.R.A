@@ -64,6 +64,12 @@ def _resolve(text: str, via: str = "phone"):
     ("wake me up at 7:15", "phone.set_alarm", {"hour": 7, "minute": 15}),
     ("set an alarm for 6 pm", "phone.set_alarm", {"hour": 18, "minute": 0}),
     ("start a timer for five minutes", "phone.set_timer", {"seconds": 300}),
+    # Do Not Disturb on the phone (Phase 8d)
+    ("turn on do not disturb", "phone.dnd", {"on": True}),
+    ("put my phone on dnd for an hour", "phone.dnd", {"on": True, "minutes": 60}),
+    ("switch on do not disturb for 30 minutes", "phone.dnd", {"on": True, "minutes": 30}),
+    ("turn off do not disturb", "phone.dnd", {"on": False}),
+    ("dnd off", "phone.dnd", {"on": False}),
     # memory and Claude
     ("remember that my sister's birthday is on the 12th", "inject_knowledge", {}),
     ("ask claude to review my last commit", "ask_claude", {"question": "review my last commit"}),
@@ -119,6 +125,9 @@ def test_held_out_phrasings(text, action, params):
     ("lay out my day", "play_on_phone"),
     # weather words in other senses
     ("what's the weather app called", "get_weather"),
+    # asking about Do Not Disturb isn't switching it
+    ("is my phone on do not disturb", "phone.dnd"),
+    ("can you turn on do not disturb on my laptop", "phone.dnd"),
 ])
 def test_near_misses_are_not_taken(text, wrong):
     got = _resolve(text)

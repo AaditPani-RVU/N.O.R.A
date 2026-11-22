@@ -186,6 +186,21 @@ object ConfirmSteps {
             val number = params.optString("number").takeIf { it.isNotBlank() && params.optString("name").isNotBlank() }
             return "Phone call to $who" + (number?.let { " ($it)" } ?: "") + " from your SIM"
         }
+        // Phase 8d: what reaches someone else is said as a sentence, the words quoted in full.
+        val text = params.optString("text").take(1000)
+        val person = params.optString("name").ifBlank { params.optString("number") }.take(80)
+        when (action) {
+            "phone.reply_notification" -> {
+                val app = params.optString("app").take(40)
+                return "Reply to ${params.optString("to").take(80)}" + (if (app.isNotBlank()) " on $app" else "") +
+                    ": \u201c$text\u201d"
+            }
+            "phone.send_sms" -> return "Text message to $person from your SIM: \u201c$text\u201d"
+            "phone.send_whatsapp" -> return "WhatsApp to $person, for you to send: \u201c$text\u201d"
+            "phone.dnd" -> return if (params.optBoolean("on")) {
+                "Turn Do Not Disturb on" + (if (params.has("minutes")) " for ${params.optInt("minutes")} minutes" else "")
+            } else "Turn Do Not Disturb off"
+        }
         val onPhone = action.startsWith("phone.")
         val verb = action.removePrefix("phone.").replace('_', ' ').replace('.', ' ')
             .replaceFirstChar { it.uppercase() } + if (onPhone) " on the phone" else ""

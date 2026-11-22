@@ -30,6 +30,10 @@
     <!-- "Call Mom": find the number, then place the call. Each call is approved on the phone first. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Phase 8d: "text Mom I'm on my way", approved with the fingerprint first;
+         Do Not Disturb on request -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- Package visibility (Android 11+): only what the capabilities need to
@@ -61,6 +65,11 @@
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
         <package android:name="com.spotify.music" />
+        <package android:name="com.whatsapp" />
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
         <package android:name="com.google.android.apps.youtube.music" />
         <package android:name="com.google.android.apps.maps" />
     </queries>
@@ -230,6 +239,10 @@
 
         <receiver
             android:name=".phone.WakeAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".phone.DndOff"
             android:exported="false" />
 
         <receiver

@@ -377,3 +377,62 @@ object ContactPick {
     private fun norm(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), " ")
         .replace(Regex("\\s+"), " ").trim()
 }
+
+/**
+ * Which notification "reply to Mom on WhatsApp" means (Phase 8d). Only
+ * notifications that can be replied to are offered; the conversation's title
+ * has to contain every word the user said, and the app, when named, has to
+ * match the label or package. One conversation, even with several
+ * notifications, is an answer (the newest); more than one is a question.
+ */
+object ReplyPick {
+    sealed class Result {
+        data class One(val note: Note) : Result()
+        data class Several(val titles: List<String>) : Result()
+        object None : Result()
+    }
+
+    fun pick(to: String, app: String, notes: List<Note>): Result {
+        val want = words(to)
+        val inApp = app.trim().lowercase()
+        val pool = notes.filter { n ->
+            (inApp.isEmpty() || n.app.lowercase().contains(inApp) || n.packageName.lowercase().contains(inApp)) &&
+                (want.isEmpty() || words(conversation(n.title)).containsAll(want))
+        }
+        if (want.isEmpty() && inApp.isEmpty()) return Result.None
+        val byTitle = pool.groupBy { conversation(it.title).lowercase() }
+        return when (byTitle.size) {
+            0 -> Result.None
+            1 -> Result.One(pool.maxBy { it.postedAt })
+            else -> {
+                // An exact title beats a partial one: "Mom" over "Mom's book club".
+                val exact = byTitle.filterKeys { words(it) == want }
+                if (exact.size == 1) Result.One(exact.values.single().maxBy { it.postedAt })
+                else Result.Several(byTitle.values.map { conversation(it.first().title) }.distinct().sorted().take(4))
+            }
+        }
+    }
+
+    /** "Mom (2 messages)" → "Mom"; "Family: Dad" (a group's line) stays as it is. */
+    fun conversation(title: String): String =
+        title.replace(Regex("\\s*\\(\\d+ (?:new )?messages?\\)\\s*$", RegexOption.IGNORE_CASE), "").trim()
+
+    private fun words(s: String): Set<String> = s.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), " ")
+        .split(Regex("\\s+")).filter { it.isNotEmpty() }.toSet()
+}
+
+/** A number for wa.me: digits only, with the country code. Null when it can't be made one. */
+object WaNumber {
+    fun of(number: String, defaultCountryCode: String?): String? {
+        val trimmed = number.trim()
+        val digits = trimmed.filter { it.isDigit() }
+        if (digits.length < 6) return null
+        return when {
+            trimmed.startsWith("+") -> digits
+            trimmed.startsWith("00") -> digits.drop(2)
+            defaultCountryCode.isNullOrEmpty() -> null
+            // A national number: drop the trunk 0 and put the country code in front.
+            else -> defaultCountryCode + digits.trimStart('0')
+        }
+    }
+}

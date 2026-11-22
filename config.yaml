@@ -919,7 +919,13 @@ hub:
     phone.play_media: 14000
   # Core-side tier floor per capability. Effective tier is the max of this and
   # what the device declares (0 read, 1 act, 2 confirm on device, 3 + biometric).
-  capability_tiers: {}
+  # Phase 8d: what reaches other people stays behind a yes on the phone,
+  # whatever an app build declares.
+  capability_tiers:
+    phone.reply_notification: 2
+    phone.send_whatsapp: 2
+    phone.send_sms: 3
+    phone.dnd: 2
   # Capabilities whose output other people wrote (plan §7.5). The core marks
   # these untrusted whatever the device says: summarised by a model with no
   # tools, never stored, and anything decided after reading them needs a yes.

@@ -51,7 +51,10 @@ class NoraNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) = record(sbn, active = true)
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        synchronized(ring) { ring[sbn.key]?.let { ring[sbn.key] = it.copy(second = false) } }
+        synchronized(ring) {
+            ring[sbn.key]?.let { ring[sbn.key] = it.copy(second = false) }
+            replies.remove(sbn.key)
+        }
     }
 
     private fun record(sbn: StatusBarNotification, active: Boolean) {
@@ -59,9 +62,13 @@ class NoraNotificationListener : NotificationListenerService() {
         synchronized(ring) {
             ring.remove(sbn.key)
             ring[sbn.key] = note to active
+            // Kept only while it's on screen: what "reply to Mom" can reply through (Phase 8d).
+            val reply = if (active) replyAction(sbn.notification) else null
+            if (reply != null) replies[sbn.key] = reply else replies.remove(sbn.key)
             val cutoff = System.currentTimeMillis() - KEEP_MS
             ring.entries.removeAll { it.value.first.postedAt < cutoff }
             while (ring.size > MAX) ring.remove(ring.keys.first())
+            replies.keys.retainAll(ring.keys)
         }
     }
 
@@ -87,6 +94,8 @@ class NoraNotificationListener : NotificationListenerService() {
 
         /** key → (note, still on screen). Insertion-ordered: oldest first. */
         private val ring = LinkedHashMap<String, Pair<Note, Boolean>>()
+        /** key → its reply action, for notifications still on screen. Same lock as [ring]. */
+        private val replies = HashMap<String, Notification.Action>()
 
         @Volatile
         var connected = false
@@ -110,7 +119,15 @@ class NoraNotificationListener : NotificationListenerService() {
             ring.values.associate { it.first.packageName to it.first.app }
         }
 
-        fun clear() = synchronized(ring) { ring.clear() }
+        /** On-screen notifications with a reply box, and that box. */
+        fun replyable(): List<Pair<Note, Notification.Action>> = synchronized(ring) {
+            replies.mapNotNull { (key, action) -> ring[key]?.takeIf { it.second }?.let { it.first to action } }
+        }
+
+        fun clear() = synchronized(ring) {
+            ring.clear()
+            replies.clear()
+        }
     }
 }
 
