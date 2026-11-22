@@ -123,7 +123,8 @@ _SYSTEM = (
 )
 
 
-def _vision(image_b64: str, prompt: str, max_tokens: int = _MIN_VISION_TOKENS) -> str:
+def _vision(image_b64: str, prompt: str, max_tokens: int = _MIN_VISION_TOKENS, *,
+            mime: str = "image/png", system: str = _SYSTEM) -> str:
     """Send a screenshot to Groq vision, return spoken text.
 
     A dense screen makes the model reason longer, so a budget that was ample
@@ -139,13 +140,13 @@ def _vision(image_b64: str, prompt: str, max_tokens: int = _MIN_VISION_TOKENS) -
             model=_vision_model(),
             max_tokens=budget,
             messages=[
-                {"role": "system", "content": _SYSTEM},
+                {"role": "system", "content": system},
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                            "image_url": {"url": f"data:{mime};base64,{image_b64}"},
                         },
                         {"type": "text", "text": prompt},
                     ],

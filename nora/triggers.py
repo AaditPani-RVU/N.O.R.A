@@ -41,7 +41,9 @@ logger = logging.getLogger("nora.triggers")
 
 GEOFENCE_CAPABILITY = "phone.set_geofences"
 # Capabilities the core drives itself and keeps out of the model's tool list.
-INTERNAL_CAPABILITIES = frozenset({GEOFENCE_CAPABILITY, "phone.wake_alarm"})
+# phone.take_photo is reached through look_with_phone, which also asks the
+# vision model about the picture (nora.commands.camera).
+INTERNAL_CAPABILITIES = frozenset({GEOFENCE_CAPABILITY, "phone.wake_alarm", "phone.take_photo"})
 
 ENTER, EXIT = "enter", "exit"
 INSIDE, OUTSIDE = "inside", "outside"

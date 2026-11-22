@@ -147,3 +147,39 @@ def test_phone_only_families_step_aside_without_a_phone():
         assert _resolve("wake me up at 7", via="laptop") is None
     finally:
         pass
+
+
+# ── the phone's camera (Phase 7) ─────────────────────────────────────────────
+
+@pytest.mark.parametrize("text, question", [
+    ("what is this", "what is this"),
+    ("what's this plant", "what's this plant"),
+    ("what am I looking at?", "what am I looking at"),
+    ("read this label for me", "read this label"),
+    ("take a photo and tell me what breed this dog is", "what breed this dog is"),
+])
+def test_looking_through_the_phone(text, question):
+    from unittest import mock
+    from nora.evals.harness import EVAL_DEVICE
+    with mock.patch("nora.commands.camera._camera_device", return_value=EVAL_DEVICE):
+        assert _resolve(text) == ("look_with_phone", {"question": question})
+        # Said to the laptop, there's no camera in hand.
+        got = _resolve(text, via="laptop")
+        assert got is None or got[0] != "look_with_phone"
+
+
+@pytest.mark.parametrize("text", ["what's that", "what is this song", "read that message",
+                                  "what's that called"])
+def test_not_everything_with_this_or_that_is_a_photo(text):
+    from unittest import mock
+    from nora.evals.harness import EVAL_DEVICE
+    with mock.patch("nora.commands.camera._camera_device", return_value=EVAL_DEVICE):
+        got = _resolve(text)
+    assert got is None or got[0] != "look_with_phone"
+
+
+def test_no_camera_no_photo():
+    from unittest import mock
+    with mock.patch("nora.commands.camera._camera_device", return_value=""):
+        got = _resolve("what is this")
+    assert got is None or got[0] != "look_with_phone"

@@ -66,6 +66,10 @@
         </intent>
         <package android:name="com.spotify.music" />
         <package android:name="com.whatsapp" />
+        <!-- Phase 7: the phone's camera app takes "what is this?" photos -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.SENDTO" />
             <data android:scheme="smsto" />
@@ -244,6 +248,22 @@
         <receiver
             android:name=".phone.DndOff"
             android:exported="false" />
+
+        <!-- Phase 7: hands over to the camera app for one photo, invisibly -->
+        <activity
+            android:name=".phone.PhotoActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.photos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/photo_paths" />
+        </provider>
 
         <receiver
             android:name=".phone.BootReceiver"

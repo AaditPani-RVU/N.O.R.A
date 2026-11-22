@@ -184,6 +184,22 @@ class DeviceLink(
         current?.send("voice.barge_in", corr = utteranceId)
     }
 
+    /**
+     * A photo for the invocation being answered (Phase 7), as `blob.chunk`
+     * frames on this socket, ahead of the result that names [blobId]. False
+     * when not connected: a photo isn't worth an outbox.
+     */
+    fun sendBlob(blobId: String, data: ByteArray, mime: String): Boolean {
+        val sock = current ?: return false
+        val enc = Base64.getEncoder()
+        val parts = (data.indices step BLOB_CHUNK).map { data.copyOfRange(it, minOf(it + BLOB_CHUNK, data.size)) }
+        parts.forEachIndexed { i, part ->
+            sock.send("blob.chunk", JSONObject().put("blob_id", blobId).put("seq", i).put("mime", mime)
+                .put("last", i == parts.size - 1).put("data", enc.encodeToString(part)))
+        }
+        return true
+    }
+
     /** Queue an event; it is sent now if connected, else on the next connection. */
     fun emitEvent(name: String, data: JSONObject) {
         val env = Protocol.envelope("event", JSONObject()
@@ -486,6 +502,8 @@ class DeviceLink(
 
     companion object {
         const val HANDSHAKE_MS = 10_000L
+        /** Bytes per `blob.chunk`, decoded; the core takes up to 96 KB. */
+        const val BLOB_CHUNK = 96 * 1024
         private const val BACKOFF_MIN_MS = 1_000L
         private const val BACKOFF_MAX_MS = 60_000L
 

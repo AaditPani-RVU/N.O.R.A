@@ -917,6 +917,7 @@ hub:
   # tracks (up to 10s, retrying once) before it answers, so it needs longer.
   invoke_deadlines_ms:
     phone.play_media: 14000
+    phone.take_photo: 90000        # the user lines up the shot in the camera app
   # Core-side tier floor per capability. Effective tier is the max of this and
   # what the device declares (0 read, 1 act, 2 confirm on device, 3 + biometric).
   # Phase 8d: what reaches other people stays behind a yes on the phone,
@@ -965,6 +966,13 @@ triggers:
     low_battery_pct: 30
     arrive_brief: true          # welcome, said on the laptop and sent to the phone: missed calls, what's due
     arrive_resume_music: true   # resume Spotify on the laptop (not in quiet hours; undo pauses)
+
+photos:
+  # "What is this?" with the phone's camera (nora/photos.py, Phase 7). A photo
+  # is kept in memory this long for follow-ups, then dropped; only "save that
+  # photo" writes one to disk, under save_dir.
+  keep_minutes: 10
+  save_dir: "~/Pictures/NORA"
 
 calendar_rules:
   # Leave-by alerts and the night-before alarm, from the Google calendar

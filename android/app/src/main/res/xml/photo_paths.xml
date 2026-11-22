@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The one place the camera app may write NORA's photo (phone/Camera.kt). -->
+<paths>
+    <cache-path name="photos" path="photos/" />
+</paths>

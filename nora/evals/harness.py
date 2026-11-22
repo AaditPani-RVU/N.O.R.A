@@ -41,8 +41,11 @@ def phone_connected() -> Iterator[None]:
     async def _never(**_params):        # pragma: no cover - nothing executes in an eval
         raise RuntimeError("evals never execute a capability")
 
+    from nora import triggers
     for raw in phone_manifest():
         entry = protocol.check_manifest_entry(raw)
+        if entry["name"] in triggers.INTERNAL_CAPABILITIES:
+            continue        # the hub keeps these out of the tool list too
         desc = entry["description"]
         if entry["tier"] >= protocol.TIER_CONFIRM:
             desc = f"{desc} (asks on the device first)".strip()

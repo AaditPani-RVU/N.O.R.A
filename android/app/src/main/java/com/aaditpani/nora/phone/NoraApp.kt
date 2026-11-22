@@ -246,6 +246,10 @@ class LinkController(private val app: Context) {
         link?.emitEvent(name, data)
     }
 
+    /** A photo for the invocation being answered; false when the link is down. */
+    fun sendBlob(blobId: String, data: ByteArray, mime: String): Boolean =
+        link?.sendBlob(blobId, data, mime) ?: false
+
     fun emitStatus() {
         link?.emitEvent("device.status", DeviceStatus.read(app))
     }

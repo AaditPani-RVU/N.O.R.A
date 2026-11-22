@@ -25,6 +25,8 @@ fun allCapabilities(context: Context, prefs: LinkPrefs): List<Capability> {
         ReadNotifications(app) { prefs.hiddenNoteApps }, ReadMissedCalls(app) { prefs.hiddenNoteApps }, GetLocation(app), Navigate(app),
         SetAlarm(app), SetTimer(app), Dial(app), SetGeofences(app),
         CallUser(app), CallContact(app), BlockNumber(app, prefs),
+        // Phase 7: live only, reached through look_with_phone
+        TakePhoto(app),
         // Phase 8c
         SetWakeAlarms(app),
         // Phase 8d: each asks on the phone first

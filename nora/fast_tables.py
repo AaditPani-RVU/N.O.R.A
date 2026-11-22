@@ -134,6 +134,17 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             return I("do not disturb", "phone.dnd", params)
         return build
 
+    def look(m):
+        # Only said to the phone, and only if it has a camera: "what is this"
+        # to the laptop's microphone has nothing to look through.
+        from nora import channel
+        from nora.commands import camera
+        ch = channel.current()
+        if ch is None or not camera._camera_device() or camera._camera_device() != ch.device_id:
+            return None
+        q = (m.groupdict().get("q") or "").strip(" ,.?!")
+        return I("look", "look_with_phone", {"question": q or m.string.strip(" ?.!")})
+
     def ask_claude(m):
         q = (m.groupdict().get("q") or m.groupdict().get("pre") or "").strip(" ,.")
         if len(q) < 4:
@@ -301,6 +312,19 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             + r"(?:\s+(?:tomorrow|today|in\s+the\s+morning))?",
             r"wake\s+me\s+(?:up\s+)?at\s+" + TIME + r"(?:\s+(?:tomorrow|in\s+the\s+morning))?",
         ], alarm),
+        # ── the phone's camera (Phase 7) ──────────────────────────────────
+        ("look", [
+            # Bare "what's that" is too often about something just said; "this" is in hand.
+            r"what(?:'s|\s+is)\s+this(?:\s+here)?[?.!]*",
+            r"what(?:'s|\s+is)\s+(?:this|that)\s+(?:thing|plant|flower|tree|bug|insect|animal|bird|"
+            r"dish|food|object|building|sign|label)(?:\s+here)?[?.!]*",
+            r"what\s+am\s+i\s+(?:looking\s+at|holding)[?.!]*",
+            r"(?:have\s+a\s+)?look\s+at\s+(?:this|that)[?.!]*",
+            r"what\s+does\s+(?:this|that)(?:\s+(?:sign|label|page|note|screen))?\s+say[?.!]*",
+            r"(?:read|translate)\s+this(?:\s+(?:sign|label|page|note|menu))?(?:\s+for\s+me)?[?.!]*",
+            r"(?:take\s+a\s+(?:photo|picture|pic)|use\s+(?:the|my)\s+camera)(?:\s+and\s+(?:tell\s+me\s+)?(?P<q>.{3,120}?))?[?.!]*",
+        ], look),
+
         # ── Do Not Disturb on the phone (Phase 8d; asks on the phone first) ──
         ("dnd_on", [
             r"(?:turn|switch|put)\s+(?:on\s+)?(?:my\s+phone\s+(?:on\s+|in\s+)?)?(?:do\s+not\s+disturb|dnd)(?:\s+on)?"

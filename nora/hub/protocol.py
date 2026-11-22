@@ -37,7 +37,15 @@ DEVICE_TYPES = frozenset({
     "manifest", "result", "confirm_response", "event", "utterance",
     "ping", "pong", "kill", "voice.barge_in",
     "memories",          # {"op": "list"} / {"op": "forget", "id"}: the memory screen (Sharp F)
+    "blob.chunk",        # a photo for the invocation that follows it (Phase 7)
 })
+
+# Bulk payloads (a photo) arrive as `blob.chunk` frames on the authenticated
+# socket, ahead of the result that refers to them: {blob_id, seq, mime, data
+# (base64, at most BLOB_CHUNK bytes decoded), last}. Order on one socket is
+# kept, so the blob is whole by the time its result is read.
+BLOB_CHUNK = 96 * 1024
+BLOB_MAX = 8 * 1024 * 1024
 
 # Error codes (plan §5). DEVICE_OFFLINE is core-side only.
 INVALID_PARAMS = "INVALID_PARAMS"

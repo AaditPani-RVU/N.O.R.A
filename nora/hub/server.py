@@ -75,6 +75,8 @@ class Session:
     _stream: int = 0
     # utterance id -> the VoiceOut speaking its answer (voice turns only)
     voices: dict[str, Any] = field(default_factory=dict)
+    # blob id -> (mime, chunks so far): photos on their way in (Phase 7)
+    blobs: dict[str, tuple[str, list[bytes]]] = field(default_factory=dict)
 
     @property
     def device_id(self) -> str:
@@ -491,6 +493,8 @@ class Hub:
                                                   test=test))
             session._turns.add(task)
             task.add_done_callback(session._turns.discard)
+        elif kind == "blob.chunk":
+            self._blob_chunk(session, msg["body"])
         elif kind == "memories":
             task = asyncio.create_task(self._memories(session, msg))
             session._turns.add(task)
@@ -500,6 +504,46 @@ class Hub:
             self._apply_manifest(session, msg["body"].get("capabilities") or [])
             if not session.killed:
                 self._register(session)
+
+    # ── photos from the device (Phase 7) ─────────────────────────────────────
+    @staticmethod
+    def _blob_chunk(session: Session, body: dict) -> None:
+        """Collect one chunk; on the last, hand the photo to `nora.photos`.
+        Anything out of order, oversized or of the wrong type drops the blob."""
+        import base64
+        import binascii
+
+        from nora import photos
+        blob_id = body.get("blob_id")
+        mime = body.get("mime")
+        seq = body.get("seq")
+        if (not isinstance(blob_id, str) or not 8 <= len(blob_id) <= 64
+                or mime not in photos.MIMES or not isinstance(seq, int)):
+            logger.warning("%s sent a malformed blob chunk", session.device_id)
+            return
+        try:
+            data = base64.b64decode(str(body.get("data", "")), validate=True)
+        except (binascii.Error, ValueError):
+            session.blobs.pop(blob_id, None)
+            logger.warning("%s sent a blob chunk that isn't base64", session.device_id)
+            return
+        have_mime, parts = session.blobs.get(blob_id, (mime, []))
+        size = sum(len(p) for p in parts) + len(data)
+        if (seq != len(parts) or have_mime != mime or len(data) > protocol.BLOB_CHUNK
+                or size > protocol.BLOB_MAX or (not parts and len(session.blobs) >= 4)):
+            session.blobs.pop(blob_id, None)
+            logger.warning("%s blob %s dropped (seq %s, %d bytes)", session.device_id,
+                           blob_id[:8], seq, size)
+            return
+        parts.append(data)
+        if body.get("last") is True:
+            session.blobs.pop(blob_id, None)
+            try:
+                photos.put(blob_id, session.device_id, b"".join(parts), mime)
+            except ValueError as e:
+                logger.warning("%s blob %s refused: %s", session.device_id, blob_id[:8], e)
+        else:
+            session.blobs[blob_id] = (mime, parts)
 
     # ── the memory screen (Sharp F) ──────────────────────────────────────────
     async def _memories(self, session: Session, msg: dict) -> None:
