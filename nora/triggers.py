@@ -41,7 +41,7 @@ logger = logging.getLogger("nora.triggers")
 
 GEOFENCE_CAPABILITY = "phone.set_geofences"
 # Capabilities the core drives itself and keeps out of the model's tool list.
-INTERNAL_CAPABILITIES = frozenset({GEOFENCE_CAPABILITY})
+INTERNAL_CAPABILITIES = frozenset({GEOFENCE_CAPABILITY, "phone.wake_alarm"})
 
 ENTER, EXIT = "enter", "exit"
 INSIDE, OUTSIDE = "inside", "outside"

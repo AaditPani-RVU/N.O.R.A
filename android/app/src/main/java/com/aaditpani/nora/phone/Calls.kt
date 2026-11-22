@@ -35,9 +35,15 @@ import org.json.JSONObject
  */
 object Calls {
     /** [say] is what she says on answering, when it's more than the ringing line. */
-    data class Call(val reason: String, val startedAt: Long, val say: String = reason)
+    data class Call(val reason: String, val startedAt: Long, val say: String = reason,
+                    /** Set for a morning alarm ([WakeAlarms]): rings on the alarm stream, longer, and snoozes. */
+                    val alarmId: String? = null, val snoozes: Int = 0) {
+        val alarm get() = alarmId != null
+        val ringMs get() = if (alarm) ALARM_RING_MS else RING_MS
+    }
 
     const val RING_MS = 30_000L
+    const val ALARM_RING_MS = 90_000L
     private const val TAG = "NoraCall"
 
     private val _ringing = MutableStateFlow<Call?>(null)
@@ -48,13 +54,14 @@ object Calls {
 
     /** Start ringing. False when a call is already ringing. */
     @Synchronized
-    fun ring(context: Context, reason: String, say: String = reason): Boolean {
+    fun ring(context: Context, reason: String, say: String = reason,
+             alarmId: String? = null, snoozes: Int = 0): Boolean {
         if (_ringing.value != null) return false
-        val call = Call(reason, System.currentTimeMillis(), say)
+        val call = Call(reason, System.currentTimeMillis(), say, alarmId, snoozes)
         _ringing.value = call
         Notifications.incomingCall(context, call)
         timeout = scope.launch {
-            delay(RING_MS)
+            delay(call.ringMs)
             end(context, call, "missed")
         }
         Log.i(TAG, "ringing")
@@ -82,7 +89,17 @@ object Calls {
         if (_ringing.value !== call) return
         stopRinging(context)
         Log.i(TAG, outcome)
-        Notifications.message(context, "Missed call from NORA", call.reason)
+        if (call.alarm) {
+            // Declined is "I'm up". Missed snoozes, until it has twice.
+            if (outcome == "missed" && call.snoozes < WakeAlarms.MAX_SNOOZES) {
+                WakeAlarms.snooze(context, call)
+                Notifications.message(context, "Alarm snoozed", "${call.reason}. Ringing again in 5 minutes.")
+            } else if (outcome == "missed") {
+                Notifications.message(context, "Missed alarm from NORA", call.say)
+            }
+        } else {
+            Notifications.message(context, "Missed call from NORA", call.reason)
+        }
         report(context, call, outcome)
     }
 
@@ -95,7 +112,9 @@ object Calls {
 
     /** How it went, to the core's log. Not the reason: the core already has it. */
     private fun report(context: Context, call: Call, outcome: String) {
-        context.controller.event("call.ended", JSONObject()
+        // An alarm isn't a call the core placed: it has its own event, so it
+        // can't be taken for the core's outstanding call.
+        context.controller.event(if (call.alarm) "alarm.ended" else "call.ended", JSONObject()
             .put("outcome", outcome)
             .put("ring_ms", System.currentTimeMillis() - call.startedAt))
     }

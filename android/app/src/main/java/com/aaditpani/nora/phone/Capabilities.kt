@@ -25,6 +25,8 @@ fun allCapabilities(context: Context, prefs: LinkPrefs): List<Capability> {
         ReadNotifications(app) { prefs.hiddenNoteApps }, ReadMissedCalls(app) { prefs.hiddenNoteApps }, GetLocation(app), Navigate(app),
         SetAlarm(app), SetTimer(app), Dial(app), SetGeofences(app),
         CallUser(app), CallContact(app), BlockNumber(app, prefs),
+        // Phase 8c
+        SetWakeAlarms(app),
     )
 }
 

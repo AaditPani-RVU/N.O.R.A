@@ -25,6 +25,7 @@ object Notifications {
     private const val MESSAGE_CHANNEL = "messages"
     private const val CONFIRM_CHANNEL = "confirm"
     private const val CALL_CHANNEL = "calls"
+    private const val ALARM_CHANNEL = "alarms"
     const val LINK_ID = 1
     /** NORA's latest answer to something typed. One at a time: a new answer replaces it. */
     private const val CHAT_ID = 2
@@ -52,6 +53,17 @@ object Notifications {
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 1000, 1000)
+            },
+            // The morning alarm NORA sets from the calendar: the alarm stream,
+            // so it sounds with the ringer on silent, like the clock app's.
+            NotificationChannel(ALARM_CHANNEL, "Alarms from NORA", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "The morning alarm NORA sets the night before from your calendar"
+                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 800, 800)
+                setBypassDnd(true)
             },
         ))
     }
@@ -213,15 +225,15 @@ object Notifications {
         val decline = PendingIntent.getBroadcast(context, 22,
             Intent(context, CallReceiver::class.java).setAction(CallReceiver.ACTION_DECLINE),
             PendingIntent.FLAG_IMMUTABLE)
-        val n = Notification.Builder(context, CALL_CHANNEL)
+        val n = Notification.Builder(context, if (call.alarm) ALARM_CHANNEL else CALL_CHANNEL)
             .setSmallIcon(R.drawable.ic_nora)
             .setStyle(Notification.CallStyle.forIncomingCall(nora, decline, answer))
             .setContentText(call.reason)
-            .setCategory(Notification.CATEGORY_CALL)
+            .setCategory(if (call.alarm) Notification.CATEGORY_ALARM else Notification.CATEGORY_CALL)
             .setFullScreenIntent(screen, true)
             .setContentIntent(screen)
             .setOngoing(true)
-            .setTimeoutAfter(Calls.RING_MS + 5_000)
+            .setTimeoutAfter(call.ringMs + 5_000)
             .build()
         n.flags = n.flags or Notification.FLAG_INSISTENT   // the ringtone loops, like a call
         context.getSystemService(NotificationManager::class.java).notify(CALL_ID, n)

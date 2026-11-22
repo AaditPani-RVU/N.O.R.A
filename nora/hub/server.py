@@ -322,7 +322,8 @@ class Hub:
         def send(text: str, kind: str) -> bool:
             if session.killed:
                 return False
-            title = {"reminder": "Reminder", "call": "Missed call from NORA"}.get(kind, "NORA")
+            title = {"reminder": "Reminder", "call": "Missed call from NORA",
+                     "leave": "Time to leave", "alarm": "Tomorrow"}.get(kind, "NORA")
             session.send_nowait("notify", {"title": title, "body": text,
                                            "priority": "default", "kind": kind})
             return True
@@ -347,6 +348,9 @@ class Hub:
         await asyncio.get_running_loop().run_in_executor(None, jobs.flush, session.device_id)
         # A reboot or reinstall clears the phone's geofences: hand them over on every connect.
         asyncio.create_task(triggers.sync_device(self, session.device_id))
+        # Likewise the night-before wake alarms (Phase 8c): AlarmManager forgets them on reboot.
+        from nora import calendar_rules
+        asyncio.create_task(calendar_rules.sync_device(self, session.device_id))
         # Load Kokoro now (~1.5 s once), not on this device's first spoken turn.
         asyncio.get_running_loop().run_in_executor(None, _voice.core_voice_available)
 

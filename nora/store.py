@@ -163,6 +163,30 @@ _MIGRATIONS: list[str] = [
         changed_at  REAL NOT NULL           -- when the phone crossed, by its clock
     );
     """,
+    # 7 — calendar rules (Phase 8c): each alert once per event, geocoded event
+    # locations, and the wake alarms the phone should have set
+    """
+    CREATE TABLE calendar_alerts (
+        key         TEXT NOT NULL,          -- event id@start, or a date for the night-before
+        kind        TEXT NOT NULL,          -- leave | night
+        at          REAL NOT NULL,
+        PRIMARY KEY (key, kind)
+    );
+    CREATE TABLE geocode_cache (
+        query       TEXT PRIMARY KEY,       -- the location as written, lower-cased
+        lat         REAL,                   -- NULL: looked up, nothing found
+        lon         REAL,
+        at          REAL NOT NULL
+    );
+    CREATE TABLE wake_alarms (
+        day         TEXT PRIMARY KEY,       -- ISO date of the morning
+        at          REAL NOT NULL,          -- epoch seconds
+        title       TEXT NOT NULL,
+        say         TEXT NOT NULL,          -- said on answering
+        status      TEXT NOT NULL,          -- set | cancelled
+        updated_at  REAL NOT NULL
+    );
+    """,
 ]
 
 _local = threading.local()

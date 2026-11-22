@@ -960,6 +960,22 @@ triggers:
     arrive_brief: true          # welcome, said on the laptop and sent to the phone: missed calls, what's due
     arrive_resume_music: true   # resume Spotify on the laptop (not in quiet hours; undo pauses)
 
+calendar_rules:
+  # Leave-by alerts and the night-before alarm, from the Google calendar
+  # (nora/calendar_rules.py, Phase 8c). Travel time is OSRM's, from where the
+  # phone's geofences last put you (no alert when you're somewhere unknown).
+  enabled: true
+  leave_by: true
+  heads_up_min: 5             # alert this long before the time to leave
+  buffer_min: 10              # arrive this early
+  traffic_factor: 1.3         # OSRM has no traffic: pad a drive by this much
+  mode: driving               # driving | walking | bicycling
+  night_before: true          # set tomorrow's alarm on the phone and send the plan
+  night_before_at: "21:30"    # from this time (retried each minute until night_before_until
+  night_before_until: "23:30" # while the phone is offline)
+  ready_min: 60               # waking to walking out of the door
+  alarm_if_before: "11:00"    # only when the first event starts before this
+
 places:
   # "I'm going home": saved places live in the core store (nora/places.py).
   # Free, keyless OpenStreetMap services; OSRM has no traffic data.
