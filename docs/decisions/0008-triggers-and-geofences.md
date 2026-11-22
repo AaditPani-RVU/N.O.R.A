@@ -14,9 +14,9 @@ large, so it is built in slices:
 |---|---|---|
 | **8a** | Event bus and trigger engine on the core | this ADR |
 | **8b** | Geofences on the phone; arriving and leaving home | this ADR |
-| 8c | Calendar rules: leave-by alerts, the night-before alarm | next |
-| 8d | Replies that need a yes: `reply_notification`, `send_sms`, `send_whatsapp`, `dnd` | later |
-| 8e | Device agent for the travel laptop | later |
+| 8c | Calendar rules: leave-by alerts, the night-before alarm | ADR-0009 |
+| 8d | Replies that need a yes: `reply_notification`, `send_sms`, `send_whatsapp`, `dnd` | ADR-0009 |
+| 8e | Device agent for the travel laptop | ADR-0009 |
 
 The push "doorbell" (FCM / UnifiedPush) is **deferred**. `LinkService` is a
 foreground service that keeps the socket open; on 2026-11-21 the phone
