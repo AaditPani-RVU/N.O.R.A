@@ -14,15 +14,19 @@ Usage in pipeline:
 """
 from __future__ import annotations
 
+import re
 import time
 from collections import deque
 
+# Whole words only. "what" and "why" used to be here and matched as
+# substrings, so every question ("what is this", "open whatsapp") counted.
 _FILLER_WORDS = frozenset({
-    "ugh", "uggh", "argh", "arg", "hmm", "hm", "ugh",
+    "ugh", "uggh", "argh", "arg", "hmm", "hm",
     "damn", "dammit", "seriously", "come on", "again",
-    "why", "what", "still", "really", "nothing", "broken",
+    "still", "really", "nothing", "broken",
     "failed", "error", "wrong", "not working",
 })
+_FILLER_RE = re.compile(r"\b(?:" + "|".join(sorted(map(re.escape, _FILLER_WORDS), key=len, reverse=True)) + r")\b")
 
 _WINDOW = 8        # utterances to look back
 _THRESHOLD = 2     # signals needed to trigger
@@ -67,15 +71,17 @@ class FrustrationTracker:
         # Signal 1: filler/frustration words in last 3 utterances
         filler_hits = sum(
             1 for entry in history[-3:]
-            if any(word in entry["text"] for word in _FILLER_WORDS)
+            if _FILLER_RE.search(entry["text"])
         )
         if filler_hits >= 1:
             signals += 1
 
-        # Signal 2: same command repeated 3+ times in last 5
-        texts = [e["text"] for e in recent]
-        if len(texts) >= 3 and len(set(texts[-3:])) == 1:
-            signals += 2  # double-weight — very clear frustration signal
+        # Signal 2: same command three times running. Double weight only when
+        # one of them failed: "what is this" at three things, or "next track"
+        # three times, is using NORA, not being stuck.
+        last3 = recent[-3:]
+        if len(last3) == 3 and len({e["text"] for e in last3}) == 1:
+            signals += 1 if all(e["success"] for e in last3) else 2
 
         # Signal 3: consecutive failures
         failures = sum(1 for e in recent if not e["success"])
