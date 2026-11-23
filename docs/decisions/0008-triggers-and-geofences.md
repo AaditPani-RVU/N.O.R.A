@@ -55,6 +55,10 @@ screen or asks the phone something never holds up the socket.
   (`triggers.INTERNAL_CAPABILITIES`): which places are watched follows the
   saved places, never a turn's say-so.
 - No initial trigger, so setting the fences at home doesn't read as arriving.
+  The phone therefore never says which side of a new fence it is on, so the
+  core assumes it: a place saved from the phone's location is "inside", and a
+  place moved by address or forgotten goes back to unknown. Otherwise a stale
+  "outside" turns the first real exit into a repeat, and leaving does nothing.
 - Needs location "Allow all the time". Without it the phone says where the
   setting is, once per run.
 

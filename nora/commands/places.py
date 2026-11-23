@@ -176,6 +176,8 @@ async def save_place(name: str, address: str = "") -> StepResult:
                           message=f"I couldn't get your phone's location, so {key} isn't saved. "
                                   f"{loc.message}".strip())
     places.save(key, address=str(loc.data.get("address") or ""), lat=here[0], lon=here[1])
+    from nora import triggers
+    triggers.assume(key, triggers.INSIDE)      # saved from here, so here is inside it
     where = loc.data.get("address")
     return StepResult(action="save_place", success=True,
                       message=f"Saved this spot as {key}" + (f", {where}." if where else "."))

@@ -104,12 +104,15 @@ def save(name: str, *, address: str = "", lat: float | None = None,
     key = canonical(name)
     if not key:
         raise ValueError("a place needs a name")
+    before = get(key)
     with store.transaction() as conn:
         conn.execute(
             "INSERT INTO places (name, address, lat, lon, updated_at) VALUES (?,?,?,?,?)"
             " ON CONFLICT(name) DO UPDATE SET address=excluded.address, lat=excluded.lat,"
             " lon=excluded.lon, updated_at=excluded.updated_at",
             (key, address.strip()[:300], lat, lon, time.time()))
+    if before is not None and (before.lat, before.lon) != (lat, lon):
+        _forget_presence(key)      # the fence moved: which side of it is unknown
     _refence()
     return Place(key, address.strip()[:300], lat, lon)
 
@@ -132,8 +135,14 @@ def forget(name: str) -> bool:
         gone = conn.execute("DELETE FROM places WHERE name = ?",
                             (canonical(name),)).rowcount == 1
     if gone:
+        _forget_presence(canonical(name))
         _refence()
     return gone
+
+
+def _forget_presence(key: str) -> None:
+    from nora import triggers
+    triggers.assume(key, None)
 
 
 def _refence() -> None:

@@ -557,6 +557,8 @@ class PlacesTest(HubTestCase):
         self.assertTrue(r.success)
         p = places.get("college")
         self.assertEqual((p.lat, p.lon, p.address), (12.95, 77.60, "MG Road"))
+        from nora import triggers
+        self.assertEqual(triggers.where("college"), "inside")   # saved from here
 
     async def test_save_place_by_address(self) -> None:
         from nora.commands.places import save_place

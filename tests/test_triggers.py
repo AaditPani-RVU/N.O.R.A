@@ -67,6 +67,30 @@ def test_nonsense_events_change_nothing():
     assert triggers.record_crossing(crossing("exit", place="")) is None
 
 
+def test_a_place_saved_from_here_is_inside_so_the_first_exit_counts():
+    # Seen live: home was pinned 400 m off, so "outside" stuck while the user
+    # was at home. Re-saved from the phone, the fence has no initial trigger,
+    # and without this the first real exit read as a repeat.
+    triggers.record_crossing(crossing("exit", ago=3600))
+    triggers.assume("Home", triggers.INSIDE)
+    assert triggers.where("home") == "inside"
+    leave = triggers.record_crossing(crossing("exit"))
+    assert leave is not None and leave.state == "outside"
+
+
+def test_moving_or_forgetting_a_place_forgets_which_side_you_were_on():
+    with mock.patch.object(triggers, "sync_all"):
+        places.save("home", lat=12.97, lon=77.59)
+        triggers.record_crossing(crossing("exit"))
+        places.save("home", lat=12.97, lon=77.59)          # same pin: state kept
+        assert triggers.where("home") == "outside"
+        places.save("home", lat=12.89, lon=77.66)          # moved
+        assert triggers.where("home") is None
+        triggers.record_crossing(crossing("exit"))
+        places.forget("home")
+        assert triggers.where("home") is None
+
+
 # ── fences ───────────────────────────────────────────────────────────────────
 
 def test_fences_are_the_saved_places_with_coordinates():

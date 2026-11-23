@@ -167,6 +167,27 @@ def record_crossing(ev: Event) -> Crossing | None:
     return Crossing(place, state, prev["changed_at"] if prev is not None else None, fresh and settled)
 
 
+def assume(place: str, state: str | None) -> None:
+    """Set where the user is without a crossing, setting off no rules.
+
+    The fences carry no initial trigger, so the phone never says which side
+    of a new or moved fence it is on. A place saved from the phone's own
+    location is one the user is standing in; a place moved by address, or
+    forgotten, is somewhere the old state no longer describes. Left alone,
+    a stale "outside" swallows the first real exit as a repeat.
+    """
+    from nora import places
+    key = places.canonical(place)
+    with store.transaction() as conn:
+        if state is None:
+            conn.execute("DELETE FROM place_presence WHERE place = ?", (key,))
+        else:
+            conn.execute("INSERT INTO place_presence (place, state, changed_at) VALUES (?, ?, ?) "
+                         "ON CONFLICT(place) DO UPDATE SET state = excluded.state, "
+                         "changed_at = excluded.changed_at", (key, state, time.time()))
+    logger.info("%s: %s (assumed)", key, state or "unknown")
+
+
 def where(place: str) -> str | None:
     """INSIDE, OUTSIDE, or None when no crossing has been seen yet."""
     from nora import places
