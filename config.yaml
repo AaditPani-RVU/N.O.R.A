@@ -776,11 +776,12 @@ remote_mic:
 
 screen_intelligence:
   # Vision model for read_screen / find_on_screen / click_on. Groq retired
-  # meta-llama/llama-4-scout-17b-16e-instruct (404 as of 2026-08-19) and
-  # qwen/qwen3.6-27b is the only vision model left on the platform.
+  # meta-llama/llama-4-scout-17b-16e-instruct (404 as of 2026-08-19), then
+  # qwen/qwen3.6-27b (404 on 2026-11-23); qwen/qwen3.8-27b replaced it. If this
+  # one goes too, NORA switches to the newest model of the same family and logs it.
   # It is a reasoning model — see the notes in screen_intelligence.py before
   # lowering max_tokens or turning on reasoning_format.
-  vision_model: "qwen/qwen3.6-27b"
+  vision_model: "qwen/qwen3.8-27b"
 
 web_search:
   # tell_me_about() — the spoken research answer. Three tiers, tried in order:

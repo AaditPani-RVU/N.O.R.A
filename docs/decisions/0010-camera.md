@@ -34,7 +34,7 @@ lists a capture activity, blob upload, vision analysis and a retention policy.
   most 8 MB, at most four in flight per session; out of order, oversized or not
   an image type drops it. The phone shrinks the photo to 1600 px JPEG first
   (ImageDecoder applies the EXIF rotation) and deletes its copy.
-- **Vision:** Groq's `qwen/qwen3.6-27b`, the model `read_screen` already uses,
+- **Vision:** Groq's `qwen/qwen3.8-27b` (`qwen3.6-27b` until Groq retired it on 2026-11-23), the model `read_screen` already uses,
   with a camera prompt. Its answer is marked **untrusted**: a sign, a letter or
   a screen in the picture can say anything.
 - **Retention:** in memory for 10 minutes for follow-ups, at most ten photos,

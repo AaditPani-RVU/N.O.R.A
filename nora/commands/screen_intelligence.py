@@ -35,9 +35,11 @@ logger = logging.getLogger("nora.commands.screen_intelligence")
 
 # llama-4-scout was decommissioned — it 404s on the Groq API as of 2026-08-19,
 # which silently killed read_screen, find_on_screen and click_on. qwen3.6-27b
-# is the only vision model left on Groq. Read from config so the next
-# deprecation is a config edit rather than a code change.
-_DEFAULT_VISION_MODEL = "qwen/qwen3.6-27b"
+# was the only vision model left on Groq, and it went too (404, 2026-11-23),
+# replaced by qwen3.8-27b. Read from config; and when the configured model is
+# gone, _vision moves to the newest model of the same family for the rest of
+# the run, so the next rename doesn't silently kill the camera and the screen.
+_DEFAULT_VISION_MODEL = "qwen/qwen3.8-27b"
 _GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 # qwen3.6 is a reasoning model: it emits a <think> block before its answer and
@@ -65,9 +67,51 @@ class VisionTruncated(RuntimeError):
     """The model spent its whole token budget reasoning and never answered."""
 
 
+_successor: dict[str, str] = {}      # retired model -> the one used instead
+
+
 def _vision_model() -> str:
-    return get_config().get("screen_intelligence", {}).get(
+    model = get_config().get("screen_intelligence", {}).get(
         "vision_model", _DEFAULT_VISION_MODEL)
+    return _successor.get(model, model)
+
+
+_VERSION_RE = re.compile(r"\d+(?:\.\d+)*")
+
+
+def _same_but_version(model: str) -> re.Pattern | None:
+    """qwen/qwen3.6-27b matches qwen/qwen3.8-27b, not qwen/qwen3-32b: only the
+    version may change, so a text-only model of another size is never picked."""
+    m = _VERSION_RE.search(model)
+    if m is None:
+        return None
+    return re.compile(re.escape(model[:m.start()]) + r"(\d+(?:\.\d+)*)"
+                      + re.escape(model[m.end():]) + r"$")
+
+
+def _replace_retired(model: str) -> str | None:
+    """The highest version on Groq of the retired model, or None."""
+    pattern = _same_but_version(model)
+    if pattern is None:
+        return None
+    try:
+        listed = [m.id for m in _get_client().models.list().data]
+    except Exception as e:
+        logger.warning("couldn't list Groq models to replace %s: %s", model, e)
+        return None
+    alive = {m: tuple(int(n) for n in hit.group(1).split("."))
+             for m in listed if m != model and (hit := pattern.match(m))}
+    if not alive:
+        return None
+    newest = max(alive, key=alive.get)
+    _successor[model] = newest
+    logger.warning("vision model %s is gone from Groq; using %s. Set "
+                   "screen_intelligence.vision_model in config.yaml to keep it.", model, newest)
+    return newest
+
+
+def _model_gone(e: Exception) -> bool:
+    return getattr(e, "status_code", None) == 404 and "model_not_found" in str(e)
 
 
 def _strip_reasoning(text: str) -> str:
@@ -134,25 +178,26 @@ def _vision(image_b64: str, prompt: str, max_tokens: int = _MIN_VISION_TOKENS, *
     """
     budget = max(int(max_tokens), _MIN_VISION_TOKENS)
 
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}"}},
+                {"type": "text", "text": prompt},
+            ],
+        },
+    ]
     for attempt in (1, 2):
         client = _get_client()
-        resp = client.chat.completions.create(
-            model=_vision_model(),
-            max_tokens=budget,
-            messages=[
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{image_b64}"},
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                },
-            ],
-        )
+        model = _vision_model()
+        try:
+            resp = client.chat.completions.create(model=model, max_tokens=budget, messages=messages)
+        except Exception as e:
+            if not _model_gone(e) or _replace_retired(model) is None:
+                raise
+            resp = client.chat.completions.create(
+                model=_vision_model(), max_tokens=budget, messages=messages)
         choice = resp.choices[0]
         answer = _strip_reasoning(choice.message.content or "")
         if answer:
