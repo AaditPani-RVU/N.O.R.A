@@ -312,6 +312,17 @@ def _families(fp) -> list[tuple[str, list[str], Callable]]:
             + r"(?:\s+(?:tomorrow|today|in\s+the\s+morning))?",
             r"wake\s+me\s+(?:up\s+)?at\s+" + TIME + r"(?:\s+(?:tomorrow|in\s+the\s+morning))?",
         ], alarm),
+        # The night-before alarm (Phase 8c). Left to the model, "when's my
+        # alarm" was answered from an old chat about a 10:06 PM ring.
+        ("alarm status", [
+            r"(?:when(?:'s|\s+is)|what\s+time\s+is)\s+my\s+(?:next\s+|morning\s+)?alarm"
+            r"(?:\s+(?:set\s+for|tomorrow))?[?.!]*",
+            r"(?:is|did\s+you\s+set)\s+(?:my|an?)\s+alarm\s+(?:set\s+)?for\s+tomorrow[?.!]*",
+        ], lambda m: I("alarm status", "wake_alarm_status", {})),
+        ("cancel alarm", [
+            r"(?:cancel|remove|delete)\s+(?:tomorrow'?s\s+|my\s+(?:morning\s+)?|the\s+(?:morning\s+)?)alarm"
+            r"(?:\s+for\s+tomorrow)?[?.!]*",
+        ], lambda m: I("cancel alarm", "cancel_wake_alarm", {})),
         # ── the phone's camera (Phase 7) ──────────────────────────────────
         ("look", [
             # Bare "what's that" is too often about something just said; "this" is in hand.

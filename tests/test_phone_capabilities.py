@@ -367,6 +367,11 @@ class PhoneRoutingTest(HubTestCase):
             "remember my college is at RV University":
                 [("save_place", {"name": "college", "address": "RV University"})],
             "save this place as college": [("save_place", {"name": "college"})],
+            "when's my alarm": [("wake_alarm_status", {})],
+            "what time is my alarm tomorrow?": [("wake_alarm_status", {})],
+            "is my alarm set for tomorrow": [("wake_alarm_status", {})],
+            "cancel tomorrow's alarm": [("cancel_wake_alarm", {})],
+            "cancel my alarm": [("cancel_wake_alarm", {})],
             "this is my gym": [("save_place", {"name": "gym"})],
             # Found live: these went to the wrong place before their rules.
             "open github.com on my phone": [("phone.open_url", {"url": "github.com"})],
