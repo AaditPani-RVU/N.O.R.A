@@ -44,3 +44,7 @@ _scout.STATE_PATH = Path(_tmp) / "nora_model_scout.json"
 # The shared token ledger (nora.budget) is read by the live core and the evals.
 from nora import budget as _budget  # noqa: E402
 _budget.LEDGER_PATH = Path(_tmp) / "nora_budget.json"
+
+# The overnight self-repair remembers what it tried; never the live file.
+from nora import self_repair as _self_repair  # noqa: E402
+_self_repair.STATE_PATH = Path(_tmp) / "nora_self_repair.json"

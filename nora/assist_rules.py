@@ -1,8 +1,9 @@
 """Fast-path rules for the NORA Assist features (NORA_ASSIST_PLAN.md).
 
-Kept beside `fast_path` rather than inside it: `fast_path._build_rules` calls
-`register(_rule, _intent)` once, after the phone's rules, so these phrasings
-are matched before the general music / open / search rules can claim them.
+Kept beside `fast_path` rather than inside it. `fast_path._build_rules` calls
+`register_first` before the phrase tables and `register` after the phone's
+rules, so every phrasing here is matched before the general music / open /
+search rules can claim it.
 """
 from __future__ import annotations
 
@@ -76,9 +77,14 @@ def register(rule, intent) -> None:
 
 
 def register_first(rule, intent) -> None:
-    """Rules that must beat the phrase tables: "what's new on Hormuz" is the
-    briefing's phrasing too, and a watched story should answer it with the
-    change rather than the whole news grid."""
+    """Rules matched before the phrase tables and the general rules.
+
+    These phrasings collide with older, broader rules: "what's new on Hormuz"
+    is the briefing's phrasing, "show me the fix" reads as "show me <place>"
+    on the globe, "how much did I spend" and "quiz me on PE" fall to chat or
+    search. Each pattern here is narrow enough that taking it first costs the
+    older rules nothing (the full fast-path suite runs against this order).
+    """
     def _story_or_none(m):
         # "What's new on Hormuz" is a story update only for a watched story;
         # anything else goes on to the news briefing as before.
@@ -126,3 +132,10 @@ def register_first(rule, intent) -> None:
          lambda m: intent("make cards", "make_study_cards", {"subject": m["s"] or ""}))
     rule(r"(?:plan|book|schedule|find)\s+(?:some\s+)?study\s+(?:time|blocks?|sessions?)\s+for\s+(?:my\s+)?(?P<s>" + _SUBJECT + r")",
          lambda m: intent("plan study", "plan_study", {"subject": m["s"]}))
+
+    # ── G: self-repair ─────────────────────────────────────────────────────
+    rule(r"(?:show|tell)\s+me\s+(?:the|your|last\s+night'?s)\s+(?:fix|repair)|what\s+did\s+you\s+(?:fix|repair)(?:\s+last\s+night)?",
+         lambda m: intent("repair status", "repair_status"))
+    rule(r"merge\s+(?:the|your|that)\s+(?:fix|repair)",
+         lambda m: intent("merge repair", "merge_repair", confirm=True))
+
