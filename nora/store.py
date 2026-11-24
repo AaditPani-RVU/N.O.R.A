@@ -199,6 +199,16 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX battery_samples_at ON battery_samples(device_id, at);
     """,
+    # 9 — words the user taught NORA to hear: "I said Hormuz, not vermouth"
+    # (NORA_ASSIST_PLAN A). `heard` is '' for a word added without a mishearing.
+    """
+    CREATE TABLE vocabulary (
+        word        TEXT NOT NULL,          -- as it should be written: "Hormuz"
+        heard       TEXT NOT NULL DEFAULT '',  -- lower-case phrase it was heard as
+        added_at    REAL NOT NULL,
+        PRIMARY KEY (word, heard)
+    );
+    """,
 ]
 
 _local = threading.local()

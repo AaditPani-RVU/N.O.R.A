@@ -63,12 +63,25 @@ def _transcribe_remote(audio: np.ndarray, cfg: dict) -> str:
         base_url=cfg.get("base_url", "https://api.groq.com/openai/v1"),
         timeout=float(cfg.get("timeout_sec", 10)),
     )
+    prompt = _vocabulary_prompt()
     resp = client.audio.transcriptions.create(
         model=cfg.get("remote_model", "whisper-large-v3-turbo"),
         file=buf,
         language="en",
+        **({"prompt": prompt} if prompt else {}),
     )
     return (resp.text or "").strip()
+
+
+def _vocabulary_prompt() -> str:
+    """The user's names as Whisper context (NORA_ASSIST_PLAN A), or '' on any trouble:
+    a missing hint costs a misspelling, a raised one would cost the turn."""
+    try:
+        from nora import vocabulary
+        return vocabulary.whisper_prompt()
+    except Exception as e:
+        logger.debug("No vocabulary prompt: %s", e)
+        return ""
 
 
 def has_speech(audio: np.ndarray, sample_rate: int = 16000) -> bool:
@@ -144,6 +157,7 @@ def transcribe(audio: np.ndarray) -> str:
         language="en",
         vad_filter=True,
         condition_on_previous_text=False,
+        initial_prompt=_vocabulary_prompt() or None,
     )
 
     text_parts = []

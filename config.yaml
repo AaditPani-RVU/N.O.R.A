@@ -1077,3 +1077,12 @@ briefing:
         - https://www.thehindu.com/news/national/feeder/default.rss
         - https://indianexpress.com/section/technology/feed/
         - http://feeds.bbci.co.uk/news/world/rss.xml
+
+# ── NORA Assist (NORA_ASSIST_PLAN.md) ────────────────────────────────────────
+vocabulary:
+  # Words to hear right on every recogniser, before the ones NORA collects
+  # (taught words, routines, study subjects, stories, places, contacts, artists).
+  words: ["Milo", "Hormuz", "RV University", "Duster", "NORA"]
+  # Pass them to the laptop's Whisper as its prompt. Off if it ever leaks names
+  # into transcripts.
+  whisper_prompt: true

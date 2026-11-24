@@ -428,6 +428,10 @@ def _build_rules() -> None:
     from nora import fast_tables
     fast_tables.register(sys.modules[__name__])
     _phone_rules()
+    # NORA Assist (NORA_ASSIST_PLAN.md): vocabulary, follow-through, routines,
+    # stories, spending, study, self-repair.
+    from nora import assist_rules
+    assist_rules.register(_rule, _intent)
 
     # ─── Music: no-arg commands ───────────────────────────────────────────
     _rule(

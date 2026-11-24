@@ -50,10 +50,11 @@ def _cfg() -> dict:
 
 def _speech_hints() -> list[str]:
     """Names for the phone's recogniser to listen for (Sharp D): the artists
-    the user plays most, which it otherwise hears as "deaf tools"."""
+    the user plays most, which it otherwise hears as "deaf tools", and the rest
+    of the user's vocabulary (NORA_ASSIST_PLAN A)."""
     try:
-        from nora import music_names
-        return music_names.biasing()
+        from nora import vocabulary
+        return vocabulary.biasing()
     except Exception as exc:                     # never worth a refused session
         logger.debug("no speech hints: %s", exc)
         return []

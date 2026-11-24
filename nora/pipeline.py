@@ -269,6 +269,14 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
     if not text or len(text.strip()) < 2:
         return TurnOutcome(kind="ignored", text=text)
 
+    # A mishearing the user corrected once is fixed on every channel after
+    # (NORA_ASSIST_PLAN A): "vermouth" → "Hormuz" before anything routes on it.
+    try:
+        from nora import vocabulary
+        text = vocabulary.repair(text)
+    except Exception as e:
+        logger.debug("vocabulary repair skipped: %s", e)
+
     # Mirror the utterance to the dashboard transcript *before* the guard
     # runs -- a blocked input should still show what was said, next to the
     # refusal, rather than disappearing.

@@ -127,9 +127,9 @@ class PairingTest(HubTestCase):
         dev = fake_device.FakeDevice(self.url)
         await dev.pair(code)
         registry.approve(dev.device_id)
-        with mock.patch("nora.music_names.biasing", return_value=["Deftones", "Pink Floyd"]):
+        with mock.patch("nora.vocabulary.biasing", return_value=["Milo", "Deftones", "Pink Floyd"]):
             welcome = await dev.connect()
-        self.assertEqual(welcome["speech_hints"], ["Deftones", "Pink Floyd"])
+        self.assertEqual(welcome["speech_hints"], ["Milo", "Deftones", "Pink Floyd"])
         self.devices.append(dev)
 
     async def test_code_is_single_use(self) -> None:
