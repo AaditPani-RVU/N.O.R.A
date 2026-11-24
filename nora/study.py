@@ -381,7 +381,8 @@ def start_quiz(name: str = "", minutes: float = 10, device: str = "local") -> st
         s = min(dated, key=lambda x: x["exam_on"]) if dated else (subs[0] if subs else None)
     if s is None:
         if name:
-            return (f"I don't have any {name} notes yet. Drop files in {_folder()}/{name.title()}, "
+            folder = name if any(c.isupper() for c in name) else name.title()
+            return (f"I don't have any {name} notes yet. Drop files in {_folder()}/{folder}, "
                     "or say: add a note.")
         return "You haven't given me anything to study yet."
     now = time.time()
