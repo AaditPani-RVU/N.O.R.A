@@ -13,6 +13,7 @@ import com.aaditpani.nora.link.ErrorCode
 import com.aaditpani.nora.link.MissedCalls
 import com.aaditpani.nora.link.Note
 import com.aaditpani.nora.link.NoteDigest
+import com.aaditpani.nora.link.Payments
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -59,6 +60,8 @@ class NoraNotificationListener : NotificationListenerService() {
 
     private fun record(sbn: StatusBarNotification, active: Boolean) {
         val note = toNote(sbn) ?: return
+        val isNew = synchronized(ring) { ring[sbn.key]?.first?.let { it.text != note.text } ?: true }
+        if (active && isNew) forwardPayment(sbn.packageName, note)
         synchronized(ring) {
             ring.remove(sbn.key)
             ring[sbn.key] = note to active
@@ -69,6 +72,18 @@ class NoraNotificationListener : NotificationListenerService() {
             ring.entries.removeAll { it.value.first.postedAt < cutoff }
             while (ring.size > MAX) ring.remove(ring.keys.first())
             replies.keys.retainAll(ring.keys)
+        }
+    }
+
+    /** A payment, as it arrives, to the core's spending log (NORA_ASSIST_PLAN E). */
+    private fun forwardPayment(pkg: String, note: Note) {
+        if (!Payments.isPayment(pkg, note.title, note.text)) return
+        runCatching {
+            val controller = applicationContext.controller
+            if (pkg in controller.hiddenNoteApps.value) return
+            controller.event("money.notification", JSONObject()
+                .put("package", pkg).put("app", note.app)
+                .put("title", note.title).put("text", note.text))
         }
     }
 

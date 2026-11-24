@@ -247,6 +247,20 @@ _MIGRATIONS: list[str] = [
         pending_at  REAL NOT NULL DEFAULT 0
     );
     """,
+    # 13 — payments the phone showed a notification for, parsed (NORA_ASSIST_PLAN E).
+    # The notification text is never stored, only what was read out of it.
+    """
+    CREATE TABLE spend (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        at          REAL NOT NULL,
+        amount      REAL NOT NULL,          -- rupees
+        direction   TEXT NOT NULL,          -- debit | credit
+        party       TEXT NOT NULL DEFAULT '',
+        app         TEXT NOT NULL DEFAULT '',
+        digest      TEXT NOT NULL UNIQUE    -- of the text and a 10-minute bucket
+    );
+    CREATE INDEX spend_at ON spend(at);
+    """,
 ]
 
 _local = threading.local()

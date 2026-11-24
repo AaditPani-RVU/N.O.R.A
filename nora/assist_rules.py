@@ -91,3 +91,16 @@ def register_first(rule, intent) -> None:
         return intent("story update", "story_update", {"topic": m["t"]})
     rule(r"(?:what'?s\s+(?:new|the\s+latest|happening)|any\s+(?:updates?|news))\s+(?:on|with|about|in)\s+(?:the\s+)?(?P<t>.{2,60}?)",
          _story_or_none)
+
+    # ── E: spending ────────────────────────────────────────────────────────
+    _period = r"(?P<p>today|yesterday|this\s+week|last\s+week|this\s+month|last\s+month)"
+
+    def _spend(m):
+        p = re.sub(r"^this\s+", "", (m.groupdict().get("p") or "week").lower())
+        party = (m.groupdict().get("party") or "").strip()
+        return intent("spending", "spending", {"period": p, "party": party})
+    rule(r"(?:how\s+much\s+(?:money\s+)?(?:did|have)\s+i\s+(?:spend|spent)|what\s+(?:did|have)\s+i\s+spen[dt]"
+         r"|what(?:'s|\s+is|\s+was)\s+my\s+spending)(?:\s+(?:on|at)\s+(?P<party>[\w&.' ]{2,30}?))?(?:\s+" + _period + r")?",
+         _spend)
+    rule(r"how\s+much\s+(?:did\s+i\s+spend\s+)?(?:on|at)\s+(?P<party>[\w&.' ]{2,30}?)(?:\s+" + _period + r")?",
+         _spend)
