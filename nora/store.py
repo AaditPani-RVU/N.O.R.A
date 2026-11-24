@@ -219,6 +219,21 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX nudges_task ON nudges(task_id, rung, at);
     """,
+    # 11 — routines and their log: "I fed Milo" (NORA_ASSIST_PLAN C)
+    """
+    CREATE TABLE routines (
+        name        TEXT PRIMARY KEY,       -- verb stem + object: "feed milo"
+        times       TEXT NOT NULL,          -- JSON [[hour, minute], ...]
+        grace_min   INTEGER NOT NULL DEFAULT 45,
+        created_at  REAL NOT NULL
+    );
+    CREATE TABLE routine_log (
+        name        TEXT NOT NULL,
+        at          REAL NOT NULL,
+        note        TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX routine_log_name ON routine_log(name, at);
+    """,
 ]
 
 _local = threading.local()
