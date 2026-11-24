@@ -1115,3 +1115,26 @@ vocabulary:
   # Pass them to the laptop's Whisper as its prompt. Off if it ever leaks names
   # into transcripts.
   whisper_prompt: true
+
+follow_through:
+  # Late tasks climb a ladder: a phone note a day, the nightly check-in,
+  # then a call once a week late and nudged three times (quiet hours hold).
+  nudge_from: "10:00"
+  checkin_at: "21:00"
+  checkin_until: "23:00"
+  ring_after_days: 7
+
+routines:
+  grace_min: 45               # after a routine's time, before the nudge
+
+story_watch:
+  every_hours: 3
+  burst: 25                   # new headlines in one poll that go to the phone at once
+
+spending:
+  enabled: true               # parsed amount + payee only; notification text is never kept
+
+study:
+  folder: "~/NORA/study"      # one folder per subject: ~/NORA/study/PE/*.pdf
+  generate_at: "02:30"        # flashcards are made overnight, on the background role
+  notes_per_run: 12

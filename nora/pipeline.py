@@ -318,6 +318,13 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
         stop_all()
         trace.route("stop")
         deps.frustration.record(text_lower, rms=rms, success=True)
+        # "Stop the quiz" is a stop phrase too: end it and give the score.
+        try:
+            from nora import study
+            if study.quiz_active(channel.device_id):
+                speak(study.end_quiz(), mood="chat")
+        except Exception as e:
+            logger.debug("ending the quiz failed: %s", e)
         return TurnOutcome(kind="interrupted", text=text)
 
     # Only the core's own microphone can end the process. "Goodbye" typed on a
@@ -332,6 +339,19 @@ async def _handle_turn(text: str, deps: TurnDeps, rms: float,
         trace.route("wake")
         speak(phrasing.get("already_awake"), mood="chat")
         return TurnOutcome(kind="chat", text=text, intent="already_awake")
+
+    # A quiz on this channel takes the reply as its answer (NORA_ASSIST_PLAN F).
+    try:
+        from nora import study
+        quiz_reply = study.intercept(text, channel.device_id)
+    except Exception as e:
+        logger.warning("quiz reply failed: %s", e)
+        quiz_reply = None
+    if quiz_reply is not None:
+        trace.route("quiz")
+        speak(quiz_reply, mood="chat")
+        ui_server.notify_stage("idle")
+        return TurnOutcome(kind="chat", text=text, intent="quiz_answer", reply=quiz_reply)
 
     # 3a. Fast-path: deterministic resolution before the LLM is ever touched.
     # Handles ~40-50% of real commands (music, volume, time, open/close, etc.)

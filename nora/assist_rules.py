@@ -104,3 +104,25 @@ def register_first(rule, intent) -> None:
          _spend)
     rule(r"how\s+much\s+(?:did\s+i\s+spend\s+)?(?:on|at)\s+(?P<party>[\w&.' ]{2,30}?)(?:\s+" + _period + r")?",
          _spend)
+
+    # ── F: study ───────────────────────────────────────────────────────────
+    def _quiz(m):
+        minutes = m.groupdict().get("min")
+        params = {"subject": (m.groupdict().get("s") or "").strip()}
+        if minutes:
+            params["minutes"] = float(minutes)
+        return intent("quiz", "start_quiz", params)
+    rule(r"(?:quiz|test)\s+me(?:\s+(?:on|in|about)\s+(?:my\s+)?(?P<s>" + _SUBJECT + r"))?"
+         r"(?:\s+for\s+(?P<min>\d{1,3})\s+min(?:ute)?s?)?", _quiz)
+    rule(r"let'?s\s+(?:revise|study)\s+(?:my\s+)?(?P<s>" + _SUBJECT + r")(?:\s+for\s+(?P<min>\d{1,3})\s+min(?:ute)?s?)?",
+         _quiz)
+    rule(r"(?:my|the)\s+(?P<s>" + _SUBJECT + r")\s+(?:exam|test|final|midterm)\s+is\s+(?:on\s+)?(?P<d>.{2,30})",
+         lambda m: intent("exam date", "add_exam", {"subject": m["s"], "date": m["d"]}))
+    rule(r"(?:save|add|put)\s+(?:this|that|the\s+photo|it)\s+(?:to|in|into)\s+(?:my\s+)?(?P<s>" + _SUBJECT + r")\s+notes",
+         lambda m: intent("photo to notes", "save_photo_to_notes", {"subject": m["s"]}))
+    rule(r"add\s+(?:a|an|to\s+my)\s+(?P<s>" + _SUBJECT + r")\s+notes?[:,]?\s+(?P<t>.{10,})",
+         lambda m: intent("study note", "add_study_note", {"subject": m["s"], "text": m["t"]}))
+    rule(r"make\s+(?:my\s+)?(?:(?P<s>" + _SUBJECT + r")\s+)?(?:flash\s?)?cards(?:\s+now)?",
+         lambda m: intent("make cards", "make_study_cards", {"subject": m["s"] or ""}))
+    rule(r"(?:plan|book|schedule|find)\s+(?:some\s+)?study\s+(?:time|blocks?|sessions?)\s+for\s+(?:my\s+)?(?P<s>" + _SUBJECT + r")",
+         lambda m: intent("plan study", "plan_study", {"subject": m["s"]}))

@@ -261,6 +261,40 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX spend_at ON spend(at);
     """,
+    # 14 — study mode: subjects, notes, flashcards (NORA_ASSIST_PLAN F)
+    """
+    CREATE TABLE study_subjects (
+        key         TEXT PRIMARY KEY,       -- lower-case: "pe"
+        label       TEXT NOT NULL,          -- as shown: "PE"
+        exam_on     TEXT,                   -- ISO date, or NULL
+        created_at  REAL NOT NULL
+    );
+    CREATE TABLE study_notes (
+        id          TEXT PRIMARY KEY,       -- digest of the text
+        subject     TEXT NOT NULL,
+        source      TEXT NOT NULL,          -- said | photo | file:<path>#<size>:<mtime>
+        text        TEXT NOT NULL,
+        added_at    REAL NOT NULL,
+        carded      INTEGER NOT NULL DEFAULT 0,
+        retired     INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX study_notes_subject ON study_notes(subject, carded, retired);
+    CREATE TABLE study_cards (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject       TEXT NOT NULL,
+        note_id       TEXT NOT NULL,
+        q             TEXT NOT NULL,
+        a             TEXT NOT NULL,
+        due_at        REAL NOT NULL DEFAULT 0,      -- 0 = never asked
+        interval_days REAL NOT NULL DEFAULT 0,
+        ease          REAL NOT NULL DEFAULT 2.5,
+        reps          INTEGER NOT NULL DEFAULT 0,
+        lapses        INTEGER NOT NULL DEFAULT 0,
+        created_at    REAL NOT NULL,
+        retired       INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX study_cards_due ON study_cards(subject, retired, due_at);
+    """,
 ]
 
 _local = threading.local()
