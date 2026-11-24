@@ -76,7 +76,7 @@ hints at all.
   `briefing._google_news` the briefing uses) every 3 hours.
 - Headlines seen are remembered; only new ones count. Once 2+ are new, the `background` role writes a
   one- or two-sentence "what changed since: <last summary>" and stores it as pending.
-- Pending updates are read in the next session briefing. A burst (6+ new headlines in one poll)
+- Pending updates are read in the next session briefing. A burst (25+ new headlines in one poll; a query returns up to ~100)
   goes to the phone at once, outside quiet hours.
 - "What's new on Hormuz?" → `story_update` (fetches now). "Stop watching Hormuz" → `unwatch_story`.
 - Table `story_watch(topic, created_at, last_check, seen JSON, summary, pending, pending_at)`.

@@ -234,6 +234,19 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX routine_log_name ON routine_log(name, at);
     """,
+    # 12 — stories the user asked NORA to keep an eye on (NORA_ASSIST_PLAN D)
+    """
+    CREATE TABLE story_watch (
+        key         TEXT PRIMARY KEY,       -- the topic, lower-cased
+        topic       TEXT NOT NULL,          -- as said: "the Strait of Hormuz"
+        created_at  REAL NOT NULL,
+        last_check  REAL NOT NULL DEFAULT 0,
+        seen        TEXT NOT NULL DEFAULT '[]',   -- JSON normalised headlines
+        summary     TEXT NOT NULL DEFAULT '',     -- the last thing said about it
+        pending     TEXT NOT NULL DEFAULT '',     -- a change not yet told
+        pending_at  REAL NOT NULL DEFAULT 0
+    );
+    """,
 ]
 
 _local = threading.local()

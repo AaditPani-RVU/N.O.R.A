@@ -60,3 +60,34 @@ def register(rule, intent) -> None:
          lambda m: intent("add a routine", "add_routine", {"what": m["what"], "times": m["times"]}))
     rule(r"(?:what|which)\s+routines\s+(?:do\s+i\s+have|are\s+there)|list\s+(?:my\s+)?routines",
          lambda m: intent("list routines", "list_routines"))
+
+    # ── D: story watch ─────────────────────────────────────────────────────
+    rule(r"(?:keep\s+(?:an\s+)?eye\s+on|keep\s+(?:me\s+)?(?:posted|updated)\s+(?:on|about)"
+         r"|(?:follow|track|watch)\s+(?:the\s+)?(?:news|story|stories|situation|developments)\s+(?:on|about|in|with|around))\s+"
+         r"(?P<t>(?!(?:me|you|him|her|them|it|my\s+back)\b).{2,60}?)(?:\s+for\s+me)?",
+         lambda m: intent("watch a story", "watch_story", {"topic": m["t"]}))
+    rule(r"(?:stop|quit)\s+(?:watching|following|tracking)\s+(?P<t>.{2,60})",
+         lambda m: intent("unwatch a story", "unwatch_story", {"topic": m["t"]}))
+    rule(r"(?:what\s+stories\s+are\s+you\s+(?:watching|following)|which\s+stories\s+(?:am\s+i|are\s+you)\s+following)",
+         lambda m: intent("list stories", "list_stories"))
+    rule(r"any\s+(?:updates?|news)\s+on\s+(?:my\s+stories|the\s+stories\s+(?:you're|you\s+are)\s+watching)",
+         lambda m: intent("story update", "story_update", {"topic": ""}))
+
+
+
+def register_first(rule, intent) -> None:
+    """Rules that must beat the phrase tables: "what's new on Hormuz" is the
+    briefing's phrasing too, and a watched story should answer it with the
+    change rather than the whole news grid."""
+    def _story_or_none(m):
+        # "What's new on Hormuz" is a story update only for a watched story;
+        # anything else goes on to the news briefing as before.
+        from nora import story_watch
+        try:
+            if story_watch._find(m["t"]) is None:
+                return None
+        except Exception:
+            return None
+        return intent("story update", "story_update", {"topic": m["t"]})
+    rule(r"(?:what'?s\s+(?:new|the\s+latest|happening)|any\s+(?:updates?|news))\s+(?:on|with|about|in)\s+(?:the\s+)?(?P<t>.{2,60}?)",
+         _story_or_none)

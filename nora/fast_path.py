@@ -425,12 +425,12 @@ def _build_rules() -> None:
     # Sharp B: the everyday families, as phrase tables (nora/fast_tables.py).
     # First: "start a timer for five minutes" said to the phone was opening an
     # app called "timer for five minutes" through the phone's "start X" rule.
-    from nora import fast_tables
+    from nora import assist_rules, fast_tables
+    assist_rules.register_first(_rule, _intent)
     fast_tables.register(sys.modules[__name__])
     _phone_rules()
     # NORA Assist (NORA_ASSIST_PLAN.md): vocabulary, follow-through, routines,
     # stories, spending, study, self-repair.
-    from nora import assist_rules
     assist_rules.register(_rule, _intent)
 
     # ─── Music: no-arg commands ───────────────────────────────────────────

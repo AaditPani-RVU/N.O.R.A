@@ -279,6 +279,35 @@ llm_router:
           chat_template_kwargs:
             thinking: false
 
+    background:
+      # Work nobody is waiting on (NORA_ASSIST_PLAN): story-watch summaries,
+      # study flashcards. NVIDIA first so it never spends the Groq budget the
+      # live turns run on; Groq's 20b only as the last resort.
+      - name: nvidia_nemotron_bolt_e4b
+        provider: nvidia
+        base_url: "https://integrate.api.nvidia.com/v1"
+        api_key_env: "NVIDIA_API_KEY"
+        model: "nvidia/nemotron-3.5-bolt-e4b"
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
+      - name: nvidia_nemotron_ultra_550b
+        provider: nvidia
+        base_url: "https://integrate.api.nvidia.com/v1"
+        api_key_env: "NVIDIA_API_KEY"
+        model: "nvidia/nemotron-3-ultra-550b-a55b"
+        extra_body:
+          chat_template_kwargs:
+            thinking: false
+      - name: groq_gpt_oss_20b
+        provider: groq
+        base_url: "https://api.groq.com/openai/v1"
+        api_key_env: "GROQ_API_KEY"
+        model: "openai/gpt-oss-20b"
+        extra_body:
+          reasoning_format: "hidden"
+          reasoning_effort: "low"
+
     reasoning:
       # Latency matters less here — this role is for deliberate thinking, not
       # for holding a conversation — so the slower, stronger model leads.
