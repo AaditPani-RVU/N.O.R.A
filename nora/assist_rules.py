@@ -28,3 +28,14 @@ def register(rule, intent) -> None:
          lambda m: intent("forget a word", "forget_word", {"word": m["word"].strip()}))
     rule(r"(?:what|which)\s+words\s+(?:have\s+i\s+taught\s+you|do\s+you\s+know|have\s+you\s+learn(?:ed|t))",
          lambda m: intent("list words", "list_words"))
+
+    # ── B: follow-through ──────────────────────────────────────────────────
+    _day = (r"(?P<due>today|tonight|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday"
+            r"|saturday|sunday)|next\s+week|the\s+\d{1,2}(?:st|nd|rd|th)?|in\s+\w+\s+days?)")
+    rule(r"(?:push|move|postpone|shift)\s+(?P<q>.{1,60}?)\s+(?:to|till|until)\s+" + _day,
+         lambda m: intent("push a task", "push_task", {"query": m["q"], "due": m["due"]}))
+    rule(r"(?:push|move|postpone)\s+(?P<q>it|that|that\s+one)",
+         lambda m: intent("push a task", "push_task", {"query": "it", "due": "tomorrow"}))
+    rule(r"(?:drop|forget\s+about|cancel)\s+(?P<q>it|that|that\s+one|the\s+task\s+.{1,60}|task\s+.{1,60})",
+         lambda m: intent("drop a task", "drop_task",
+                          {"query": re.sub(r"^(?:the\s+)?task\s+", "", m["q"])}))

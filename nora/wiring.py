@@ -133,6 +133,9 @@ def start_subsystems(speak: Callable[..., None]) -> None:
     # Calendar rules: leave-by alerts and the night-before alarm (Phase 8c).
     from nora import calendar_rules
     calendar_rules.start(speak=speak)
+    # NORA Assist: follow-through, routines, stories, study, self-repair.
+    from nora import assist
+    assist.start(speak=_gated)
 
     text_input.start()
 
@@ -174,7 +177,7 @@ def start_subsystems(speak: Callable[..., None]) -> None:
 def stop_subsystems() -> None:
     """Shut the background threads down. Safe to call twice."""
     from nora import (
-        ambient, anomaly_watchdog, calendar_rules, calls, consolidation, jobs, proactive,
+        ambient, anomaly_watchdog, assist, calendar_rules, calls, consolidation, jobs, proactive,
         scheduler, terminal_monitor, triggers, vision,
     )
     from nora.gateway import telegram
@@ -185,7 +188,7 @@ def stop_subsystems() -> None:
         ("terminal_monitor", terminal_monitor.stop),
         ("anomaly_watchdog", anomaly_watchdog.stop),
         ("scheduler", scheduler.stop), ("calls", calls.stop), ("triggers", triggers.stop),
-        ("calendar_rules", calendar_rules.stop),
+        ("calendar_rules", calendar_rules.stop), ("assist", assist.stop),
         ("jobs", jobs.stop),
         ("telegram", telegram.stop), ("hub", _stop_hub),
     ):

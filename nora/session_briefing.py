@@ -73,6 +73,18 @@ def generate_briefing() -> str | None:
     except Exception as e:
         logger.warning("Briefing: task ledger error: %s", e)
 
+    # What's late, and what else the assist features hold for this morning
+    # (NORA_ASSIST_PLAN B, D, F, G).
+    for mod in ("follow_through", "story_watch", "study", "self_repair"):
+        try:
+            line = __import__(f"nora.{mod}", fromlist=["briefing_line"]).briefing_line()
+            if line:
+                parts.append(line)
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning("Briefing: %s error: %s", mod, e)
+
     # Yesterday's daily brief
     try:
         if _BRIEF_PATH.exists():

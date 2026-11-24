@@ -209,6 +209,16 @@ _MIGRATIONS: list[str] = [
         PRIMARY KEY (word, heard)
     );
     """,
+    # 10 — each rung of the follow-through ladder, once (NORA_ASSIST_PLAN B).
+    # `task_id` is a task's id, or "checkin:<date>" for a night's check-in.
+    """
+    CREATE TABLE nudges (
+        task_id     TEXT NOT NULL,
+        rung        INTEGER NOT NULL,       -- 1 notified, 2 check-in, 3 rang
+        at          REAL NOT NULL
+    );
+    CREATE INDEX nudges_task ON nudges(task_id, rung, at);
+    """,
 ]
 
 _local = threading.local()

@@ -225,3 +225,60 @@ def agenda(day: str = "today") -> str:
         else:
             parts.append(f"And {n} open tasks with no date.")
     return " ".join(parts)
+
+
+def _one_open(query: str) -> dict | None:
+    from nora import task_ledger
+    q = (query or "").strip()
+    statuses = [task_ledger.STATUS_OPEN, task_ledger.STATUS_IN_PROGRESS]
+    if q.lower() in ("", "it", "that", "this", "that one", "this one"):
+        # "push it": the task the check-in or a nudge last named — the longest late.
+        from nora import follow_through
+        late = follow_through.late(date.today())
+        if late:
+            return late[0][0]
+        open_ = task_ledger.get_open_tasks()
+        return open_[0] if open_ else None
+    matches = task_ledger.find_tasks(q, statuses=statuses)
+    if not matches:
+        # "the assignment" for "Submit the assignment": every word present.
+        words = [w for w in q.lower().split() if w not in ("the", "a", "my")]
+        matches = [t for t in task_ledger.get_open_tasks()
+                   if words and all(w in t["title"].lower() for w in words)]
+    return matches[0] if matches else None
+
+
+@register(
+    "push_task",
+    sig="push_task(query: str, due: str = 'tomorrow')",
+    description="Move an open task to another day: 'push the assignment to friday'. "
+                "query 'it' means the task NORA just mentioned",
+    category="tasks",
+)
+def push_task(query: str, due: str = "tomorrow") -> str:
+    from nora import follow_through
+    today = date.today()
+    said = (due or "tomorrow").strip().lower()
+    when = days.parse("next monday" if said == "next week" else said, today)
+    if when is None:
+        return f"I didn't catch which day '{due}' is."
+    task = _one_open(query)
+    if task is None:
+        return f"No open task matching '{query}'."
+    return follow_through.push(task, when, today)
+
+
+@register(
+    "drop_task",
+    sig="drop_task(query: str)",
+    description="Drop an open task the user no longer means to do (not done, abandoned). "
+                "query 'it' means the task NORA just mentioned",
+    category="tasks",
+)
+def drop_task(query: str) -> str:
+    from nora import task_ledger
+    task = _one_open(query)
+    if task is None:
+        return f"No open task matching '{query}'."
+    task_ledger.close_task(task["id"], status=task_ledger.STATUS_ABANDONED)
+    return f"Dropped {task['title']}."
