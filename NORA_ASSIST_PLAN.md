@@ -1,6 +1,6 @@
 # NORA Assist — Seven Features for the Main Assistant
 
-*Started 2026-11-24. Built on `next/assistant` in `~/Projects/JARVIS-next`.*
+*Started 2026-11-24. Built on `next/assistant` in `~/Projects/JARVIS-next`, merged 2026-11-24.*
 
 Each feature is grounded in something the usage logs showed (about 1,000 audited actions,
 `nora_user_model.json`, `nora_turn_trace.jsonl`). Everything is free and keyless, and nothing new
@@ -116,7 +116,7 @@ hints at all.
 
 ## G — Self-repair overnight
 
-- At `run_at` (03:30), read the last 24 h of failed actions (`nora_audit_log.jsonl`) and failed
+- At `run_at` (01:30, clear of the 03:30 backup and the 04:15 evals), read the last 24 h of failed actions (`nora_audit_log.jsonl`) and failed
   turns (`nora_turn_trace.jsonl`). Group them by action, and pick the worst one with 2+ failures
   that hasn't been attempted in 7 days.
 - Create a worktree `~/Projects/JARVIS-repair` on a fresh branch `repair/<action>-<date>` from
@@ -142,7 +142,7 @@ hints at all.
 | B follow-through | built |
 | C routines | built |
 | D story watch | built |
-| E spending | built (core); APK change needs a rebuild + install |
+| E spending | built; the phone half needs the new APK installed |
 | F study mode | built |
 | G self-repair | built |
 
